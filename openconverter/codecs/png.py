@@ -15,7 +15,7 @@ VALID_DEPTHS = {0: (1, 2, 4, 8, 16), 2: (8, 16), 3: (1, 2, 4, 8), 4: (8, 16), 6:
 CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
 ADAM7 = ((0, 0, 8, 8), (4, 0, 8, 8), (0, 4, 4, 8), (2, 0, 4, 4), (0, 2, 2, 4), (1, 0, 2, 2), (0, 1, 1, 2))
 LARGE_IMAGE_PIXELS = 4_000_000
-LARGE_IMAGE_CHAIN = 16
+LARGE_IMAGE_CHAIN = 4
 
 
 def sniff(data: bytes) -> bool:
@@ -397,6 +397,67 @@ def _chunk(ctype: bytes, body: bytes) -> bytes:
     return struct.pack(">I", len(body)) + ctype + body + struct.pack(">I", crc32(body, crc32(ctype)))
 
 
+class _Wide:
+    """Masks for 16-bit-lane arithmetic on rows of ``n`` samples."""
+
+    __slots__ = ("ones", "full", "k512", "k1024")
+    _cache: dict = {}
+
+    def __new__(cls, n):
+        obj = cls._cache.get(n)
+        if obj is None:
+            obj = super().__new__(cls)
+            obj.ones = int.from_bytes(b"\x01\x00" * n, "little")
+            obj.full = (1 << (16 * n)) - 1
+            obj.k512 = obj.ones * 512
+            obj.k1024 = obj.ones * 1024
+            if len(cls._cache) > 64:
+                cls._cache.clear()
+            cls._cache[n] = obj
+        return obj
+
+
+def _spread(row: bytes) -> int:
+    wide = bytearray(2 * len(row))
+    wide[0::2] = row
+    return int.from_bytes(wide, "little")
+
+
+def _lane_abs(v: int, bias: int, bit: int, w: _Wide) -> int:
+    """|lane - bias| for lanes holding bias + d (no borrows cross lanes)."""
+    s = (v >> bit) & w.ones          # 1 where lane >= bias
+    m = (s << 16) - s                # 0xFFFF in those lanes
+    pos = v & m
+    neg = v & (w.full ^ m)
+    kb = (w.k512 if bias == 512 else w.k1024)
+    return (pos - (kb & m)) + ((kb & (w.full ^ m)) - neg)
+
+
+def _lane_ge(x: int, y: int, w: _Wide) -> int:
+    """1 in lanes where x >= y (values < 1024)."""
+    return ((x + w.k1024 - y) >> 10) & w.ones
+
+
+def paeth_predict_row(a_row: bytes, b_row: bytes, c_row: bytes) -> bytes:
+    """Paeth predictor for every byte of a row at once (PNG spec 9.4)."""
+    n = len(a_row)
+    if n == 0:
+        return b""
+    w = _Wide(n)
+    a, b, c = _spread(a_row), _spread(b_row), _spread(c_row)
+    pa = _lane_abs(b + w.k512 - c, 512, 9, w)           # |b - c|
+    pb = _lane_abs(a + w.k512 - c, 512, 9, w)           # |a - c|
+    pc = _lane_abs(a + b + w.k1024 - 2 * c, 1024, 10, w)  # |a + b - 2c|
+    choose_a = _lane_ge(pb, pa, w) & _lane_ge(pc, pa, w)
+    choose_b = (w.ones ^ choose_a) & _lane_ge(pc, pb, w)
+    choose_c = w.ones ^ choose_a ^ choose_b
+    ma = (choose_a << 16) - choose_a
+    mb = (choose_b << 16) - choose_b
+    mc = (choose_c << 16) - choose_c
+    pred = (a & ma) | (b & mb) | (c & mc)
+    return pred.to_bytes(2 * n, "little")[0::2]
+
+
 def _filter_rows(raw: bytes, rows: int, row_len: int, bpp: int, adaptive: bool, progress) -> bytes:
     """Apply per-row adaptive filtering (minimum sum of absolute differences)."""
     if not adaptive:
@@ -423,26 +484,8 @@ def _filter_rows(raw: bytes, rows: int, row_len: int, bpp: int, adaptive: bool, 
             _to_bytes(lanes.sub(x, prior_int), row_len),
             _to_bytes(lanes.sub(x, lanes.avg(left, prior_int)), row_len),
         ]
-        # Paeth predictor (needs per-byte comparisons)
-        a_row = _to_bytes(left, row_len)
-        c_row = _to_bytes(up_left, row_len)
-        pred = bytearray(row_len)
-        for i, (a, b, c) in enumerate(zip(a_row, prior, c_row)):
-            pa = b - c
-            pb = a - c
-            pc = pa + pb
-            if pa < 0:
-                pa = -pa
-            if pb < 0:
-                pb = -pb
-            if pc < 0:
-                pc = -pc
-            if pa <= pb and pa <= pc:
-                pred[i] = a
-            elif pb <= pc:
-                pred[i] = b
-            else:
-                pred[i] = c
+        # Paeth predictor, evaluated for the whole row with 16-bit SWAR lanes
+        pred = paeth_predict_row(_to_bytes(left, row_len), prior, _to_bytes(up_left, row_len))
         candidates.append(_to_bytes(lanes.sub(x, _to_int(pred)), row_len))
         best = min(range(5), key=lambda f: sum(candidates[f].translate(abs_t)))
         out.append(best)

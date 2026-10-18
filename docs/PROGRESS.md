@@ -31,12 +31,12 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [x] 9. HTTP server, API, security, multipart, SSE + integration tests
 - [x] 10. Web UI
 - [x] 11. CLI convert / formats
-- [ ] 12. Robustness/fuzz suite, performance tuning
+- [x] 12. Robustness/fuzz suite, performance tuning
 - [ ] 13. Browser verification (§17), screenshots
 - [ ] 14. Docs, CHANGELOG, CI, verify_release.py; CI green
 - [ ] 15. Tag and release
 
-**Current milestone:** 12
+**Current milestone:** 13
 
 ## Decisions
 - Version single source: `openconverter/__init__.py`; pyproject reads it via setuptools `dynamic` attr; a test asserts it.
@@ -75,6 +75,10 @@ Then re-read this file and continue with the current milestone (spec §18).
 - The background-colour option is shown only when the target flattens alpha and the upload's header suggests transparency (`may_have_alpha`, best effort); the conversion itself always uses the real pixels. Input (read) options sit in a collapsed "Input options" section.
 - Large-image (> 4 MP) time estimate = median(duration/megapixel) of this machine's finished conversions (same target preferred), from history.jsonl `megapixels`; with no history it says so instead of guessing.
 - CLI: option flags map 1:1 to schema keys (--quality, --level, --background, --indent, --to-encoding, ...); a flag that does not apply to the detected source/target pair is a usage error (exit 2). CLI uses schema defaults (not the web settings file). Output is written to a temp name then os.replace'd. Console streams use errors='replace'.
+- Fuzz suite (tests/integration/test_fuzz.py): seeded truncations, byte flips, garbage-after-magic, absurd dimensions and raw inflate garbage for every decoder (PNG, JPEG, GIF, BMP, TGA, QOI, Netpbm, zlib, text, CSV, JSON), each in a watchdog thread; only OpenConverterError subclasses are accepted. An extra offline campaign (1,500 mutations per fixture) found no untyped exceptions or slow cases.
+- Performance tuning: DEFLATE rolling hash widened to 16 bits, globals bound to locals, `for range(chain)` candidate loop with cheap byte rejects; level table shortened (level 6 chain 8; > 4 MP images use chain 4 with a note). PNG encoder Paeth predictor vectorised with 16-bit SWAR lanes (verified against the scalar predictor). PNG write 1024x768 went from 34 s to 20-27 s on this machine; still above the 15 s target (below the 40 s ceiling) - see Known issues.
+- QOI: hashes and channel differences are precomputed for the whole image with byte-lane big-int arithmetic, and the decoder builds packed 32-bit pixels in a list (array.tobytes at the end): 1920x1080 write+read went from 27.5 s to 10.9 s.
+- scripts/verify_release.py and its meta tests are kept out of commits until the docs/screenshots it checks exist (M14), so the push gate stays meaningful.
 
 ## Performance log
 | Date | Operation | Input | Result |
@@ -82,6 +86,11 @@ Then re-read this file and continue with the current milestone (spec §18).
 | 2026-10-18 | deflate level 1 / 6 / 9 | 1024x768 photo-like RGB, raw 2.36 MB | 9.4 s / 11-17 s / 12.4 s (machine timing is noisy) |
 | 2026-10-18 | inflate (our stream) | same | 2.7-3.8 s |
 | 2026-10-18 | JPEG encode q85 4:2:0 / decode | 1024x768 photo-like | 6.0 s / 4.1 s |
+| 2026-10-18 | PNG write level 6 (before tuning) | 1024x768 | 33.9 s |
+| 2026-10-18 | PNG write level 6 (after tuning) | 1024x768 / 1920x1080 | 20-27 s / 68.5 s |
+| 2026-10-18 | PNG read | 1024x768 / 1920x1080 | 4.8-7.5 s / 15.1 s |
+| 2026-10-18 | JPEG encode / decode | 1920x1080 | 17.1 s / 14.6 s |
+| 2026-10-18 | QOI write + read (after tuning) | 1920x1080 | 5.6 s + 5.3 s |
 
 ## Known issues
-- None yet.
+- PNG write of a 1024x768 photo-like image at the default level takes 20-27 s on this laptop (target 15 s, ceiling 40 s). Further gains need a different match-finding strategy; documented in FORMATS.md.

@@ -249,5 +249,22 @@ class PngEncodeTests(unittest.TestCase):
         self.assertGreaterEqual(len(filters), 2)
 
 
+
+class PaethSwarTests(unittest.TestCase):
+    def test_matches_scalar_predictor(self):
+        rng = random.Random(5)
+        vals = [0, 1, 127, 128, 254, 255]
+        triples = [(a, b, c) for a in vals for b in vals for c in vals]
+        triples += [(rng.randrange(256), rng.randrange(256), rng.randrange(256)) for _ in range(3000)]
+        a = bytes(t[0] for t in triples)
+        b = bytes(t[1] for t in triples)
+        c = bytes(t[2] for t in triples)
+        exp = bytearray()
+        for x, y, z in triples:
+            pa, pb, pc = abs(y - z), abs(x - z), abs(x + y - 2 * z)
+            exp.append(x if pa <= pb and pa <= pc else y if pb <= pc else z)
+        self.assertEqual(png.paeth_predict_row(a, b, c), bytes(exp))
+
+
 if __name__ == "__main__":
     unittest.main()

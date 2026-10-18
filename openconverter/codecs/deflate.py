@@ -35,8 +35,9 @@ FIXED_DIST_LENGTHS = [5] * 30
 
 WSIZE = 32768
 WMASK = WSIZE - 1
-HSIZE = 1 << 15
+HSIZE = 1 << 16
 HMASK = HSIZE - 1
+HSHIFT = 6  # 3 bytes x 6 bits >= 16: the rolling hash depends on exactly 3 bytes
 MAX_MATCH = 258
 MIN_MATCH = 3
 
@@ -474,9 +475,9 @@ def _limit_lengths(lengths, freqs, used, max_len):
 # but chain/nice limits are scaled down because each hash-chain step costs far
 # more in pure Python; measured trade-offs are documented in docs/FORMATS.md.
 LEVELS = {
-    1: (4, 4, 8, 4), 2: (4, 5, 16, 8), 3: (4, 6, 32, 16),
-    4: (4, 4, 16, 8), 5: (8, 16, 32, 12), 6: (8, 16, 64, 16),
-    7: (8, 32, 128, 64), 8: (32, 128, 258, 256), 9: (32, 258, 258, 1024),
+    1: (4, 4, 8, 4), 2: (4, 5, 16, 6), 3: (4, 6, 32, 8),
+    4: (4, 4, 16, 4), 5: (8, 16, 32, 6), 6: (8, 16, 64, 8),
+    7: (8, 32, 128, 32), 8: (32, 128, 258, 128), 9: (32, 258, 258, 512),
 }
 BLOCK_TOKENS = 1 << 15
 
@@ -724,11 +725,19 @@ def _write_stored(bw, raw, final):
 
 def _lz77(data, good, max_lazy, nice, chain_limit, lazy, progress):
     """Yield (tokens, end_position) blocks. A token is a literal byte (< 256)
-    or ``(length << 16) | distance`` for a match."""
+    or ``(length << 16) | distance`` for a match.
+
+    Hash chains: head[h] is the most recent position whose 3-byte hash is h;
+    prev[p & WMASK] links to the previous position with the same hash. The
+    hash is a rolling 16-bit hash of 3 bytes; candidates are verified byte-wise.
+    Everything is bound to locals and the match finder is inlined: attribute,
+    global and function-call overhead per input byte dominates in pure Python.
+    """
     n = len(data)
-    # Hash chains: head[h] is the most recent position whose 3-byte hash is h,
-    # prev[p & WMASK] links to the previous position with the same hash.
-    # The hash is zlib's rolling 15-bit hash; candidates are verified byte-wise.
+    hmask = HMASK
+    wmask = WMASK
+    wsize = WSIZE
+    max_match = MAX_MATCH
     head = [-1] * HSIZE
     prev = [-1] * WSIZE
     tokens = []
@@ -737,26 +746,27 @@ def _lz77(data, good, max_lazy, nice, chain_limit, lazy, progress):
     end = n - 2  # last position where a 3-byte key exists
     check_step = 1 << 14
     next_check = check_step
-
-    # The match finder is inlined in both loops below: function calls per
-    # input byte would dominate the run time in pure Python.
-    h = ((data[0] << 5) ^ data[1]) & HMASK if n >= 2 else 0
+    h = ((data[0] << HSHIFT) ^ data[1]) & hmask if n >= 2 else 0
     if not lazy:
         while i < end:
-            h = ((h << 5) ^ data[i + 2]) & HMASK
+            h = ((h << 6) ^ data[i + 2]) & hmask
             cand = head[h]
-            prev[i & WMASK] = cand
+            prev[i & wmask] = cand
             head[h] = i
             best = 2
             if cand >= 0:
-                limit = i - WSIZE if i > WSIZE else -1
-                maxlen = n - i if n - i < MAX_MATCH else MAX_MATCH
-                chain = chain_limit
+                limit = i - wsize if i > wsize else -1
+                maxlen = n - i if n - i < max_match else max_match
                 ib = data[i + 2]
-                while cand > limit:
-                    # Cheap reject on the byte that would extend the best match,
-                    # then verify the prefix with one slice comparison.
-                    if data[cand + best] == ib and data[cand:cand + best] == data[i:i + best]:
+                i0 = data[i]
+                i1 = data[i + 1]
+                for _ in range(chain_limit):
+                    if cand <= limit:
+                        break
+                    # Cheap rejects first: the byte that would extend the best
+                    # match, then the first two bytes; full prefix only if longer.
+                    if data[cand + best] == ib and data[cand] == i0 and data[cand + 1] == i1 and (
+                            best == 2 or data[cand + 2:cand + best] == data[i + 2:i + best]):
                         m = best + 1
                         while m + 8 <= maxlen and data[cand + m:cand + m + 8] == data[i + m:i + m + 8]:
                             m += 8
@@ -767,20 +777,17 @@ def _lz77(data, good, max_lazy, nice, chain_limit, lazy, progress):
                         if m >= nice or m >= maxlen:
                             break
                         ib = data[i + m]
-                    chain -= 1
-                    if not chain:
-                        break
-                    cand = prev[cand & WMASK]
-            if best >= MIN_MATCH:
+                    cand = prev[cand & wmask]
+            if best >= 3:
                 append((best << 16) | dist)
                 stop = i + best
                 if best <= max_lazy:
                     for q in range(i + 1, stop if stop < end else end):
-                        h = ((h << 5) ^ data[q + 2]) & HMASK
-                        prev[q & WMASK] = head[h]
+                        h = ((h << 6) ^ data[q + 2]) & hmask
+                        prev[q & wmask] = head[h]
                         head[h] = q
                 elif stop < end:
-                    h = ((data[stop - 1] << 10) ^ (data[stop] << 5) ^ data[stop + 1]) & HMASK
+                    h = ((data[stop - 1] << 12) ^ (data[stop] << 6) ^ data[stop + 1]) & hmask
                 i = stop
             else:
                 append(data[i])
@@ -797,22 +804,28 @@ def _lz77(data, good, max_lazy, nice, chain_limit, lazy, progress):
         prev_len = 0
         prev_dist = 0
         have_prev = False
+        dist = 0
         while i < end:
-            h = ((h << 5) ^ data[i + 2]) & HMASK
+            h = ((h << 6) ^ data[i + 2]) & hmask
             cand = head[h]
-            prev[i & WMASK] = cand
+            prev[i & wmask] = cand
             head[h] = i
             ln = 0
             if cand >= 0 and prev_len < max_lazy:
-                maxlen = n - i if n - i < MAX_MATCH else MAX_MATCH
-                best = prev_len if prev_len >= MIN_MATCH else 2
+                maxlen = n - i if n - i < max_match else max_match
+                best = prev_len if prev_len >= 3 else 2
                 if best < maxlen:
-                    limit = i - WSIZE if i > WSIZE else -1
+                    limit = i - wsize if i > wsize else -1
                     chain = chain_limit >> 2 if prev_len >= good else chain_limit
                     dist = 0
                     ib = data[i + best]
-                    while cand > limit:
-                        if data[cand + best] == ib and data[cand:cand + best] == data[i:i + best]:
+                    i0 = data[i]
+                    i1 = data[i + 1]
+                    for _ in range(chain):
+                        if cand <= limit:
+                            break
+                        if data[cand + best] == ib and data[cand] == i0 and data[cand + 1] == i1 and (
+                                best == 2 or data[cand + 2:cand + best] == data[i + 2:i + best]):
                             m = best + 1
                             while m + 8 <= maxlen and data[cand + m:cand + m + 8] == data[i + m:i + m + 8]:
                                 m += 8
@@ -823,19 +836,16 @@ def _lz77(data, good, max_lazy, nice, chain_limit, lazy, progress):
                             if m >= nice or m >= maxlen:
                                 break
                             ib = data[i + m]
-                        chain -= 1
-                        if not chain:
-                            break
-                        cand = prev[cand & WMASK]
+                        cand = prev[cand & wmask]
                     if dist:
                         ln = best
-            if prev_len >= MIN_MATCH and ln <= prev_len:
+            if prev_len >= 3 and ln <= prev_len:
                 # Emit the previous match, which starts at i - 1.
                 append((prev_len << 16) | prev_dist)
                 stop = i - 1 + prev_len
                 for q in range(i + 1, stop if stop < end else end):
-                    h = ((h << 5) ^ data[q + 2]) & HMASK
-                    prev[q & WMASK] = head[h]
+                    h = ((h << 6) ^ data[q + 2]) & hmask
+                    prev[q & wmask] = head[h]
                     head[h] = q
                 i = stop
                 prev_len = 0
@@ -857,7 +867,7 @@ def _lz77(data, good, max_lazy, nice, chain_limit, lazy, progress):
                     tokens = []
                     append = tokens.append
         if have_prev:
-            if prev_len >= MIN_MATCH:
+            if prev_len >= 3:
                 append((prev_len << 16) | prev_dist)
                 i = i - 1 + prev_len
             else:
