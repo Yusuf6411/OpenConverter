@@ -24,7 +24,7 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [x] 2. Image IR, image ops, checksums, Netpbm, BMP, TGA, QOI
 - [x] 3. Own DEFLATE + perf measurements
 - [x] 4. PNG read/write
-- [ ] 5. JPEG baseline decode/encode
+- [x] 5. JPEG baseline decode/encode
 - [ ] 6. GIF decode, resize/thumbnail
 - [ ] 7. Text and table converters
 - [ ] 8. Registry, detection, jobs, progress/cancel, storage, settings, history
@@ -36,7 +36,7 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [ ] 14. Docs, CHANGELOG, CI, verify_release.py; CI green
 - [ ] 15. Tag and release
 
-**Current milestone:** 5
+**Current milestone:** 6
 
 ## Decisions
 - Version single source: `openconverter/__init__.py`; pyproject reads it via setuptools `dynamic` attr; a test asserts it.
@@ -54,12 +54,17 @@ Then re-read this file and continue with the current milestone (spec §18).
 - DEFLATE level table keeps zlib's shape but scales chain/nice limits down (level 6 = chain 16, nice 64): each chain step costs ~0.1 us in C but ~1 us in Python. Measured on filtered photo data the size cost vs zlib -6 is ~3%.
 - PNG writer: palette chosen in `palette=auto` when <= 256 colours and the packed raw size is smaller; L images whose values are all multiples of 255/85/17 are written at 1/2/4 bits (lossless). Adaptive MSAD filtering for >= 8-bit non-palette images, filter None otherwise. Filters Sub/Up/Average use whole-row SWAR big-int arithmetic; Paeth uses a per-byte loop.
 - PNG reader: an unknown critical chunk raises UnsupportedVariant (it is a valid file we cannot interpret); a chunk longer than the configured maximum raises LimitExceeded. DPI is rounded to 0.1.
+- JPEG IDCT: precomputed cosine basis summed over non-zero coefficients (sparse blocks are typical), DC-only fast path; FDCT: float AAN with scaling folded into the quantiser. Chroma upsampling is triangle ("fancy") for h2v1, h1v2 and h2v2, matching libjpeg-turbo; other ratios replicate.
+- JPEG interop fixtures in tests/fixtures/jpeg were produced with the browser pane (Chromium/libjpeg-turbo): Chromium-encoded JPEGs with Chromium's decoded pixels, and our encoder's output with Chromium's decode. Our decoder matches within 4 levels.
+- JPEG encoder default subsampling: 4:2:0 for q < 90, 4:4:4 otherwise (noted in the result). Internal `colour_transform=False` writes Adobe RGB JPEGs for decoder tests only.
+- `.claude/` (local preview launch config) is git-ignored.
 
 ## Performance log
 | Date | Operation | Input | Result |
 |---|---|---|---|
 | 2026-10-18 | deflate level 1 / 6 / 9 | 1024x768 photo-like RGB, raw 2.36 MB | 9.4 s / 11-17 s / 12.4 s (machine timing is noisy) |
 | 2026-10-18 | inflate (our stream) | same | 2.7-3.8 s |
+| 2026-10-18 | JPEG encode q85 4:2:0 / decode | 1024x768 photo-like | 6.0 s / 4.1 s |
 
 ## Known issues
 - None yet.

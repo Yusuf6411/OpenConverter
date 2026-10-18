@@ -23,3 +23,6 @@ tests/_tmp/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local tooling
+.claude/
