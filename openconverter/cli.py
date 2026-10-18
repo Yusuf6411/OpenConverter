@@ -71,6 +71,11 @@ def _add_serve_args(p):
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
+    for stream in (sys.stdout, sys.stderr):
+        try:  # never crash on a file name the console encoding cannot show
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     parser = build_parser()
     # `openconverter` alone (or with only serve flags) means `serve`.
     if not argv or argv[0].startswith("-") and argv[0] not in ("-h", "--help", "--version"):

@@ -30,13 +30,13 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [x] 8. Registry, detection, jobs, progress/cancel, storage, settings, history
 - [x] 9. HTTP server, API, security, multipart, SSE + integration tests
 - [x] 10. Web UI
-- [ ] 11. CLI convert / formats
+- [x] 11. CLI convert / formats
 - [ ] 12. Robustness/fuzz suite, performance tuning
 - [ ] 13. Browser verification (§17), screenshots
 - [ ] 14. Docs, CHANGELOG, CI, verify_release.py; CI green
 - [ ] 15. Tag and release
 
-**Current milestone:** 11
+**Current milestone:** 12
 
 ## Decisions
 - Version single source: `openconverter/__init__.py`; pyproject reads it via setuptools `dynamic` attr; a test asserts it.
@@ -74,6 +74,7 @@ Then re-read this file and continue with the current milestone (spec §18).
 - Web UI: uploads use XMLHttpRequest (one file at a time) for real upload progress; conversions use SSE with polling fallback and a 10 s SSE retry. Queue cards persist in localStorage and are reconciled on load with GET /api/jobs and /api/history. The UI sends only user-changed options; the server fills the rest from settings, and /api/formats shows those same defaults.
 - The background-colour option is shown only when the target flattens alpha and the upload's header suggests transparency (`may_have_alpha`, best effort); the conversion itself always uses the real pixels. Input (read) options sit in a collapsed "Input options" section.
 - Large-image (> 4 MP) time estimate = median(duration/megapixel) of this machine's finished conversions (same target preferred), from history.jsonl `megapixels`; with no history it says so instead of guessing.
+- CLI: option flags map 1:1 to schema keys (--quality, --level, --background, --indent, --to-encoding, ...); a flag that does not apply to the detected source/target pair is a usage error (exit 2). CLI uses schema defaults (not the web settings file). Output is written to a temp name then os.replace'd. Console streams use errors='replace'.
 
 ## Performance log
 | Date | Operation | Input | Result |
