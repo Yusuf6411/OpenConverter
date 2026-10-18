@@ -22,7 +22,7 @@ Then re-read this file and continue with the current milestone (spec §18).
 ## Milestones
 - [x] 1. Repo bootstrap, package skeleton, `python -m openconverter --version`
 - [x] 2. Image IR, image ops, checksums, Netpbm, BMP, TGA, QOI
-- [ ] 3. Own DEFLATE + perf measurements
+- [x] 3. Own DEFLATE + perf measurements
 - [ ] 4. PNG read/write
 - [ ] 5. JPEG baseline decode/encode
 - [ ] 6. GIF decode, resize/thumbnail
@@ -36,7 +36,7 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [ ] 14. Docs, CHANGELOG, CI, verify_release.py; CI green
 - [ ] 15. Tag and release
 
-**Current milestone:** 3
+**Current milestone:** 4
 
 ## Decisions
 - Version single source: `openconverter/__init__.py`; pyproject reads it via setuptools `dynamic` attr; a test asserts it.
@@ -48,6 +48,15 @@ Then re-read this file and continue with the current milestone (spec §18).
 - TGA: 32-bit uses alpha when descriptor alpha bits = 8, or when alpha bits = 0 but the 4th byte is not all zero (common writer bug).
 - PBM writer thresholds at 50% grey (< 128 -> black) and notes it unless the image is already pure black/white.
 - Writers drop an alpha channel that is fully opaque (lossless) rather than writing a 32-bit file.
+
+- DEFLATE: hash chains use zlib's rolling 15-bit hash (head/prev lists, candidates verified byte-wise); the hot loop is a closure-free generator because cell-variable access was ~40% slower. Levels use zlib's (good, lazy, nice, chain) table. Blocks are cut every ~32k tokens (checked every 16 KiB of input).
+- DEFLATE trees are always complete (a lone symbol is paired with a dummy); length limiting clamps then repairs the Kraft sum (zlib-style heuristic).
+
+## Performance log
+| Date | Operation | Input | Result |
+|---|---|---|---|
+| 2026-10-18 | deflate level 1 / 6 / 9 | 1024x768 photo-like RGB, raw 2.36 MB | 9.4 s / 11-17 s / 12.4 s (machine timing is noisy) |
+| 2026-10-18 | inflate (our stream) | same | 2.7-3.8 s |
 
 ## Known issues
 - None yet.
