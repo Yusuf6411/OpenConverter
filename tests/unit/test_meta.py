@@ -26,5 +26,46 @@ class VersionTests(unittest.TestCase):
         self.assertIn("1.0.0", out.stdout)
 
 
+
+def _verifier():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("verify_release", ROOT / "scripts" / "verify_release.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class StaticPolicyTests(unittest.TestCase):
+    """Meta tests (spec §15): the shipped code honours the hard constraints."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.v = _verifier()
+
+    def test_only_stdlib_imports(self):
+        self.assertEqual(self.v.check_stdlib_only(), [])
+
+    def test_no_forbidden_modules(self):
+        self.assertEqual(self.v.check_forbidden(), [])
+        for mod in ("zlib", "gzip", "zipfile", "bz2", "lzma", "cgi"):
+            self.assertIn(mod, self.v.FORBIDDEN)
+
+    def test_no_remote_urls(self):
+        self.assertEqual(self.v.check_remote_urls(), [])
+
+    def test_no_inline_script_or_style(self):
+        self.assertEqual(self.v.check_inline_web(), [])
+
+    def test_detectors_catch_violations(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "x.py"
+            p.write_text("import zlib\nimport numpy\nfrom os import path\n", encoding="utf-8")
+            mods = {m for m, _ in self.v.imported_modules(p)}
+            self.assertEqual(mods, {"zlib", "numpy", "os"})
+        self.assertTrue(self.v.URL_RE.search("fetch('https://cdn.example.com/x.js')"))
+
+
 if __name__ == "__main__":
     unittest.main()

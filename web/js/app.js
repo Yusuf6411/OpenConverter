@@ -241,6 +241,17 @@ class App {
     const jobsById = new Map(serverJobs.map((j) => [j.job_id, j]));
     const histById = new Map(this.history.entries.map((e) => [e.id, e]));
     const knownJobs = new Set();
+    const ids = saved.filter((s) => s && s.entry && s.entry.file_id).map((s) => s.entry.file_id);
+    const outs = saved.filter((s) => s && s.result && s.result.output_id).map((s) => s.result.output_id);
+    let existing = {};
+    let outputsAlive = {};
+    if (ids.length || outs.length) {
+      try {
+        const r = await api.lookup(ids, outs);
+        existing = r.files;
+        outputsAlive = r.outputs;
+      } catch (e) { existing = {}; outputsAlive = {}; }
+    }
     for (const s of saved) {
       if (!s || !s.name) continue;
       const card = new Card(this, s);
@@ -263,14 +274,14 @@ class App {
           card.error = { code: "not_found", message: "The server restarted before this conversion finished." };
         }
       }
-      if (card.status === "done" && card.result && histById.has(card.jobId) && histById.get(card.jobId).expired) {
+      if (card.status === "done" && card.result && !outputsAlive[card.result.output_id]) {
         card.status = "ready";
         card.result = null;
       }
-      if (card.entry && card.status !== "error") {
-        try { await api.file(card.entry.file_id); } catch (e) {
-          if (card.status !== "done") { card.status = "error"; card.error = { code: "not_found", message: "" }; }
-        }
+      if (card.entry && card.status !== "error" && !existing[card.entry.file_id]) {
+        // The upload expired (retention) or the data folder was reset.
+        if (card.status !== "done") { card.status = "error"; card.error = { code: "not_found", message: "" }; }
+        card.uploadGone = true;
       }
       card.render(true);
       this.cards.push(card);

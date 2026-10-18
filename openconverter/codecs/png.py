@@ -79,6 +79,7 @@ def _unfilter_rows(raw: bytes, rows: int, row_len: int, bpp: int, progress, repo
     prior = bytes(row_len)
     prior_int = 0
     pos = 0
+    check_every = max(1, 16384 // max(1, row_len))  # ~every 16 KiB of row data
     shift = 8 * bpp
     for y in range(rows):
         ftype = raw[pos]
@@ -138,7 +139,7 @@ def _unfilter_rows(raw: bytes, rows: int, row_len: int, bpp: int, progress, repo
         out += cur
         prior = cur
         prior_int = cur_int if cur_int is not None else _to_int(cur)
-        if (y & 31) == 0:
+        if y % check_every == 0:
             progress.check_cancelled()
             progress.report(report_base + y, report_total, "decoding")
     return out
@@ -473,6 +474,7 @@ def _filter_rows(raw: bytes, rows: int, row_len: int, bpp: int, adaptive: bool, 
     prior = bytes(row_len)
     prior_int = 0
     abs_t = _ABS
+    check_every = max(1, 16384 // max(1, row_len))
     for y in range(rows):
         row = raw[y * row_len:(y + 1) * row_len]
         x = _to_int(row)
@@ -492,7 +494,7 @@ def _filter_rows(raw: bytes, rows: int, row_len: int, bpp: int, adaptive: bool, 
         out += candidates[best]
         prior = row
         prior_int = x
-        if (y & 31) == 0:
+        if y % check_every == 0:
             progress.check_cancelled()
             progress.report(y, rows, "filtering")
     return bytes(out)

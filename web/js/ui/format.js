@@ -34,7 +34,7 @@ export function sizeChange(input, output) {
 const STAGES = {
   queued: "Waiting…", decoding: "Decoding", converting: "Converting", encoding: "Encoding",
   finalizing: "Finishing", done: "Done", failed: "Failed", cancelled: "Cancelled",
-  uploading: "Uploading", inflating: "Decoding", compressing: "Encoding", parsing: "Reading", writing: "Writing",
+  uploading: "Uploading", cancelling: "Cancelling…", inflating: "Decoding", compressing: "Encoding", parsing: "Reading", writing: "Writing",
 };
 export function stageLabel(stage) { return STAGES[stage] || stage || ""; }
 

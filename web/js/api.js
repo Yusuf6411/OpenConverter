@@ -43,6 +43,8 @@ export const api = {
   settings: () => request("GET", "/api/settings"),
   saveSettings: (s) => request("PUT", "/api/settings", s),
   file: (id) => request("GET", "/api/files/" + id),
+  lookup: (ids, outputs) => request("GET", "/api/files?ids=" + ids.map(encodeURIComponent).join(",") +
+    "&outputs=" + outputs.map(encodeURIComponent).join(",")),
   createJob: (fileId, target, options) => request("POST", "/api/jobs", { file_id: fileId, target_format: target, options }),
   job: (id) => request("GET", "/api/jobs/" + id),
   jobs: () => request("GET", "/api/jobs"),

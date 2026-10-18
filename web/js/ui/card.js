@@ -87,7 +87,8 @@ export class Card {
   setThumb() {
     clear(this.thumb);
     const fmt = this.format;
-    if (this.entry && fmt && fmt.category === "image") {
+    const hasPreview = this.result && this.status === "done" ? !this.outputGone : !this.uploadGone;
+    if (this.entry && fmt && fmt.category === "image" && hasPreview) {
       const src = this.result && this.status === "done" ? api.outputPreviewUrl(this.result.output_id)
         : api.filePreviewUrl(this.entry.file_id);
       const img = h("img", { alt: "", src, loading: "lazy", decoding: "async" });
@@ -100,6 +101,20 @@ export class Card {
   }
 
   render(full = false) {
+    // Re-rendering detaches and re-attaches controls; keep keyboard focus on them.
+    const active = document.activeElement;
+    const hadFocus = active && active !== document.body && this.el.contains(active);
+    this.renderInner(full);
+    if (hadFocus && document.activeElement !== active) {
+      if (active.isConnected && !active.disabled) active.focus();
+      else {
+        const fallback = this.actions.querySelector("button, a");
+        if (fallback) fallback.focus();
+      }
+    }
+  }
+
+  renderInner(full) {
     const fmt = this.format;
     const tfmt = this.targetFormat;
     this.el.className = "card state-" + this.status;
@@ -263,6 +278,7 @@ export class Card {
     if (!this.canConvert) return;
     this.stopTracking();
     this.status = "queued";
+    this.cancelRequested = false;
     this.progress = 0;
     this.stage = "queued";
     this.result = null;
@@ -281,9 +297,11 @@ export class Card {
 
   async cancel() {
     if (!this.jobId) return;
+    this.cancelRequested = true;  // shown as "Cancelling" until the worker stops
     try {
       const snap = await api.cancel(this.jobId);
       this.apply(snap);
+      if (!FINAL.has(this.status)) this.render();
     } catch (e) {
       announce("Could not cancel: " + friendlyError(e));
     }
@@ -348,7 +366,7 @@ export class Card {
     const wasFinal = FINAL.has(this.status);
     this.status = snap.state;
     this.progress = Math.max(this.progress, snap.progress || 0);
-    this.stage = snap.stage;
+    this.stage = this.cancelRequested && !FINAL.has(snap.state) ? "cancelling" : snap.stage;
     if (snap.state === "done") this.result = snap.result;
     if (snap.state === "failed" || snap.state === "cancelled") this.error = snap.error;
     const nowFinal = FINAL.has(this.status);

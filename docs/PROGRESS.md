@@ -32,11 +32,11 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [x] 10. Web UI
 - [x] 11. CLI convert / formats
 - [x] 12. Robustness/fuzz suite, performance tuning
-- [ ] 13. Browser verification (§17), screenshots
+- [x] 13. Browser verification (§17), screenshots
 - [ ] 14. Docs, CHANGELOG, CI, verify_release.py; CI green
 - [ ] 15. Tag and release
 
-**Current milestone:** 13
+**Current milestone:** 14
 
 ## Decisions
 - Version single source: `openconverter/__init__.py`; pyproject reads it via setuptools `dynamic` attr; a test asserts it.
@@ -79,6 +79,9 @@ Then re-read this file and continue with the current milestone (spec §18).
 - Performance tuning: DEFLATE rolling hash widened to 16 bits, globals bound to locals, `for range(chain)` candidate loop with cheap byte rejects; level table shortened (level 6 chain 8; > 4 MP images use chain 4 with a note). PNG encoder Paeth predictor vectorised with 16-bit SWAR lanes (verified against the scalar predictor). PNG write 1024x768 went from 34 s to 20-27 s on this machine; still above the 15 s target (below the 40 s ceiling) - see Known issues.
 - QOI: hashes and channel differences are precomputed for the whole image with byte-lane big-int arithmetic, and the decoder builds packed 32-bit pixels in a list (array.tobytes at the end): 1920x1080 write+read went from 27.5 s to 10.9 s.
 - scripts/verify_release.py and its meta tests are kept out of commits until the docs/screenshots it checks exist (M14), so the push gate stays meaningful.
+- §17 browser pass (built-in browser pane, Chromium, 2026-10-18), server started with `python -m openconverter serve --no-browser --data-dir <scratch>` at http://127.0.0.1:8080. Test files were generated in the page (canvas PNG/JPEG, hand-built BMP/PPM, the GIF fixture) and added through the real file input; clicks used the real buttons. Results: PNG with alpha -> JPG q85 (note "Alpha flattened onto #FFFFFF."); JPG -> PNG 200x150; BMP+PPM+GIF "Set all to PNG" + "Convert all" all done (BMP->PNG pixel-identical per Chromium); CSV with quoted comma+newline -> JSON exactly correct; truncated PNG -> friendly error, other cards fine; 4000x3000 noisy PNG -> Cancel -> cancelled, no output; theme toggle and settings (quality 70) persisted across reload and applied to a new card; history re-download, delete, clear all; keyboard-only operation; 900/700 px with no horizontal scroll; all 56 required conversions driven through the UI, PNG/JPEG/BMP outputs decoded by Chromium and all 75 outputs decoded by our codecs; console clean; only 127.0.0.1/localhost requests.
+- Fixes from the pass: focus is kept on card controls across re-renders (it was lost after changing the target); cancellation is checked every ~16 KiB of PNG rows (was every 32 rows: ~2 s latency on wide images, now ~150 ms) and the card shows "Cancelling..."; previews of undecodable images return 204 (no console error) and saved cards are reconciled with one `GET /api/files?ids=&outputs=` lookup instead of per-file 404s; settings form error styled; small thumbnails scale up.
+- Screenshots: browser-pane captures converted to PNG with our own JPEG decoder + PNG encoder (docs/screenshots, 180-220 KB each).
 
 ## Performance log
 | Date | Operation | Input | Result |

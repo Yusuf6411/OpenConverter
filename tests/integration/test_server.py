@@ -209,9 +209,27 @@ class UploadTests(ServerTestCase):
         self.assertEqual(resp.getheader("Content-Type"), "image/png")
         thumb = png.decode(data)
         self.assertLessEqual(max(thumb.width, thumb.height), 512)
+        broken = (FIXTURES / "images/photo.png").read_bytes()[:600]
+        status, body = self.srv.upload([("broken.png", broken)])
+        resp, data = self.srv.request("GET", f"/api/files/{body['files'][0]['file_id']}/preview")
+        self.assertEqual((resp.status, data), (204, b""))
+        self.assertEqual(resp.getheader("X-OpenConverter-Error"), "corrupt_file")
         status, body = self.srv.upload([("t.csv", b"a,b\n1,2\n")])
         resp, data = self.srv.request("GET", f"/api/files/{body['files'][0]['file_id']}/preview")
         self.assertEqual(resp.status, 415)
+
+
+class LookupTests(ServerTestCase):
+    def test_batch_lookup(self):
+        status, body = self.srv.upload([("a.png", (FIXTURES / "images/alpha.png").read_bytes())])
+        fid = body["files"][0]["file_id"]
+        missing = "0" * 32
+        status, out, _ = self.srv.json("GET", f"/api/files?ids={fid},{missing},../x&outputs={missing},bad")
+        self.assertEqual(status, 200)
+        self.assertEqual(out["files"][fid]["detected_format"], "png")
+        self.assertIsNone(out["files"][missing])
+        self.assertIsNone(out["files"]["../x"])
+        self.assertEqual(out["outputs"], {missing: False, "bad": False})
 
 
 class ConversionApiTests(ServerTestCase):

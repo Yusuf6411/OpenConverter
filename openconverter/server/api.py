@@ -10,8 +10,8 @@ from openconverter.converters.image_converter import decode_image, thumbnail_png
 from openconverter.core import files
 from openconverter.core.registry import REGISTRY
 from openconverter.core.storage import check_id, new_id
-from openconverter.errors import (BadRequest, LimitExceeded, NotFound, OpenConverterError, ServiceUnavailable,
-                                  UnsupportedFormat)
+from openconverter.errors import (BadRequest, CorruptFile, LimitExceeded, NotFound, OpenConverterError,
+                                  ServiceUnavailable, UnsupportedFormat, UnsupportedVariant)
 from openconverter.server import multipart, security, sse
 
 
@@ -95,13 +95,35 @@ def file_info(req, app, file_id):
     return app.storage.upload_meta(file_id)
 
 
+def file_lookup(req, app):
+    """GET /api/files?ids=a,b&outputs=c,d -> upload metadata (null if gone) and output existence.
+
+    Lets the UI reconcile saved cards after a reload without a 404 per expired file."""
+    raw = req.query.get("ids", [""])[0]
+    ids = [i for i in raw.split(",") if i][:500]
+    out = {}
+    for i in ids:
+        try:
+            out[i] = app.storage.upload_meta(i)
+        except NotFound:
+            out[i] = None
+    raw_out = req.query.get("outputs", [""])[0]
+    outputs = {o: app.storage.output_exists(o) for o in [x for x in raw_out.split(",") if x][:500]}
+    return {"files": out, "outputs": outputs}
+
+
 def _preview(app, kind, item_id, data_loader, fmt):
     spec = REGISTRY.get(fmt)
     if spec.category != "image":
         raise UnsupportedFormat("Previews are only available for images.")
     cache = app.storage.cached_preview(kind, item_id)
     if not cache.is_file():
-        img = decode_image(data_loader(), fmt, limits=app.limits)
+        try:
+            img = decode_image(data_loader(), fmt, limits=app.limits)
+        except (CorruptFile, UnsupportedVariant, LimitExceeded) as exc:
+            # No preview can be made; the conversion itself reports the error.
+            # 204 (not 4xx) because a missing thumbnail is not a request error.
+            return Response(204, b"", headers={"X-OpenConverter-Error": exc.code})
         data = thumbnail_png(img, 512)
         tmp = cache.with_name(cache.name + f".{new_id()}.part")
         tmp.write_bytes(data)
@@ -203,6 +225,7 @@ ROUTES = [
     ("GET", r"/api/health", health),
     ("GET", r"/api/formats", formats),
     ("POST", r"/api/files", upload_files),
+    ("GET", r"/api/files", file_lookup),
     ("GET", rf"/api/files/{ID}", file_info),
     ("GET", rf"/api/files/{ID}/preview", file_preview),
     ("POST", r"/api/jobs", create_job),

@@ -8,7 +8,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from openconverter import __version__
 from openconverter.config import (CLEANUP_INTERVAL_SECONDS, MAX_JSON_BODY, MAX_SSE_STREAMS, SOCKET_TIMEOUT, Settings,
@@ -180,6 +180,7 @@ class Request:
         self.body = None
         self.must_close = False
         self.body_read = False
+        self.query = parse_qs(urlsplit(handler.path).query, keep_blank_values=True)
 
     def content_length(self) -> int:
         if "Transfer-Encoding" in self.headers:
