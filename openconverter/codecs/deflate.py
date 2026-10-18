@@ -470,11 +470,13 @@ def _limit_lengths(lengths, freqs, used, max_len):
 # deflate
 # --------------------------------------------------------------------------
 
-# (good_length, max_lazy, nice_length, max_chain) as in zlib
+# (good_length, max_lazy, nice_length, max_chain). Same shape as zlib's table,
+# but chain/nice limits are scaled down because each hash-chain step costs far
+# more in pure Python; measured trade-offs are documented in docs/FORMATS.md.
 LEVELS = {
-    1: (4, 4, 8, 4), 2: (4, 5, 16, 8), 3: (4, 6, 32, 32),
-    4: (4, 4, 16, 16), 5: (8, 16, 32, 32), 6: (8, 16, 128, 128),
-    7: (8, 32, 128, 256), 8: (32, 128, 258, 1024), 9: (32, 258, 258, 4096),
+    1: (4, 4, 8, 4), 2: (4, 5, 16, 8), 3: (4, 6, 32, 16),
+    4: (4, 4, 16, 8), 5: (8, 16, 32, 12), 6: (8, 16, 64, 16),
+    7: (8, 32, 128, 64), 8: (32, 128, 258, 256), 9: (32, 258, 258, 1024),
 }
 BLOCK_TOKENS = 1 << 15
 
@@ -750,18 +752,21 @@ def _lz77(data, good, max_lazy, nice, chain_limit, lazy, progress):
                 limit = i - WSIZE if i > WSIZE else -1
                 maxlen = n - i if n - i < MAX_MATCH else MAX_MATCH
                 chain = chain_limit
+                ib = data[i + 2]
                 while cand > limit:
-                    if data[cand + best] == data[i + best]:
-                        m = 0
-                        while m + 16 <= maxlen and data[cand + m:cand + m + 16] == data[i + m:i + m + 16]:
-                            m += 16
+                    # Cheap reject on the byte that would extend the best match,
+                    # then verify the prefix with one slice comparison.
+                    if data[cand + best] == ib and data[cand:cand + best] == data[i:i + best]:
+                        m = best + 1
+                        while m + 8 <= maxlen and data[cand + m:cand + m + 8] == data[i + m:i + m + 8]:
+                            m += 8
                         while m < maxlen and data[cand + m] == data[i + m]:
                             m += 1
-                        if m > best:
-                            best = m
-                            dist = i - cand
-                            if m >= nice or m >= maxlen:
-                                break
+                        best = m
+                        dist = i - cand
+                        if m >= nice or m >= maxlen:
+                            break
+                        ib = data[i + m]
                     chain -= 1
                     if not chain:
                         break
@@ -805,18 +810,19 @@ def _lz77(data, good, max_lazy, nice, chain_limit, lazy, progress):
                     limit = i - WSIZE if i > WSIZE else -1
                     chain = chain_limit >> 2 if prev_len >= good else chain_limit
                     dist = 0
+                    ib = data[i + best]
                     while cand > limit:
-                        if data[cand + best] == data[i + best]:
-                            m = 0
-                            while m + 16 <= maxlen and data[cand + m:cand + m + 16] == data[i + m:i + m + 16]:
-                                m += 16
+                        if data[cand + best] == ib and data[cand:cand + best] == data[i:i + best]:
+                            m = best + 1
+                            while m + 8 <= maxlen and data[cand + m:cand + m + 8] == data[i + m:i + m + 8]:
+                                m += 8
                             while m < maxlen and data[cand + m] == data[i + m]:
                                 m += 1
-                            if m > best:
-                                best = m
-                                dist = i - cand
-                                if m >= nice or m >= maxlen:
-                                    break
+                            best = m
+                            dist = i - cand
+                            if m >= nice or m >= maxlen:
+                                break
+                            ib = data[i + m]
                         chain -= 1
                         if not chain:
                             break

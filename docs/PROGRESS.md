@@ -23,7 +23,7 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [x] 1. Repo bootstrap, package skeleton, `python -m openconverter --version`
 - [x] 2. Image IR, image ops, checksums, Netpbm, BMP, TGA, QOI
 - [x] 3. Own DEFLATE + perf measurements
-- [ ] 4. PNG read/write
+- [x] 4. PNG read/write
 - [ ] 5. JPEG baseline decode/encode
 - [ ] 6. GIF decode, resize/thumbnail
 - [ ] 7. Text and table converters
@@ -36,7 +36,7 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [ ] 14. Docs, CHANGELOG, CI, verify_release.py; CI green
 - [ ] 15. Tag and release
 
-**Current milestone:** 4
+**Current milestone:** 5
 
 ## Decisions
 - Version single source: `openconverter/__init__.py`; pyproject reads it via setuptools `dynamic` attr; a test asserts it.
@@ -51,6 +51,9 @@ Then re-read this file and continue with the current milestone (spec §18).
 
 - DEFLATE: hash chains use zlib's rolling 15-bit hash (head/prev lists, candidates verified byte-wise); the hot loop is a closure-free generator because cell-variable access was ~40% slower. Levels use zlib's (good, lazy, nice, chain) table. Blocks are cut every ~32k tokens (checked every 16 KiB of input).
 - DEFLATE trees are always complete (a lone symbol is paired with a dummy); length limiting clamps then repairs the Kraft sum (zlib-style heuristic).
+- DEFLATE level table keeps zlib's shape but scales chain/nice limits down (level 6 = chain 16, nice 64): each chain step costs ~0.1 us in C but ~1 us in Python. Measured on filtered photo data the size cost vs zlib -6 is ~3%.
+- PNG writer: palette chosen in `palette=auto` when <= 256 colours and the packed raw size is smaller; L images whose values are all multiples of 255/85/17 are written at 1/2/4 bits (lossless). Adaptive MSAD filtering for >= 8-bit non-palette images, filter None otherwise. Filters Sub/Up/Average use whole-row SWAR big-int arithmetic; Paeth uses a per-byte loop.
+- PNG reader: an unknown critical chunk raises UnsupportedVariant (it is a valid file we cannot interpret); a chunk longer than the configured maximum raises LimitExceeded. DPI is rounded to 0.1.
 
 ## Performance log
 | Date | Operation | Input | Result |

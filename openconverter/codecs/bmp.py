@@ -165,7 +165,7 @@ def decode(data: bytes, progress=NULL_PROGRESS, limits=DEFAULT_LIMITS) -> Image:
         if hsize >= 36:
             xppm, yppm, colours_used = struct.unpack_from("<iiI", data, 38)
             if xppm > 0 and yppm > 0:
-                meta["dpi"] = (round(xppm * 0.0254, 2), round(yppm * 0.0254, 2))
+                meta["dpi"] = (round(xppm * 0.0254, 1), round(yppm * 0.0254, 1))
         top_down = height < 0
         height = abs(height)
         pal_entry = 4
