@@ -33,10 +33,10 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [x] 11. CLI convert / formats
 - [x] 12. Robustness/fuzz suite, performance tuning
 - [x] 13. Browser verification (§17), screenshots
-- [ ] 14. Docs, CHANGELOG, CI, verify_release.py; CI green
+- [x] 14. Docs, CHANGELOG, CI, verify_release.py; CI green
 - [ ] 15. Tag and release
 
-**Current milestone:** 14
+**Current milestone:** 14 (CI) / 15
 
 ## Decisions
 - Version single source: `openconverter/__init__.py`; pyproject reads it via setuptools `dynamic` attr; a test asserts it.
@@ -94,6 +94,9 @@ Then re-read this file and continue with the current milestone (spec §18).
 | 2026-10-18 | PNG read | 1024x768 / 1920x1080 | 4.8-7.5 s / 15.1 s |
 | 2026-10-18 | JPEG encode / decode | 1920x1080 | 17.1 s / 14.6 s |
 | 2026-10-18 | QOI write + read (after tuning) | 1920x1080 | 5.6 s + 5.3 s |
+| 2026-10-18 | Final bench (full clocks): PNG write / read, JPEG enc / dec, PNG->JPG, JPG->PNG | 1024x768 | 5.9 / 1.7 / 1.4 / 2.3 / 4.2 / 4.9 s |
+| 2026-10-18 | same | 1920x1080 | 16.6 / 4.7 / 3.9 / 2.9 / 11.3 / 14.8 s |
 
 ## Known issues
-- PNG write of a 1024x768 photo-like image at the default level takes 20-27 s on this laptop (target 15 s, ceiling 40 s). Further gains need a different match-finding strategy; documented in FORMATS.md.
+- Timings on the dev laptop vary 3-4x with its power/thermal state: final run (full clocks) PNG write 1024x768 5.9 s, 1920x1080 16.6 s; earlier throttled runs 20-27 s / 68 s. Both documented in FORMATS.md.
+- A thumbnail request for a very large image decodes the whole image in an HTTP thread (not cancellable); it only costs time.

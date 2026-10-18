@@ -86,8 +86,20 @@ Bodies over the `max_upload_mb` setting get `413 limit_exceeded` and leave no pa
 ### `GET /api/files/{file_id}`
 The stored metadata of an upload (same shape as an entry above).
 
+### `GET /api/files?ids=…&outputs=…` *(added for page-reload reconciliation)*
+Batch existence check used by the UI after a reload, so expired files do not cause one `404` each.
+```
+GET /api/files?ids=3f2a…,0000…&outputs=77ab…
+```
+```json
+{"files": {"3f2a…": {"file_id": "3f2a…", "detected_format": "png", "...": "..."}, "0000…": null},
+ "outputs": {"77ab…": true}}
+```
+
 ### `GET /api/files/{file_id}/preview`
 PNG thumbnail (≤ 512 px) made with our own resize and PNG encoder. Images only (`415` otherwise).
+If the image cannot be decoded (damaged, unsupported variant, over the limits) the response is
+`204 No Content` with an `X-OpenConverter-Error: <code>` header; the conversion itself reports the error.
 
 ### `POST /api/jobs`
 ```json
@@ -141,7 +153,7 @@ The name is `<original stem>.<new extension>`, sanitised (path separators,
 control characters and reserved Windows names removed).
 
 ### `GET /api/outputs/{output_id}/preview`
-PNG thumbnail of an image output (≤ 512 px).
+PNG thumbnail of an image output (≤ 512 px), same `204` rule as above.
 
 ### `GET /api/history`
 ```json
