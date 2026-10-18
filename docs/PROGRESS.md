@@ -26,7 +26,7 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [x] 4. PNG read/write
 - [x] 5. JPEG baseline decode/encode
 - [x] 6. GIF decode, resize/thumbnail
-- [ ] 7. Text and table converters
+- [x] 7. Text and table converters
 - [ ] 8. Registry, detection, jobs, progress/cancel, storage, settings, history
 - [ ] 9. HTTP server, API, security, multipart, SSE + integration tests
 - [ ] 10. Web UI
@@ -36,7 +36,7 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [ ] 14. Docs, CHANGELOG, CI, verify_release.py; CI green
 - [ ] 15. Tag and release
 
-**Current milestone:** 7
+**Current milestone:** 8
 
 ## Decisions
 - Version single source: `openconverter/__init__.py`; pyproject reads it via setuptools `dynamic` attr; a test asserts it.
@@ -60,6 +60,10 @@ Then re-read this file and continue with the current milestone (spec §18).
 - `.claude/` (local preview launch config) is git-ignored.
 - GIF: area outside the first frame is transparent (as browsers render it); out-of-palette indices (other than the transparent index) raise CorruptFile; LZW data that ends before the frame is full raises CorruptFile. A GIF fixture built by the test GIF writer was decoded by Chromium identically (stored with Chromium's pixels).
 - Thumbnails: integer-factor box reduction (ceil(longest/512)), so previews are <= 512 px on the long side, sometimes smaller; area-average resize only for extremely thin images.
+- Text decoding order: BOM -> BOM-less UTF-16 (NUL-byte pattern in the first 4 KiB) -> strict UTF-8 -> the `source_encoding` fallback (default Windows-1252; its 5 undefined bytes fall back to Latin-1). UTF-32 -> UnsupportedVariant. Unencodable characters raise UnsupportedVariant (default) or are replaced with '?' and counted.
+- Target encodings: utf-8, utf-8-bom, utf-16le(-bom), utf-16be(-bom), latin-1, windows-1252. Newline: preserve (default for TXT), lf, crlf (default for CSV output, per RFC 4180).
+- CSV: blank lines outside quotes are skipped; text after a closing quote is kept (lenient); single-empty-field rows are written as `""`. Header de-dup: empty -> column_N, duplicates -> name_2 (noted). Cells stay strings (no type inference); JSON scalars become text (null -> empty) and this is noted only when it happened.
+- Option keys are distinct for reading vs writing (source_delimiter/has_header/source_encoding vs delimiter/bom/newline/indent/ensure_ascii/to_encoding/unencodable) so CSV->CSV is unambiguous.
 
 ## Performance log
 | Date | Operation | Input | Result |
