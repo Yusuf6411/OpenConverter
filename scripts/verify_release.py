@@ -169,6 +169,16 @@ def check_tracked_sizes():
     return errors
 
 
+def check_test_files_tracked():
+    """Every file under tests/ (fixtures included) must be committed, not ignored."""
+    out = git("ls-files", "--others", "--ignored", "--exclude-standard", "--", "tests", "scripts", "web",
+              "openconverter", "docs")
+    if out.returncode != 0:
+        return ["git ls-files failed: " + out.stderr.strip()]
+    return [f"ignored by .gitignore but needed: {line}" for line in out.stdout.splitlines()
+            if line.strip() and "__pycache__" not in line and not line.endswith(".pyc")]
+
+
 CHECKS = [
     ("stdlib-only imports", check_stdlib_only),
     ("forbidden modules", check_forbidden),
@@ -177,6 +187,7 @@ CHECKS = [
     ("version consistency", check_version),
     ("required docs and files", check_required_files),
     ("tracked file sizes", check_tracked_sizes),
+    ("no needed files ignored", check_test_files_tracked),
 ]
 
 

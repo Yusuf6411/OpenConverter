@@ -9,12 +9,12 @@ venv/
 .mypy_cache/
 .pytest_cache/
 
-# Runtime data
-data/
-uploads/
-outputs/
-temp/
-logs/
+# Runtime data (only at the repository root; tests/fixtures/data is real test data)
+/data/
+/uploads/
+/outputs/
+/temp/
+/logs/
 *.log
 tests/_tmp/
 
