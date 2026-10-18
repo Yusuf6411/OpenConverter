@@ -26,3 +26,5 @@ Thumbs.db
 
 # Local tooling
 .claude/
+
+test-output.txt
