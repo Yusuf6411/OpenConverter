@@ -28,7 +28,7 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [x] 6. GIF decode, resize/thumbnail
 - [x] 7. Text and table converters
 - [x] 8. Registry, detection, jobs, progress/cancel, storage, settings, history
-- [ ] 9. HTTP server, API, security, multipart, SSE + integration tests
+- [x] 9. HTTP server, API, security, multipart, SSE + integration tests
 - [ ] 10. Web UI
 - [ ] 11. CLI convert / formats
 - [ ] 12. Robustness/fuzz suite, performance tuning
@@ -36,7 +36,7 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [ ] 14. Docs, CHANGELOG, CI, verify_release.py; CI green
 - [ ] 15. Tag and release
 
-**Current milestone:** 9
+**Current milestone:** 10
 
 ## Decisions
 - Version single source: `openconverter/__init__.py`; pyproject reads it via setuptools `dynamic` attr; a test asserts it.
@@ -68,6 +68,9 @@ Then re-read this file and continue with the current milestone (spec §18).
 - Detection: strong magic numbers, then TGA header validation, then known-unsupported signatures (PDF, ZIP, RIFF...), then text. For text the extension picks txt/csv/tsv/json; without one, '[' -> JSON, consistent delimiter counts -> CSV/TSV, else TXT. Only the first MiB is examined.
 - Upload metadata and output metadata live in `<id>.json` sidecars next to the UUID-named files, so history and downloads survive restarts. IDs are uuid4 hex (32 chars) validated by regex before any path is built.
 - A cancelled job never leaves output: outputs are written to temp/ and os.replace'd; a cancel that races the final write deletes the output.
+- Server: an error raised before/while reading a request body first drains up to 64 MB / 15 s of the unread body, so clients receive the JSON error instead of a TCP reset (seen on Windows for early 413s); the UI also checks max_upload_mb before uploading. Chunked request bodies are rejected (400). HTTP/0.9 requests get an HTTP/1.0 status line. Low-level errors (bad request line, 431) also return JSON with security headers.
+- Added GET /api/jobs (list of jobs known to this server process) so the UI can reconcile in-flight jobs after a reload; documented in docs/API.md.
+- SO_EXCLUSIVEADDRUSE on Windows and allow_reuse_address=False so a busy port fails with a clear message instead of silently sharing.
 
 ## Performance log
 | Date | Operation | Input | Result |
