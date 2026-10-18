@@ -60,3 +60,47 @@ def convert_table(data: bytes, source: str, target: str, options: dict, progress
     progress.report(1, 1, "finalizing")
     notes = list(dict.fromkeys(notes))
     return out, notes, {"rows": len(table.rows), "columns": table.width}
+
+
+def _formats():
+    from openconverter.converters.base import (OWN, PARTIAL, FormatSpec, bool_option, choice_option,
+                                               int_option)
+    source_encoding = choice_option(
+        "Source encoding (fallback)", textcodec.SOURCE_ENCODINGS, "windows-1252",
+        "Used when the file has no byte-order mark and is not valid UTF-8.")
+    read_delimited = {
+        "source_delimiter": choice_option("Input delimiter", DELIMITER_CHOICES, "auto",
+                                          labels={"auto": "Detect", "comma": "Comma", "semicolon": "Semicolon",
+                                                  "tab": "Tab", "pipe": "Pipe"}),
+        "has_header": bool_option("First row is a header", True),
+        "source_encoding": source_encoding,
+    }
+    write_common = {
+        "newline": choice_option("Line endings", ["crlf", "lf"], "crlf",
+                                 labels={"crlf": "CRLF (RFC 4180)", "lf": "LF"}),
+        "bom": bool_option("UTF-8 BOM (for Excel)", False),
+    }
+    csv_write = {"delimiter": choice_option("Delimiter", ["comma", "semicolon", "tab", "pipe"], "comma",
+                                            labels={"comma": "Comma", "semicolon": "Semicolon", "tab": "Tab",
+                                                    "pipe": "Pipe"}), **write_common}
+    note = ("RFC 4180: quoted fields, embedded delimiters/newlines/quotes, CRLF or LF, ragged rows "
+            "(padded on write), BOM stripped on read.")
+    return [
+        FormatSpec("csv", "CSV", "data", (".csv",), "text/csv", lambda data: False, True, True, OWN, note,
+                   read_options=read_delimited, write_options=csv_write, identity_meaningful=True),
+        FormatSpec("tsv", "TSV", "data", (".tsv", ".tab"), "text/tab-separated-values", lambda data: False,
+                   True, True, OWN, note, read_options=read_delimited, write_options=dict(write_common),
+                   identity_meaningful=True),
+        FormatSpec("json", "JSON", "data", (".json",), "application/json", lambda data: False, True, True,
+                   PARTIAL, "Arrays of flat objects (header = keys in first-seen order) or arrays of arrays. "
+                   "Nested values are rejected; numbers/booleans/null become text.",
+                   read_options={"source_encoding": source_encoding},
+                   write_options={"indent": choice_option("Indent", [0, 2, 4], 2, labels={0: "Compact", 2: "2 spaces",
+                                                                                         4: "4 spaces"}),
+                                  "ensure_ascii": bool_option("Escape non-ASCII characters", False)},
+                   identity_meaningful=True,
+                   ownership_note="JSON syntax is parsed and written by Python's standard json module."),
+    ]
+
+
+TABLE_FORMATS = _formats()

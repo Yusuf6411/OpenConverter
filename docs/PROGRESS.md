@@ -27,7 +27,7 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [x] 5. JPEG baseline decode/encode
 - [x] 6. GIF decode, resize/thumbnail
 - [x] 7. Text and table converters
-- [ ] 8. Registry, detection, jobs, progress/cancel, storage, settings, history
+- [x] 8. Registry, detection, jobs, progress/cancel, storage, settings, history
 - [ ] 9. HTTP server, API, security, multipart, SSE + integration tests
 - [ ] 10. Web UI
 - [ ] 11. CLI convert / formats
@@ -36,7 +36,7 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [ ] 14. Docs, CHANGELOG, CI, verify_release.py; CI green
 - [ ] 15. Tag and release
 
-**Current milestone:** 8
+**Current milestone:** 9
 
 ## Decisions
 - Version single source: `openconverter/__init__.py`; pyproject reads it via setuptools `dynamic` attr; a test asserts it.
@@ -64,6 +64,10 @@ Then re-read this file and continue with the current milestone (spec §18).
 - Target encodings: utf-8, utf-8-bom, utf-16le(-bom), utf-16be(-bom), latin-1, windows-1252. Newline: preserve (default for TXT), lf, crlf (default for CSV output, per RFC 4180).
 - CSV: blank lines outside quotes are skipped; text after a closing quote is kept (lenient); single-empty-field rows are written as `""`. Header de-dup: empty -> column_N, duplicates -> name_2 (noted). Cells stay strings (no type inference); JSON scalars become text (null -> empty) and this is noted only when it happened.
 - Option keys are distinct for reading vs writing (source_delimiter/has_header/source_encoding vs delimiter/bom/newline/indent/ensure_ascii/to_encoding/unencodable) so CSV->CSV is unambiguous.
+- FormatSpec lives in converters/base.py (core imports converters, never the reverse); each format has separate read_options/write_options schemas; /api/formats defaults reflect user settings (quality, compression_level, background).
+- Detection: strong magic numbers, then TGA header validation, then known-unsupported signatures (PDF, ZIP, RIFF...), then text. For text the extension picks txt/csv/tsv/json; without one, '[' -> JSON, consistent delimiter counts -> CSV/TSV, else TXT. Only the first MiB is examined.
+- Upload metadata and output metadata live in `<id>.json` sidecars next to the UUID-named files, so history and downloads survive restarts. IDs are uuid4 hex (32 chars) validated by regex before any path is built.
+- A cancelled job never leaves output: outputs are written to temp/ and os.replace'd; a cancel that races the final write deletes the output.
 
 ## Performance log
 | Date | Operation | Input | Result |

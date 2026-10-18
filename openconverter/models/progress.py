@@ -24,14 +24,16 @@ NULL_PROGRESS = NullProgress()
 class SubProgress(Progress):
     """Maps a sub-task's 0..total onto a fraction [start, end] of a parent's scale."""
 
-    def __init__(self, parent: Progress, start: float, end: float) -> None:
+    def __init__(self, parent: Progress, start: float, end: float, stage: str | None = None) -> None:
         self.parent = parent
         self.start = start
         self.end = end
+        self.stage = stage  # overrides the stage name reported by the sub-task
 
     def report(self, done: int, total: int, stage: str) -> None:
         frac = 0.0 if total <= 0 else min(1.0, max(0.0, done / total))
-        self.parent.report(int((self.start + (self.end - self.start) * frac) * 1000), 1000, stage)
+        self.parent.report(int((self.start + (self.end - self.start) * frac) * 1000), 1000,
+                           self.stage or stage)
 
     def check_cancelled(self) -> None:
         self.parent.check_cancelled()

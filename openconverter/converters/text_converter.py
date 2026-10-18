@@ -27,3 +27,32 @@ def convert_text(data: bytes, options: dict, progress=NULL_PROGRESS, limits=DEFA
         notes.append("No change: the output is identical to the input.")
     progress.report(3, 3, "encoding")
     return out, notes, {"source_encoding": detected, "line_endings": kind}
+
+
+def _formats():
+    from openconverter.converters.base import PARTIAL, FormatSpec, choice_option
+    source_encoding = choice_option(
+        "Source encoding (fallback)", textcodec.SOURCE_ENCODINGS, "windows-1252",
+        "Used when the text has no byte-order mark and is not valid UTF-8.")
+    return [
+        FormatSpec("txt", "Plain text", "text", (".txt", ".text", ".log"), "text/plain",
+                   lambda data: False, True, True, PARTIAL,
+                   "UTF-8 (with/without BOM), UTF-16 LE/BE (with/without BOM), Latin-1, Windows-1252; "
+                   "LF/CRLF line endings.",
+                   read_options={"source_encoding": source_encoding},
+                   write_options={
+                       "to_encoding": choice_option("Output encoding", textcodec.TARGET_ENCODINGS, "utf-8",
+                                                    labels={k: textcodec.label(k) for k in textcodec.TARGET_ENCODINGS}),
+                       "newline": choice_option("Line endings", textcodec.NEWLINES, "preserve",
+                                                labels={"preserve": "Keep as is", "lf": "LF (Unix)",
+                                                        "crlf": "CRLF (Windows)"}),
+                       "unencodable": choice_option("Unencodable characters", ["error", "replace"], "error",
+                                                    labels={"error": "Stop with an error",
+                                                            "replace": "Replace with ?"}),
+                   },
+                   identity_meaningful=True,
+                   ownership_note="Character mapping uses Python's built-in text codecs."),
+    ]
+
+
+TEXT_FORMATS = _formats()
