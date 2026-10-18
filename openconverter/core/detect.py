@@ -51,7 +51,7 @@ def detect(data: bytes, filename: str = "") -> str:
         text, _ = textcodec.decode_text(data[:1 << 20])
     except (CorruptFile, UnsupportedVariant):
         return "txt"
-    stripped = text.lstrip("﻿ \t\r\n")
+    stripped = text.lstrip("\ufeff \t\r\n")
     if stripped[:1] == "[":
         return "json"
     lines = [ln for ln in text[:65536].splitlines() if ln.strip()][:20]

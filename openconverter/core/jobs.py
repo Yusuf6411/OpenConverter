@@ -61,6 +61,12 @@ class Job:
             }
 
 
+def _megapixels(info: dict):
+    if info.get("width") and info.get("height"):
+        return round(info["width"] * info["height"] / 1e6, 3)
+    return None
+
+
 def output_name(original_name: str, target: str) -> str:
     stem = PurePath(original_name or "converted").stem or "converted"
     return stem + REGISTRY.get(target).primary_extension
@@ -220,6 +226,7 @@ class JobManager:
             "output_size": res.get("size"), "duration_ms": res.get("duration_ms"), "status": state,
             "timestamp": job.finished, "notes": res.get("notes", []), "output_id": res.get("output_id"),
             "error_code": (error or {}).get("code"),
+            "megapixels": _megapixels(res.get("info") or {}),
         })
         self._emit(job, "state")
 

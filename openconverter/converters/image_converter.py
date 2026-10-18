@@ -174,4 +174,37 @@ def probe(data: bytes, fmt: str) -> dict:
         return {}
     if w <= 0 or h <= 0:
         return {}
-    return {"width": w, "height": h}
+    return {"width": w, "height": h, "may_have_alpha": _may_have_alpha(data, fmt)}
+
+
+def _may_have_alpha(data: bytes, fmt: str) -> bool:
+    """Best-effort header check used by the UI to decide whether to offer a
+    background colour (the conversion itself always uses the real pixels)."""
+    import struct
+    try:
+        if fmt == "png":
+            if data[25] in (4, 6):
+                return True
+            return b"tRNS" in data[33:data.find(b"IDAT")] if b"IDAT" in data else b"tRNS" in data
+        if fmt == "qoi":
+            return data[12] == 4
+        if fmt == "gif":
+            gce = b"\x21\xf9\x04"
+            return any(data[i + 3] & 1 for i in _find_all(data, gce) if i + 3 < len(data))
+        if fmt == "bmp":
+            hsize = struct.unpack_from("<I", data, 14)[0]
+            bpp = struct.unpack_from("<H", data, 28)[0] if hsize >= 40 else 0
+            return bpp == 32 and hsize >= 56
+        if fmt == "tga":
+            depth, desc = data[16], data[17]
+            return bool(desc & 0x0F) or depth == 32
+    except (IndexError, struct.error):
+        return False
+    return False
+
+
+def _find_all(data: bytes, needle: bytes):
+    i = data.find(needle)
+    while i >= 0:
+        yield i
+        i = data.find(needle, i + 1)

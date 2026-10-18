@@ -29,14 +29,14 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [x] 7. Text and table converters
 - [x] 8. Registry, detection, jobs, progress/cancel, storage, settings, history
 - [x] 9. HTTP server, API, security, multipart, SSE + integration tests
-- [ ] 10. Web UI
+- [x] 10. Web UI
 - [ ] 11. CLI convert / formats
 - [ ] 12. Robustness/fuzz suite, performance tuning
 - [ ] 13. Browser verification (§17), screenshots
 - [ ] 14. Docs, CHANGELOG, CI, verify_release.py; CI green
 - [ ] 15. Tag and release
 
-**Current milestone:** 10
+**Current milestone:** 11
 
 ## Decisions
 - Version single source: `openconverter/__init__.py`; pyproject reads it via setuptools `dynamic` attr; a test asserts it.
@@ -71,6 +71,9 @@ Then re-read this file and continue with the current milestone (spec §18).
 - Server: an error raised before/while reading a request body first drains up to 64 MB / 15 s of the unread body, so clients receive the JSON error instead of a TCP reset (seen on Windows for early 413s); the UI also checks max_upload_mb before uploading. Chunked request bodies are rejected (400). HTTP/0.9 requests get an HTTP/1.0 status line. Low-level errors (bad request line, 431) also return JSON with security headers.
 - Added GET /api/jobs (list of jobs known to this server process) so the UI can reconcile in-flight jobs after a reload; documented in docs/API.md.
 - SO_EXCLUSIVEADDRUSE on Windows and allow_reuse_address=False so a busy port fails with a clear message instead of silently sharing.
+- Web UI: uploads use XMLHttpRequest (one file at a time) for real upload progress; conversions use SSE with polling fallback and a 10 s SSE retry. Queue cards persist in localStorage and are reconciled on load with GET /api/jobs and /api/history. The UI sends only user-changed options; the server fills the rest from settings, and /api/formats shows those same defaults.
+- The background-colour option is shown only when the target flattens alpha and the upload's header suggests transparency (`may_have_alpha`, best effort); the conversion itself always uses the real pixels. Input (read) options sit in a collapsed "Input options" section.
+- Large-image (> 4 MP) time estimate = median(duration/megapixel) of this machine's finished conversions (same target preferred), from history.jsonl `megapixels`; with no history it says so instead of guessing.
 
 ## Performance log
 | Date | Operation | Input | Result |

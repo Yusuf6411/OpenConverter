@@ -54,7 +54,7 @@ def parse(text: str, delimiter: str, limits=DEFAULT_LIMITS, progress=NULL_PROGRE
     """Parse delimited text. Blank lines (outside quotes) are skipped."""
     if delimiter not in _END_FIELD:
         raise ValueError(f"unsupported delimiter {delimiter!r}")
-    if text.startswith("﻿"):
+    if text.startswith("\ufeff"):
         text = text[1:]
     end_field = _END_FIELD[delimiter].search
     rows = []

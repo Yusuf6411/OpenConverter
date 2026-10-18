@@ -7,7 +7,8 @@ from pathlib import Path
 from openconverter.config import atomic_write_bytes
 
 FIELDS = ("id", "job_id", "original_name", "output_name", "source_format", "target_format", "input_size",
-          "output_size", "duration_ms", "status", "timestamp", "notes", "output_id", "error_code")
+          "output_size", "duration_ms", "status", "timestamp", "notes", "output_id", "error_code",
+          "megapixels")
 
 
 class History:
