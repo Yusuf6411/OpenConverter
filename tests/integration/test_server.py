@@ -233,6 +233,11 @@ class LookupTests(ServerTestCase):
 
 
 class ConversionApiTests(ServerTestCase):
+    def finished_outputs(self):
+        # Ignore in-flight atomic-write temporaries (".tmp-*"): a job finishing
+        # at the moment of the snapshot writes one briefly.
+        return {p.name for p in self.srv.app.storage.outputs.iterdir() if not p.name.startswith(".tmp-")}
+
     def test_every_required_conversion_end_to_end(self):
         for src, rel in SOURCES.items():
             data = (FIXTURES / rel).read_bytes()
@@ -270,7 +275,7 @@ class ConversionApiTests(ServerTestCase):
         self.assertEqual(snap["error"]["code"], "corrupt_file")
 
     def test_sse_progress_monotonic(self):
-        status, body = self.srv.upload([("n.png", png.encode(noise(300, 200, "RGB"), compression_level=1))])
+        status, body = self.srv.upload([("n.png", png.encode(noise(640, 480, "RGB"), compression_level=1))])
         fid = body["files"][0]["file_id"]
         status, job, _ = self.srv.json("POST", "/api/jobs", {"file_id": fid, "target_format": "png",
                                                              "options": {"compression_level": 6}})
@@ -309,13 +314,13 @@ class ConversionApiTests(ServerTestCase):
                 break
             time.sleep(0.05)
         self.assertIn("queued", states)
-        before = set(self.srv.app.storage.outputs.iterdir())
+        before = self.finished_outputs()
         for j in jobs:
             status, snap, _ = self.srv.json("POST", f"/api/jobs/{j}/cancel")
             self.assertEqual(status, 200)
         for j in jobs:
             self.assertEqual(self.srv.wait(j)["state"], "cancelled")
-        self.assertEqual(set(self.srv.app.storage.outputs.iterdir()), before)
+        self.assertEqual(self.finished_outputs(), before)
         self.assertEqual(list(self.srv.app.storage.temp.glob("*.part")), [])
 
     def test_concurrent_jobs(self):
