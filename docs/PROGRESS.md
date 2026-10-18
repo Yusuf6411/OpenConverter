@@ -25,7 +25,7 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [x] 3. Own DEFLATE + perf measurements
 - [x] 4. PNG read/write
 - [x] 5. JPEG baseline decode/encode
-- [ ] 6. GIF decode, resize/thumbnail
+- [x] 6. GIF decode, resize/thumbnail
 - [ ] 7. Text and table converters
 - [ ] 8. Registry, detection, jobs, progress/cancel, storage, settings, history
 - [ ] 9. HTTP server, API, security, multipart, SSE + integration tests
@@ -36,7 +36,7 @@ Then re-read this file and continue with the current milestone (spec §18).
 - [ ] 14. Docs, CHANGELOG, CI, verify_release.py; CI green
 - [ ] 15. Tag and release
 
-**Current milestone:** 6
+**Current milestone:** 7
 
 ## Decisions
 - Version single source: `openconverter/__init__.py`; pyproject reads it via setuptools `dynamic` attr; a test asserts it.
@@ -58,6 +58,8 @@ Then re-read this file and continue with the current milestone (spec §18).
 - JPEG interop fixtures in tests/fixtures/jpeg were produced with the browser pane (Chromium/libjpeg-turbo): Chromium-encoded JPEGs with Chromium's decoded pixels, and our encoder's output with Chromium's decode. Our decoder matches within 4 levels.
 - JPEG encoder default subsampling: 4:2:0 for q < 90, 4:4:4 otherwise (noted in the result). Internal `colour_transform=False` writes Adobe RGB JPEGs for decoder tests only.
 - `.claude/` (local preview launch config) is git-ignored.
+- GIF: area outside the first frame is transparent (as browsers render it); out-of-palette indices (other than the transparent index) raise CorruptFile; LZW data that ends before the frame is full raises CorruptFile. A GIF fixture built by the test GIF writer was decoded by Chromium identically (stored with Chromium's pixels).
+- Thumbnails: integer-factor box reduction (ceil(longest/512)), so previews are <= 512 px on the long side, sometimes smaller; area-average resize only for extremely thin images.
 
 ## Performance log
 | Date | Operation | Input | Result |

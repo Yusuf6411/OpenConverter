@@ -371,6 +371,60 @@ def resize(img: Image, new_w: int, new_h: int, progress=None) -> Image:
     return Image(new_w, new_h, img.mode, img.bit_depth, data, dict(img.metadata))
 
 
+def box_reduce(img: Image, f: int, progress=None) -> Image:
+    """Downscale an 8-bit image by an integer factor ``f`` (area average).
+
+    Any remainder columns/rows (fewer than ``f``) at the right/bottom edge are
+    dropped. Uses slice arithmetic so the work stays in C loops.
+    """
+    if img.bit_depth != 8:
+        raise ValueError("box_reduce works on 8-bit images")
+    if f <= 1:
+        return img.copy()
+    n = img.channels
+    w2, h2 = img.width // f, img.height // f
+    if w2 == 0 or h2 == 0:
+        raise ValueError("image is smaller than the reduction factor")
+    src = bytes(img.pixels)
+    stride = img.width * n
+    span = w2 * f * n
+    step = f * n
+    ff = f * f
+    half = ff // 2
+    out = bytearray(w2 * h2 * n)
+    out_stride = w2 * n
+    for oy in range(h2):
+        sums = [[half] * w2 for _ in range(n)]
+        for dy in range(f):
+            off = (oy * f + dy) * stride
+            row = src[off:off + span]
+            for c in range(n):
+                acc = sums[c]
+                for k in range(f):
+                    acc = list(map(int.__add__, acc, row[k * n + c::step]))
+                sums[c] = acc
+        base = oy * out_stride
+        for c in range(n):
+            out[base + c:base + out_stride:n] = bytes([v // ff for v in sums[c]])
+        if progress is not None and (oy & 15) == 0:
+            progress.check_cancelled()
+    return Image(w2, h2, img.mode, 8, out, dict(img.metadata))
+
+
+def thumbnail(img: Image, max_side: int = 512, progress=None) -> Image:
+    """8-bit preview no larger than ``max_side`` on either axis."""
+    img = to_8bit(img)
+    longest = max(img.width, img.height)
+    if longest <= max_side:
+        return img
+    f = -(-longest // max_side)
+    if img.width // f == 0 or img.height // f == 0:
+        # Extremely thin image: fall back to the exact area-average resize.
+        tw, th = thumbnail_size(img.width, img.height, max_side)
+        return resize(img, tw, th, progress)
+    return box_reduce(img, f, progress)
+
+
 def thumbnail_size(width: int, height: int, max_side: int) -> tuple[int, int]:
     if width <= max_side and height <= max_side:
         return width, height
