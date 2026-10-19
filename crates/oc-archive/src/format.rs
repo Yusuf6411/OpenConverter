@@ -229,6 +229,7 @@ pub struct WriteOpts {
     pub zip_method: Option<zip::Method>,
     pub password: Option<String>,
     pub zip_encryption: Option<zip::Encryption>,
+    pub sevenz_method: Option<crate::sevenz::Method>,
     pub comment: Option<String>,
     /// File name for a single-file stream (stored in gzip's header).
     pub single_name: Option<String>,

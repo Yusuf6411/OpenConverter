@@ -42,6 +42,14 @@ fn main() {
                     "xz" => oc_archive::zip::Method::Xz,
                     _ => oc_archive::zip::Method::Auto,
                 }),
+                sevenz_method: std::env::var("OC_7Z_METHOD").ok().map(|m| match m.as_str() {
+                    "lzma" => oc_archive::sevenz::Method::Lzma,
+                    "bzip2" => oc_archive::sevenz::Method::Bzip2,
+                    "deflate" => oc_archive::sevenz::Method::Deflate,
+                    "zstd" => oc_archive::sevenz::Method::Zstd,
+                    "copy" => oc_archive::sevenz::Method::Copy,
+                    _ => oc_archive::sevenz::Method::Lzma2,
+                }),
                 zip_encryption: std::env::var("OC_ZIP_ENC").ok().map(|m| match m.as_str() {
                     "zipcrypto" => oc_archive::zip::Encryption::ZipCrypto,
                     "aes128" => oc_archive::zip::Encryption::Aes128,
