@@ -8,6 +8,7 @@
 pub mod anim;
 pub mod bmp;
 pub mod gif;
+pub mod icns;
 pub mod ico;
 pub mod image;
 pub mod jpeg;

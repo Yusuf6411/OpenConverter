@@ -163,3 +163,9 @@ name = "animation_roundtrip"
 path = "fuzz_targets/animation_roundtrip.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "icns"
+path = "fuzz_targets/icns.rs"
+test = false
+doc = false

@@ -198,7 +198,7 @@ pub struct EncodeOptions {
 }
 
 /// Fit `img` inside a `size` x `size` box, centred on transparency.
-fn fit_square(img: &Image, size: u32) -> Image {
+pub(crate) fn fit_square(img: &Image, size: u32) -> Image {
     let scale = f64::from(size) / f64::from(img.width.max(img.height));
     let nw = ((f64::from(img.width) * scale).round() as u32).clamp(1, size);
     let nh = ((f64::from(img.height) * scale).round() as u32).clamp(1, size);

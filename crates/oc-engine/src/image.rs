@@ -10,7 +10,7 @@ use oc_core::{
     Ownership, Progress, Result, Severity, Sniffer,
 };
 use oc_image::anim::{self, Animation};
-use oc_image::{bmp, gif, ico, jpeg, netpbm, ops, png, qoi, tga, tiff, webp, Image};
+use oc_image::{bmp, gif, icns, ico, jpeg, netpbm, ops, png, qoi, tga, tiff, webp, Image};
 
 pub const PNG: FormatId = FormatId("png");
 pub const BMP: FormatId = FormatId("bmp");
@@ -20,12 +20,13 @@ pub const PNM: FormatId = FormatId("pnm");
 pub const GIF: FormatId = FormatId("gif");
 pub const JPEG: FormatId = FormatId("jpeg");
 pub const ICO: FormatId = FormatId("ico");
+pub const ICNS: FormatId = FormatId("icns");
 pub const TIFF: FormatId = FormatId("tiff");
 pub const WEBP: FormatId = FormatId("webp");
 /// Internal hub; never shown to users.
 pub const IMAGE_IR: FormatId = FormatId("image-ir");
 
-pub const FORMATS: [FormatId; 10] = [PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, TIFF, WEBP];
+pub const FORMATS: [FormatId; 11] = [PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, TIFF, WEBP];
 
 pub fn is_image(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -264,6 +265,28 @@ pub fn register(registry: &mut Registry) {
             "Microsoft ICO / CUR",
         ),
         describe(
+            ICNS,
+            "ICNS",
+            &["icns"],
+            &["image/icns"],
+            vec![Sniffer {
+                offset: 0,
+                magic: b"icns",
+                confidence: 100,
+            }],
+            false,
+            schema(vec![OptionSpec {
+                key: "sizes",
+                label: "Icon sizes",
+                help: "Comma-separated square sizes from 16, 32, 64, 128, 256, 512, 1024; empty writes the standard sizes that fit the image",
+                i18n_key: "opt.icns.sizes",
+                kind: OptionKind::Text {
+                    default: String::new(),
+                },
+            }]),
+            "Apple ICNS",
+        ),
+        describe(
             TIFF,
             "TIFF",
             &["tif", "tiff"],
@@ -480,6 +503,7 @@ fn decode_description(name: &str) -> &'static str {
         "TIFF" => "Decode TIFF",
         "WebP" => "Decode WebP",
         "ICO / CUR" => "Decode ICO",
+        "ICNS" => "Decode ICNS",
         _ => "Decode Netpbm",
     }
 }
@@ -495,6 +519,7 @@ fn encode_description(name: &str) -> &'static str {
         "TIFF" => "Encode TIFF",
         "WebP" => "Encode WebP",
         "ICO / CUR" => "Encode ICO",
+        "ICNS" => "Encode ICNS",
         _ => "Encode Netpbm",
     }
 }
@@ -515,6 +540,7 @@ pub fn decode(
         TIFF => tiff::decode(data, limits, progress),
         WEBP => webp::decode(data, limits, progress),
         ICO => ico::decode(data, limits, progress),
+        ICNS => icns::decode(data, limits, progress),
         PNM => netpbm::decode(data, limits),
         other => Err(Error::new(
             ErrorCode::UnsupportedFormat,
@@ -602,6 +628,19 @@ pub fn encode_animation(
         format!("wrote an animation of {} frames", anim.frames.len()),
     ));
     Ok((bytes, notes))
+}
+
+fn parse_sizes(opts: &Options) -> Result<Vec<u32>> {
+    opts.text("sizes")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            s.parse::<u32>()
+                .map_err(|_| Error::invalid_option("sizes", format!("'{s}' is not a size")))
+        })
+        .collect()
 }
 
 fn webp_options(opts: &Options) -> webp::EncodeOptions {
@@ -698,26 +737,19 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
             },
         )?,
         WEBP => webp::encode(img, &webp_options(opts))?,
-        ICO => {
-            let sizes = opts
-                .text("sizes")
-                .unwrap_or_default()
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(|s| {
-                    s.parse::<u32>()
-                        .map_err(|_| Error::invalid_option("sizes", format!("'{s}' is not a size")))
-                })
-                .collect::<Result<Vec<u32>>>()?;
-            ico::encode(
-                img,
-                &ico::EncodeOptions {
-                    sizes,
-                    cursor: ext == "cur",
-                },
-            )?
-        }
+        ICO => ico::encode(
+            img,
+            &ico::EncodeOptions {
+                sizes: parse_sizes(opts)?,
+                cursor: ext == "cur",
+            },
+        )?,
+        ICNS => icns::encode(
+            img,
+            &icns::EncodeOptions {
+                sizes: parse_sizes(opts)?,
+            },
+        )?,
         JPEG => {
             let quality = opts.int("quality").unwrap_or(85).clamp(1, 100) as u8;
             let (bytes, mut n) = jpeg::encode(
