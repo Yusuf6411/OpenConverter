@@ -14,6 +14,8 @@ path = "src/main.rs"
 [dependencies]
 oc-core = { path = "../oc-core" }
 oc-engine = { path = "../oc-engine" }
+oc-server = { path = "../oc-server" }
 
 [lints]
 workspace = true
+

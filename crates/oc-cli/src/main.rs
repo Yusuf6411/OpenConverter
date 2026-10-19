@@ -18,7 +18,7 @@ use std::time::Duration;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  openconverter convert <input> <output> [--overwrite] [--no-isolation] [--timeout SECONDS] [--max-memory MB] [--set key=value]...\n  openconverter formats [--json]\n  openconverter --version"
+        "usage:\n  openconverter serve [--host H] [--port N] [--allow-remote] [--no-browser] [--data-dir DIR]\n  openconverter convert <input> <output> [--overwrite] [--no-isolation] [--timeout SECONDS] [--max-memory MB] [--set key=value]...\n  openconverter formats [--json]\n  openconverter --version"
     );
     ExitCode::from(2)
 }
@@ -173,6 +173,80 @@ fn convert(engine: &Engine, args: &[String], worker: bool) -> ExitCode {
     }
 }
 
+fn serve(args: &[String]) -> ExitCode {
+    let Ok(exe) = std::env::current_exe() else {
+        eprintln!("error: cannot find this executable");
+        return ExitCode::from(1);
+    };
+    let mut cfg = oc_server::Config::new(exe);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--host" => match it.next() {
+                Some(h) => cfg.host = h.clone(),
+                None => return usage(),
+            },
+            "--port" => match it.next().and_then(|p| p.parse().ok()) {
+                Some(p) => cfg.port = p,
+                None => return usage(),
+            },
+            "--data-dir" => match it.next() {
+                Some(d) => cfg.data_dir = d.into(),
+                None => return usage(),
+            },
+            "--allow-remote" => cfg.allow_remote = true,
+            "--no-browser" => cfg.open_browser = false,
+            _ => return usage(),
+        }
+    }
+    match oc_server::run(cfg) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// Worker side of the server's look at an upload: `probe <file> <format>` prints
+/// `width`, `height` and `alpha` lines; `thumb <file> <format> <out.png>` writes a preview.
+fn worker_inspect(engine: &Engine, args: &[String]) -> ExitCode {
+    let (Some(kind), Some(path), Some(format)) = (args.first(), args.get(1), args.get(2)) else {
+        return usage();
+    };
+    let Some(from) = engine.format_by_name(format) else {
+        return ExitCode::from(ErrorCode::UnsupportedFormat.exit_code());
+    };
+    let data = match std::fs::read(path) {
+        Ok(d) => d,
+        Err(_) => return ExitCode::from(ErrorCode::IoError.exit_code()),
+    };
+    match kind.as_str() {
+        "probe" => match engine.probe(from, &data, &NoProgress) {
+            Ok(p) => {
+                println!("width={}", p.width.unwrap_or(0));
+                println!("height={}", p.height.unwrap_or(0));
+                println!("alpha={}", p.alpha);
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(&e),
+        },
+        "thumb" => {
+            let Some(out) = args.get(3) else {
+                return usage();
+            };
+            match engine
+                .thumbnail(from, &data, 512, &NoProgress)
+                .and_then(|png| std::fs::write(out, png).map_err(Into::into))
+            {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => fail(&e),
+            }
+        }
+        _ => usage(),
+    }
+}
+
 /// Deliberately misbehave; used only by the isolation tests.
 fn selftest(what: &str) -> ExitCode {
     match what {
@@ -205,10 +279,14 @@ fn main() -> ExitCode {
             println!("openconverter {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
+        Some("serve") => serve(args.get(1..).unwrap_or(&[])),
         Some("formats") => formats(&engine, args.iter().any(|a| a == "--json")),
         Some("convert") => convert(&engine, args.get(1..).unwrap_or(&[]), false),
         Some("__worker") if args.get(1).map(String::as_str) == Some("convert") => {
             convert(&engine, args.get(2..).unwrap_or(&[]), true)
+        }
+        Some("__worker") if matches!(args.get(1).map(String::as_str), Some("probe" | "thumb")) => {
+            worker_inspect(&engine, args.get(1..).unwrap_or(&[]))
         }
         Some("__selftest") => selftest(args.get(1).map_or("", String::as_str)),
         _ => usage(),

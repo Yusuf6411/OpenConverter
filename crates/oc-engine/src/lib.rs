@@ -20,6 +20,14 @@ use std::path::{Path, PathBuf};
 
 pub const TXT: FormatId = FormatId("txt");
 
+/// What a quick look at an upload found out.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Probe {
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub alpha: bool,
+}
+
 pub struct Engine {
     registry: Registry,
     pub limits: Limits,
@@ -338,6 +346,60 @@ impl Engine {
             bytes_out: out.len() as u64,
             notes,
         })
+    }
+
+    /// The format of an uploaded file: images by content, anything else by the extension of
+    /// `name`.
+    pub fn detect(&self, data: &[u8], name: &Path) -> Option<FormatId> {
+        self.detect_image(data)
+            .or_else(|| self.format_for_path(name).filter(|f| !image::is_image(*f)))
+    }
+
+    /// Formats a file of format `from` can be converted to (same format included when it
+    /// has options that make rewriting meaningful).
+    pub fn targets(&self, from: FormatId) -> Vec<FormatId> {
+        self.registry_formats()
+            .filter(|f| f.capabilities.write)
+            .filter(|f| self.registry.plan(from, f.id, false).is_ok())
+            .map(|f| f.id)
+            .collect()
+    }
+
+    /// Size and transparency of an image; `None` for non-images. Decodes the file, so run
+    /// it in a worker for untrusted input.
+    pub fn probe(&self, from: FormatId, data: &[u8], progress: &dyn Progress) -> Result<Probe> {
+        if !image::is_image(from) {
+            return Ok(Probe::default());
+        }
+        let (img, _) = image::decode(from, data, &self.limits, progress)?;
+        Ok(Probe {
+            width: Some(img.width),
+            height: Some(img.height),
+            alpha: img.layout.has_alpha(),
+        })
+    }
+
+    /// A PNG preview of at most `max` pixels on a side.
+    pub fn thumbnail(
+        &self,
+        from: FormatId,
+        data: &[u8],
+        max: u32,
+        progress: &dyn Progress,
+    ) -> Result<Vec<u8>> {
+        use oc_image::ops;
+        let (img, _) = image::decode(from, data, &self.limits, progress)?;
+        let (w, h) = (img.width.max(1), img.height.max(1));
+        let img = if w.max(h) > max {
+            let scale = f64::from(max) / f64::from(w.max(h));
+            let nw = ((f64::from(w) * scale).round() as u32).max(1);
+            let nh = ((f64::from(h) * scale).round() as u32).max(1);
+            ops::resize(&img, nw, nh, ops::Filter::Bilinear)
+        } else {
+            img
+        };
+        let (img, _) = ops::convert_depth(&img, oc_image::Depth::Eight);
+        Ok(oc_image::png::encode(&img, &oc_image::png::EncodeOptions::default()).0)
     }
 
     /// Identify an image by its leading bytes among the registered image formats.

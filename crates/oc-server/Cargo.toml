@@ -9,3 +9,14 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+axum = { version = "0.8.9", features = ["http1", "json", "matched-path", "original-uri", "query", "tokio"], default-features = false }
+getrandom = "0.4.3"
+oc-core = { path = "../oc-core" }
+oc-engine = { path = "../oc-engine" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+tokio = { version = "1.54.0", features = ["rt-multi-thread", "macros", "net", "fs", "io-util", "sync", "time", "signal"] }
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+tokio-util = { version = "0.7.20", features = ["io"] }
