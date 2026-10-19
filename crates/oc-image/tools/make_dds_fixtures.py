@@ -55,3 +55,34 @@ for (w, h) in ((16, 12), (13, 9)):
             dst = os.path.join(out, f"im_{fmt}_{sfx}.dds")
             subprocess.run(["convert", src, "-define", f"dds:compression={fmt}", dst], check=True)
             record(f"im_{fmt}_{sfx}.dds")
+
+
+# BC7: no encoder is available, so random blocks of every mode stand in. Pillow's decoder gives
+# the expected pixels. Each file is a row of 4x4 blocks.
+import random
+import struct
+
+rng = random.Random(7)
+
+
+def bc7_block(mode):
+    v = rng.getrandbits(128)
+    v &= ~((1 << (mode + 1)) - 1)
+    v |= 1 << mode
+    return v.to_bytes(16, "little")
+
+
+def write_bc7(name, modes):
+    blocks = [bc7_block(m) for m in modes]
+    n = len(blocks)
+    hdr = b"DDS " + struct.pack("<7I", 124, 0x1007 | 0x80000, 4, 4 * n, 16 * n, 0, 1) + b"\0" * 44
+    hdr += struct.pack("<8I", 32, 4, int.from_bytes(b"DX10", "little"), 0, 0, 0, 0, 0)
+    hdr += struct.pack("<5I", 0x1000, 0, 0, 0, 0)
+    hdr += struct.pack("<5I", 98, 3, 0, 1, 0)
+    open(os.path.join(out, name), "wb").write(hdr + b"".join(blocks))
+    record(name)
+
+
+for mode in range(8):
+    write_bc7(f"bc7_mode{mode}.dds", [mode] * 96)
+write_bc7("bc7_mixed.dds", list(range(8)) * 12)

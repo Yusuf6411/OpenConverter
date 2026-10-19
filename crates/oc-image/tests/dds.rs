@@ -38,5 +38,5 @@ fn dds_matches_pillow() {
         assert_eq!(bad, 0, "{}", p.display());
         n += 1;
     }
-    assert!(n >= 24, "found {n} fixtures");
+    assert!(n >= 33, "found {n} fixtures");
 }

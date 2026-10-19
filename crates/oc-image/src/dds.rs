@@ -2,8 +2,8 @@
 //!
 //! Read: the first surface (no mipmaps, cube faces or array slices beyond it) of uncompressed
 //! RGB(A), luminance and alpha formats with any channel masks up to 32 bits, and BC1-BC5
-//! (DXT1-5, ATI1/2) both from the classic header and from the DX10 extension. BC4 and BC5
-//! become gray and red-green images. Not read: BC6H, BC7, signed BC4/BC5, floating-point and
+//! (DXT1-5, ATI1/2) and BC7, both from the classic header and from the DX10 extension. BC4 and BC5
+//! become gray and red-green images. Not read: BC6H, signed BC4/BC5, floating-point and
 //! 16-bit formats, palettes and volume textures beyond their first slice.
 //! Write: uncompressed 32-bit BGRA, or BC1 / BC3 with a principal-axis endpoint fit.
 // Block and header offsets are fixed; every caller checks the lengths first (the header is
@@ -36,6 +36,7 @@ enum Block {
     Bc3,
     Bc4,
     Bc5,
+    Bc7,
 }
 
 impl Block {
@@ -88,7 +89,7 @@ fn dxgi_format(code: u32) -> Result<Format> {
         },
         65 => masked(8, [0, 0, 0, 0xFF]),
         94 | 95 => return Err(unsupported("BC6H")),
-        98 | 99 => return Err(unsupported("BC7")),
+        98 | 99 => Format::Compressed(Block::Bc7),
         81 | 84 => return Err(unsupported("signed BC4/BC5")),
         other => return Err(unsupported(&format!("DXGI {other}"))),
     })
@@ -201,6 +202,7 @@ fn decode_block(kind: Block, block: &[u8]) -> [[u8; 4]; 16] {
                 *p = [v, v, v, 255];
             }
         }
+        Block::Bc7 => px = crate::bc7::decode_block(block),
         Block::Bc5 => {
             let (r, g) = (decode_channel(&block[..8]), decode_channel(&block[8..16]));
             for (i, p) in px.iter_mut().enumerate() {
