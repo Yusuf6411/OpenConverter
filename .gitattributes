@@ -20,3 +20,10 @@ tests/fixtures/** binary
 *.rs text eol=lf
 *.toml text eol=lf
 crates/oc-compress/tests/data/** binary
+# Test data is compared byte for byte; a pixel value of 10 must not become CRLF on Windows.
+crates/*/tests/data/** binary
+fuzz/seeds/** binary
+*.rgba binary
+*.webp binary
+*.yuv binary
+*.sum binary

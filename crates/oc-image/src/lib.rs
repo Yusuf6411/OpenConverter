@@ -5,6 +5,7 @@
 //! the plan in docs/MASTER_PROMPT.md §11).
 #![forbid(unsafe_code)]
 
+pub mod anim;
 pub mod bmp;
 pub mod gif;
 pub mod ico;

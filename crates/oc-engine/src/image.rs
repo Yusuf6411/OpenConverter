@@ -9,6 +9,7 @@ use oc_core::{
     Capabilities, Category, Error, ErrorCode, FormatDescriptor, FormatId, Limits, Note, Notes,
     Ownership, Progress, Result, Severity, Sniffer,
 };
+use oc_image::anim::{self, Animation};
 use oc_image::{bmp, gif, ico, jpeg, netpbm, ops, png, qoi, tga, tiff, webp, Image};
 
 pub const PNG: FormatId = FormatId("png");
@@ -73,6 +74,16 @@ fn common_options() -> Vec<OptionSpec> {
             kind: OptionKind::Enum {
                 choices: vec!["0", "90", "180", "270"],
                 default: "0",
+            },
+        },
+        OptionSpec {
+            key: "frames",
+            label: "Animation frames",
+            help: "For animated input: keep every frame when the output can animate, or only the first",
+            i18n_key: "opt.image.frames",
+            kind: OptionKind::Enum {
+                choices: vec!["all", "first"],
+                default: "all",
             },
         },
         OptionSpec {
@@ -155,8 +166,8 @@ pub fn register(registry: &mut Registry) {
         describe(
             PNG,
             "PNG",
-            &["png"],
-            &["image/png"],
+            &["png", "apng"],
+            &["image/png", "image/apng"],
             vec![Sniffer {
                 offset: 0,
                 magic: b"\x89PNG\r\n\x1a\n",
@@ -512,6 +523,106 @@ pub fn decode(
     }
 }
 
+/// Whether `fmt` can store an animation. PNG does so only as APNG, picked by the `.apng`
+/// extension, because a plain `.png` is expected to open as a still everywhere.
+pub fn writes_animation(fmt: FormatId, ext: &str) -> bool {
+    matches!(fmt, GIF | WEBP) || (fmt == PNG && ext == "apng")
+}
+
+/// The frames of an animated GIF, WebP or PNG; `None` for other formats and for files with a
+/// single image.
+pub fn decode_animation(
+    fmt: FormatId,
+    data: &[u8],
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<Option<(Animation, Notes)>> {
+    let (anim, notes) = match fmt {
+        GIF => gif::decode_animation(data, limits)?,
+        WEBP => webp::decode_animation(data, limits, progress)?,
+        PNG if png::is_animated(data) => png::decode_animation(data, limits, progress)?,
+        _ => return Ok(None),
+    };
+    Ok((anim.frames.len() > 1).then_some((anim, notes)))
+}
+
+/// Applies the common transforms to every frame, so the frames stay the same size.
+pub fn transform_animation(
+    anim: Animation,
+    opts: &Options,
+    limits: &Limits,
+) -> Result<(Animation, Notes)> {
+    let mut notes = Notes::new();
+    let mut out = Animation::new(anim.width, anim.height);
+    out.loops = anim.loops;
+    out.metadata = anim.metadata;
+    for (i, f) in anim.frames.into_iter().enumerate() {
+        let (image, n) = transform(f.image, opts, limits)?;
+        if i == 0 {
+            notes.extend(n);
+            out.width = image.width;
+            out.height = image.height;
+        }
+        limits.check_alloc(
+            u64::from(image.width) * u64::from(image.height) * 4 * (out.frames.len() as u64 + 1),
+        )?;
+        out.frames.push(anim::Frame {
+            image,
+            delay_ms: f.delay_ms,
+        });
+    }
+    Ok((out, notes))
+}
+
+pub fn encode_animation(
+    fmt: FormatId,
+    anim: &Animation,
+    opts: &Options,
+) -> Result<(Vec<u8>, Notes)> {
+    let (bytes, mut notes) = match fmt {
+        GIF => gif::encode_animation(
+            anim,
+            &gif::EncodeOptions {
+                dither: opts.bool("dither").unwrap_or(true),
+                interlace: false,
+            },
+        )?,
+        WEBP => webp::encode_animation(anim, &webp_options(opts))?,
+        PNG => png::encode_animation(anim, &png_options(opts))?,
+        other => {
+            return Err(Error::new(
+                ErrorCode::UnsupportedFormat,
+                format!("{} cannot store an animation", other.0),
+            ))
+        }
+    };
+    notes.push(Note::new(
+        Severity::Info,
+        "image.animation",
+        format!("wrote an animation of {} frames", anim.frames.len()),
+    ));
+    Ok((bytes, notes))
+}
+
+fn webp_options(opts: &Options) -> webp::EncodeOptions {
+    webp::EncodeOptions {
+        effort: opts.int("effort").unwrap_or(4).clamp(0, 6) as u8,
+        clean_transparent: opts.bool("clean_transparent").unwrap_or(false),
+        quality: if opts.bool("lossless").unwrap_or(true) {
+            None
+        } else {
+            Some(opts.int("quality").unwrap_or(75).clamp(0, 100) as f32)
+        },
+    }
+}
+
+fn png_options(opts: &Options) -> png::EncodeOptions {
+    png::EncodeOptions {
+        level: opts.int("level").unwrap_or(6).clamp(0, 9) as u32,
+        adaptive_filter: opts.bool("adaptive_filter").unwrap_or(true),
+    }
+}
+
 /// Orientation and size changes requested through the common options.
 pub fn transform(img: Image, opts: &Options, limits: &Limits) -> Result<(Image, Notes)> {
     let mut notes = Notes::new();
@@ -565,13 +676,7 @@ pub fn transform(img: Image, opts: &Options, limits: &Limits) -> Result<(Image, 
 pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(Vec<u8>, Notes)> {
     let [br, bg, bb, _] = opts.color("background").unwrap_or([255, 255, 255, 255]);
     let (bytes, mut notes) = match fmt {
-        PNG => png::encode(
-            img,
-            &png::EncodeOptions {
-                level: opts.int("level").unwrap_or(6).clamp(0, 9) as u32,
-                adaptive_filter: opts.bool("adaptive_filter").unwrap_or(true),
-            },
-        ),
+        PNG => png::encode(img, &png_options(opts)),
         BMP => bmp::encode(img),
         TGA => tga::encode(
             img,
@@ -592,18 +697,7 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
                 predictor: opts.bool("predictor").unwrap_or(true),
             },
         )?,
-        WEBP => webp::encode(
-            img,
-            &webp::EncodeOptions {
-                effort: opts.int("effort").unwrap_or(4).clamp(0, 6) as u8,
-                clean_transparent: opts.bool("clean_transparent").unwrap_or(false),
-                quality: if opts.bool("lossless").unwrap_or(true) {
-                    None
-                } else {
-                    Some(opts.int("quality").unwrap_or(75).clamp(0, 100) as f32)
-                },
-            },
-        )?,
+        WEBP => webp::encode(img, &webp_options(opts))?,
         ICO => {
             let sizes = opts
                 .text("sizes")

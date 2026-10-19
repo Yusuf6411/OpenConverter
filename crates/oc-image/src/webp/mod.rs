@@ -1,14 +1,15 @@
 //! WebP: RIFF container, the lossless (VP8L) codec and lossy (VP8) key frames.
 //!
-//! Animation is not supported yet and fails with a typed error.
+//! Animation (ANIM/ANMF) is read and written through `decode_animation` / `encode_animation`.
 mod lossy;
 mod prefix;
 mod vp8l;
 mod vp8l_enc;
 
+use crate::anim::{self, Animation};
 use crate::image::{Depth, Image, Layout};
 use crate::ops;
-use oc_core::{Error, ErrorCode, Limits, Notes, Progress, Result};
+use oc_core::{Error, ErrorCode, Limits, Note, Notes, Progress, Result, Severity};
 
 pub fn sniff(data: &[u8]) -> bool {
     matches!(
@@ -32,18 +33,23 @@ fn chunks(data: &[u8]) -> Result<Vec<Chunk<'_>>> {
         .map_or(0, u32::from_le_bytes) as usize;
     // The RIFF size covers everything after the first 8 bytes; tolerate trailing junk.
     let end = declared.saturating_add(8).min(data.len()).max(12);
-    let mut pos = 12;
+    chunks_in(data.get(12..end).unwrap_or(&[]))
+}
+
+/// Splits a run of RIFF chunks.
+fn chunks_in(buf: &[u8]) -> Result<Vec<Chunk<'_>>> {
+    let mut pos = 0;
     let mut out = Vec::new();
-    while pos + 8 <= end {
-        let tag = data
+    while pos + 8 <= buf.len() {
+        let tag = buf
             .get(pos..pos + 4)
             .and_then(|b| <[u8; 4]>::try_from(b).ok())
             .ok_or_else(|| Error::truncated("WebP chunk header"))?;
-        let size = data
+        let size = buf
             .get(pos + 4..pos + 8)
             .and_then(|b| <[u8; 4]>::try_from(b).ok())
             .map_or(0, u32::from_le_bytes) as usize;
-        let body = data
+        let body = buf
             .get(pos + 8..pos + 8 + size)
             .ok_or_else(|| Error::truncated("WebP chunk data").at(pos as u64))?;
         out.push(Chunk { tag, body });
@@ -52,48 +58,17 @@ fn chunks(data: &[u8]) -> Result<Vec<Chunk<'_>>> {
     Ok(out)
 }
 
-pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(Image, Notes)> {
-    let notes = Notes::new();
-    let list = chunks(data)?;
-    let mut vp8x_alpha = false;
-    let mut canvas: Option<(u32, u32)> = None;
-    let mut icc: Option<Vec<u8>> = None;
-    // The first image chunk decides between the lossless and the lossy codec.
-    let mut image: Option<(bool, &[u8])> = None;
-    let mut alph: Option<&[u8]> = None;
-    for c in &list {
-        match &c.tag {
-            b"VP8X" => {
-                let flags = c.body.first().copied().unwrap_or(0);
-                if flags & 0x02 != 0 {
-                    return Err(Error::new(
-                        ErrorCode::UnsupportedVariant,
-                        "animated WebP is not supported yet",
-                    ));
-                }
-                vp8x_alpha = flags & 0x10 != 0;
-                let le24 = |i: usize| -> u32 {
-                    (0..3).fold(0u32, |a, k| {
-                        a | (u32::from(c.body.get(i + k).copied().unwrap_or(0)) << (8 * k))
-                    })
-                };
-                canvas = Some((le24(4) + 1, le24(7) + 1));
-            }
-            b"ICCP" => icc = Some(c.body.to_vec()),
-            b"VP8L" if image.is_none() => image = Some((true, c.body)),
-            b"VP8 " if image.is_none() => image = Some((false, c.body)),
-            b"ALPH" if alph.is_none() => alph = Some(c.body),
-            b"ANMF" | b"ANIM" => {
-                return Err(Error::new(
-                    ErrorCode::UnsupportedVariant,
-                    "animated WebP is not supported yet",
-                ));
-            }
-            _ => {}
-        }
-    }
-    let (is_lossless, body) = image.ok_or_else(|| Error::corrupt("WebP file has no image data"))?;
-    let mut img = if is_lossless {
+/// Decodes one VP8L or VP8 (+ALPH) bitstream into an image.
+fn decode_bitstream(
+    is_lossless: bool,
+    body: &[u8],
+    alph: Option<&[u8]>,
+    vp8x_alpha: bool,
+    canvas: Option<(u32, u32)>,
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<Image> {
+    let img = if is_lossless {
         let d = vp8l::decode(body, limits, progress)?;
         check_canvas(canvas, d.width, d.height)?;
         let alpha = d.has_alpha_hint || vp8x_alpha;
@@ -139,8 +114,172 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
             Image::new(w, h, Layout::Rgb, Depth::Eight, rgb)?
         }
     };
+    Ok(img)
+}
+
+pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(Image, Notes)> {
+    let mut notes = Notes::new();
+    let list = chunks(data)?;
+    if is_animated(&list) {
+        let (anim, n) = decode_animation_inner(&list, limits, progress, true)?;
+        notes.extend(n);
+        notes.push(Note::new(
+            Severity::Warning,
+            "webp.animation_first_frame",
+            "the file is animated; only the first frame was read",
+        ));
+        let img = anim
+            .first_image()
+            .ok_or_else(|| Error::corrupt("animated WebP has no frames"))?;
+        return Ok((img, notes));
+    }
+    Ok((decode_still(&list, limits, progress)?, notes))
+}
+
+fn is_animated(list: &[Chunk<'_>]) -> bool {
+    list.iter()
+        .find(|c| &c.tag == b"VP8X")
+        .is_some_and(|c| c.body.first().is_some_and(|f| f & 0x02 != 0))
+}
+
+fn le24(b: &[u8], i: usize) -> u32 {
+    (0..3).fold(0u32, |a, k| {
+        a | (u32::from(b.get(i + k).copied().unwrap_or(0)) << (8 * k))
+    })
+}
+
+fn vp8x_canvas(body: &[u8]) -> (u32, u32) {
+    (le24(body, 4) + 1, le24(body, 7) + 1)
+}
+
+/// Every frame of an animated WebP composited onto the canvas. A file that is not animated
+/// yields its single image as one frame.
+pub fn decode_animation(
+    data: &[u8],
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<(Animation, Notes)> {
+    let list = chunks(data)?;
+    decode_animation_inner(&list, limits, progress, false)
+}
+
+fn decode_animation_inner(
+    list: &[Chunk<'_>],
+    limits: &Limits,
+    progress: &dyn Progress,
+    first_only: bool,
+) -> Result<(Animation, Notes)> {
+    let notes = Notes::new();
+    if !is_animated(list) {
+        let img = decode_still(list, limits, progress)?;
+        let mut a = Animation::new(img.width, img.height);
+        a.metadata = img.metadata.clone();
+        a.loops = 1;
+        a.frames.push(anim::Frame {
+            image: ops_rgba(&img),
+            delay_ms: 0,
+        });
+        return Ok((a, notes));
+    }
+    let (w, h) = list
+        .iter()
+        .find(|c| &c.tag == b"VP8X")
+        .map_or((0, 0), |c| vp8x_canvas(c.body));
+    limits.check_pixels(w, h)?;
+    let mut a = Animation::new(w, h);
+    // The background colour is only a hint; players show the animation on transparency.
+    a.loops = list
+        .iter()
+        .find(|c| &c.tag == b"ANIM")
+        .and_then(|c| c.body.get(4..6))
+        .and_then(|b| <[u8; 2]>::try_from(b).ok())
+        .map_or(0, |b| u32::from(u16::from_le_bytes(b)));
+    a.metadata.icc_profile = list
+        .iter()
+        .find(|c| &c.tag == b"ICCP")
+        .map(|c| c.body.to_vec());
+    let mut canvas = anim::Compositor::new(w, h);
+    for c in list.iter().filter(|c| &c.tag == b"ANMF") {
+        if c.body.len() < 16 {
+            return Err(Error::truncated("WebP frame header"));
+        }
+        let (x, y) = (le24(c.body, 0) as usize * 2, le24(c.body, 3) as usize * 2);
+        let (fw, fh) = (le24(c.body, 6) + 1, le24(c.body, 9) + 1);
+        let delay_ms = le24(c.body, 12);
+        let flags = c.body.get(15).copied().unwrap_or(0);
+        if x as u64 + u64::from(fw) > u64::from(w) || y as u64 + u64::from(fh) > u64::from(h) {
+            return Err(Error::corrupt("WebP frame lies outside the canvas"));
+        }
+        anim::check_frame(limits, w, h, a.frames.len())?;
+        let inner = chunks_in(c.body.get(16..).unwrap_or(&[]))?;
+        let img = decode_still(&inner, limits, progress)?;
+        if (img.width, img.height) != (fw, fh) {
+            return Err(Error::corrupt("WebP frame size differs from its header"));
+        }
+        let img = ops_rgba(&img);
+        let dispose = if flags & 1 != 0 {
+            anim::Dispose::Background
+        } else {
+            anim::Dispose::Keep
+        };
+        let shown = canvas
+            .draw(
+                (x, y, fw as usize, fh as usize),
+                &img.data,
+                flags & 2 == 0,
+                dispose,
+            )
+            .to_vec();
+        a.frames.push(anim::Frame {
+            image: anim::canvas_image(w, h, shown)?,
+            delay_ms,
+        });
+        if first_only {
+            break;
+        }
+    }
+    if a.frames.is_empty() {
+        return Err(Error::corrupt("animated WebP has no frames"));
+    }
+    Ok((a, notes))
+}
+
+fn ops_rgba(img: &Image) -> Image {
+    ops::convert_layout(img, Layout::Rgba, [0, 0, 0]).0
+}
+
+/// Decodes the first image among the chunks.
+fn decode_still(list: &[Chunk<'_>], limits: &Limits, progress: &dyn Progress) -> Result<Image> {
+    let mut vp8x_alpha = false;
+    let mut canvas = None;
+    let mut icc = None;
+    let mut image: Option<(bool, &[u8])> = None;
+    let mut alph: Option<&[u8]> = None;
+    for c in list {
+        match &c.tag {
+            b"VP8X" => {
+                vp8x_alpha = c.body.first().is_some_and(|f| f & 0x10 != 0);
+                canvas = Some(vp8x_canvas(c.body));
+            }
+            b"ICCP" => icc = Some(c.body.to_vec()),
+            b"VP8L" if image.is_none() => image = Some((true, c.body)),
+            b"VP8 " if image.is_none() => image = Some((false, c.body)),
+            b"ALPH" if alph.is_none() => alph = Some(c.body),
+            _ => {}
+        }
+    }
+    let (is_lossless, body) = image.ok_or_else(|| Error::corrupt("WebP file has no image data"))?;
+    let mut img = decode_bitstream(
+        is_lossless,
+        body,
+        alph,
+        vp8x_alpha,
+        canvas,
+        limits,
+        progress,
+    )?;
     img.metadata.icc_profile = icc;
-    Ok((img, notes))
+    Ok(img)
 }
 
 fn check_canvas(canvas: Option<(u32, u32)>, w: u32, h: u32) -> Result<()> {
@@ -182,15 +321,8 @@ fn chunk(out: &mut Vec<u8>, tag: &[u8; 4], body: &[u8]) {
     }
 }
 
-/// Encode as lossless WebP (VP8L), with the ICC profile in an extended header if present.
-pub fn encode(img: &Image, opts: &EncodeOptions) -> Result<(Vec<u8>, Notes)> {
-    let mut notes = Notes::new();
-    if img.width > 16384 || img.height > 16384 {
-        return Err(Error::new(
-            ErrorCode::UnsupportedVariant,
-            "WebP images are at most 16384 pixels on a side",
-        ));
-    }
+/// An 8-bit RGB or RGBA copy of the image, as the bitstream encoders want it.
+fn prepare(img: &Image, notes: &mut Notes) -> Result<(Image, bool)> {
     let (e8, n) = ops::convert_depth(img, Depth::Eight);
     notes.extend(n);
     let target = if e8.layout.has_alpha() {
@@ -201,8 +333,65 @@ pub fn encode(img: &Image, opts: &EncodeOptions) -> Result<(Vec<u8>, Notes)> {
     let (px, n) = ops::convert_layout(&e8, target, [255, 255, 255]);
     notes.extend(n);
     let alpha = px.has_translucency();
+    Ok((px, alpha))
+}
+
+/// The chunks that make up one image: `VP8L`, or `ALPH` (when needed) and `VP8 `.
+fn image_chunks(
+    px: Image,
+    alpha: bool,
+    opts: &EncodeOptions,
+    notes: &mut Notes,
+) -> Result<Vec<u8>> {
+    let mut body = Vec::new();
     if let Some(quality) = opts.quality {
-        return encode_lossy(img, px, alpha, opts, quality, notes);
+        if px.width > 16383 || px.height > 16383 {
+            return Err(Error::new(
+                ErrorCode::UnsupportedVariant,
+                "lossy WebP images are at most 16383 pixels on a side",
+            ));
+        }
+        if !(0.0..=100.0).contains(&quality) {
+            return Err(Error::invalid_option(
+                "quality",
+                "must be between 0 and 100",
+            ));
+        }
+        let mut px = px;
+        let (w, h) = (px.width as usize, px.height as usize);
+        let mut plane = None;
+        if alpha {
+            lossy::flatten_transparent(&mut px.data, w, h);
+            plane = Some(
+                px.data
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|c| c[3])
+                    .collect::<Vec<u8>>(),
+            );
+        }
+        let frame = lossy::rgb_to_yuv(&px.data, w, h, px.layout.channels());
+        let params = oc_vp8::Params {
+            quality,
+            effort: opts.effort.min(6),
+            ..oc_vp8::Params::default()
+        };
+        let vp8 = oc_vp8::encode(&frame, &params, &oc_core::NoProgress)?;
+        notes.push(Note::new(
+            Severity::Info,
+            "image.lossy_compression",
+            format!("lossy WebP at quality {quality}"),
+        ));
+        if let Some(plane) = &plane {
+            chunk(
+                &mut body,
+                b"ALPH",
+                &lossy::encode_alpha(plane, w, h, opts.effort),
+            );
+        }
+        chunk(&mut body, b"VP8 ", &vp8);
+        return Ok(body);
     }
     let ch = px.layout.channels();
     let argb: Vec<u32> = px
@@ -222,103 +411,137 @@ pub fn encode(img: &Image, opts: &EncodeOptions) -> Result<(Vec<u8>, Notes)> {
         alpha,
         opts.effort.min(6),
     );
-    let mut body = Vec::new();
-    body.extend_from_slice(b"WEBP");
-    if let Some(icc) = &img.metadata.icc_profile {
-        let mut x = vec![0x20 | if alpha { 0x10 } else { 0 }, 0, 0, 0];
-        x.extend((px.width - 1).to_le_bytes().iter().take(3));
-        x.extend((px.height - 1).to_le_bytes().iter().take(3));
-        chunk(&mut body, b"VP8X", &x);
-        chunk(&mut body, b"ICCP", icc);
-    }
     chunk(&mut body, b"VP8L", &stream);
-    let mut out = Vec::with_capacity(body.len() + 8);
-    out.extend_from_slice(b"RIFF");
-    out.extend_from_slice(&(body.len() as u32).to_le_bytes());
-    out.extend_from_slice(&body);
-    Ok((out, notes))
+    Ok(body)
 }
 
-fn vp8x(alpha: bool, icc: bool, w: u32, h: u32) -> Vec<u8> {
-    let flags = if icc { 0x20 } else { 0 } | if alpha { 0x10 } else { 0 };
+fn riff(body: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(body.len() + 12);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(body.len() as u32 + 4).to_le_bytes());
+    out.extend_from_slice(b"WEBP");
+    out.extend_from_slice(body);
+    out
+}
+
+/// Encode as WebP: lossless (VP8L) by default, lossy (VP8) when a quality is given. The ICC
+/// profile and a lossy image's alpha go in an extended header.
+pub fn encode(img: &Image, opts: &EncodeOptions) -> Result<(Vec<u8>, Notes)> {
+    let mut notes = Notes::new();
+    if img.width > 16384 || img.height > 16384 {
+        return Err(Error::new(
+            ErrorCode::UnsupportedVariant,
+            "WebP images are at most 16384 pixels on a side",
+        ));
+    }
+    let (px, alpha) = prepare(img, &mut notes)?;
+    let (w, h) = (px.width, px.height);
+    let chunks = image_chunks(px, alpha, opts, &mut notes)?;
+    let icc = img.metadata.icc_profile.as_deref();
+    let mut body = Vec::new();
+    if icc.is_some() || (alpha && opts.quality.is_some()) {
+        chunk(&mut body, b"VP8X", &vp8x(alpha, icc.is_some(), false, w, h));
+    }
+    if let Some(icc) = icc {
+        chunk(&mut body, b"ICCP", icc);
+    }
+    body.extend_from_slice(&chunks);
+    Ok((riff(&body), notes))
+}
+
+fn vp8x(alpha: bool, icc: bool, animated: bool, w: u32, h: u32) -> Vec<u8> {
+    let flags =
+        if icc { 0x20 } else { 0 } | if animated { 0x02 } else { 0 } | if alpha { 0x10 } else { 0 };
     let mut x = vec![flags, 0, 0, 0];
     x.extend((w - 1).to_le_bytes().iter().take(3));
     x.extend((h - 1).to_le_bytes().iter().take(3));
     x
 }
 
-/// Lossy WebP: a VP8 key frame, with the alpha channel (if any) in a separate lossless chunk.
-fn encode_lossy(
-    img: &Image,
-    mut px: Image,
-    alpha: bool,
-    opts: &EncodeOptions,
-    quality: f32,
-    mut notes: Notes,
-) -> Result<(Vec<u8>, Notes)> {
-    if px.width > 16383 || px.height > 16383 {
+/// Writes an animated WebP. Frame 0 is the whole canvas; every later frame replaces the
+/// rectangle (with even corner coordinates, as the format requires) that changed.
+pub fn encode_animation(anim: &Animation, opts: &EncodeOptions) -> Result<(Vec<u8>, Notes)> {
+    let mut notes = Notes::new();
+    let (w, h) = (anim.width as usize, anim.height as usize);
+    if anim.frames.is_empty() || w == 0 || h == 0 {
+        return Err(Error::new(
+            ErrorCode::InvalidOptions,
+            "an animation needs frames",
+        ));
+    }
+    if anim.width > 16384 || anim.height > 16384 {
         return Err(Error::new(
             ErrorCode::UnsupportedVariant,
-            "lossy WebP images are at most 16383 pixels on a side",
+            "WebP images are at most 16384 pixels on a side",
         ));
     }
-    if !(0.0..=100.0).contains(&quality) {
-        return Err(Error::invalid_option(
-            "quality",
-            "must be between 0 and 100",
-        ));
+    let mut shown: Vec<Vec<u8>> = Vec::with_capacity(anim.frames.len());
+    for f in &anim.frames {
+        let (e8, n) = ops::convert_depth(&f.image, Depth::Eight);
+        notes.extend(n);
+        let rgba = ops_rgba(&e8);
+        if rgba.width as usize != w || rgba.height as usize != h {
+            return Err(Error::new(
+                ErrorCode::InvalidOptions,
+                "animation frames differ in size",
+            ));
+        }
+        shown.push(rgba.data);
     }
-    let (w, h) = (px.width as usize, px.height as usize);
-    let mut plane = None;
-    if alpha {
-        lossy::flatten_transparent(&mut px.data, w, h);
-        plane = Some(
-            px.data
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|c| c[3])
-                .collect::<Vec<u8>>(),
-        );
-    }
-    let frame = lossy::rgb_to_yuv(&px.data, w, h, px.layout.channels());
-    let params = oc_vp8::Params {
-        quality,
-        effort: opts.effort.min(6),
-        ..oc_vp8::Params::default()
-    };
-    let vp8 = oc_vp8::encode(&frame, &params, &oc_core::NoProgress)?;
-    notes.push(oc_core::Note::new(
-        oc_core::Severity::Info,
-        "image.lossy_compression",
-        format!("lossy WebP at quality {quality}"),
-    ));
+    let alpha = shown
+        .iter()
+        .any(|d| d.as_chunks::<4>().0.iter().any(|p| p[3] != 255));
+    let icc = anim.metadata.icc_profile.as_deref();
     let mut body = Vec::new();
-    body.extend_from_slice(b"WEBP");
-    let icc = img.metadata.icc_profile.as_deref();
-    if icc.is_some() || alpha {
-        chunk(
-            &mut body,
-            b"VP8X",
-            &vp8x(alpha, icc.is_some(), px.width, px.height),
-        );
-    }
+    chunk(
+        &mut body,
+        b"VP8X",
+        &vp8x(alpha, icc.is_some(), true, anim.width, anim.height),
+    );
     if let Some(icc) = icc {
         chunk(&mut body, b"ICCP", icc);
     }
-    if let Some(plane) = &plane {
-        chunk(
-            &mut body,
-            b"ALPH",
-            &lossy::encode_alpha(plane, w, h, opts.effort),
-        );
+    let mut anim_chunk = vec![0, 0, 0, 0];
+    anim_chunk.extend_from_slice(&(anim.loops.min(0xFFFF) as u16).to_le_bytes());
+    chunk(&mut body, b"ANIM", &anim_chunk);
+    let blank = anim::blank_canvas(anim.width, anim.height);
+    for (i, cur) in shown.iter().enumerate() {
+        let (mut x, mut y, mut rw, mut rh) = if i == 0 {
+            (0, 0, w, h)
+        } else {
+            anim::changed_rect(shown.get(i - 1).unwrap_or(&blank), cur, w, h)
+                .unwrap_or((0, 0, 1, 1))
+        };
+        // Offsets are stored halved, so grow the rectangle to start on even pixels.
+        rw += x & 1;
+        rh += y & 1;
+        x &= !1;
+        y &= !1;
+        let region = anim::crop_rgba(cur, w, (x, y, rw, rh));
+        let region = if alpha {
+            region
+        } else {
+            anim::rgba_to_rgb(&region)
+        };
+        let layout = if alpha { Layout::Rgba } else { Layout::Rgb };
+        let img = Image::new(rw as u32, rh as u32, layout, Depth::Eight, region)?;
+        let has_alpha = alpha && img.has_translucency();
+        let mut frame_notes = Notes::new();
+        let data = image_chunks(img, has_alpha, opts, &mut frame_notes)?;
+        if i == 0 {
+            notes.extend(frame_notes);
+        }
+        let mut anmf = Vec::with_capacity(16 + data.len());
+        for v in [x as u32 / 2, y as u32 / 2, rw as u32 - 1, rh as u32 - 1] {
+            anmf.extend_from_slice(&v.to_le_bytes()[..3]);
+        }
+        let ms = anim.frames.get(i).map_or(0, |f| f.delay_ms).min(0xFF_FFFF);
+        anmf.extend_from_slice(&ms.to_le_bytes()[..3]);
+        anmf.push(0b10); // keep the previous frame, do not blend
+        anmf.extend_from_slice(&data);
+        chunk(&mut body, b"ANMF", &anmf);
     }
-    chunk(&mut body, b"VP8 ", &vp8);
-    let mut out = Vec::with_capacity(body.len() + 8);
-    out.extend_from_slice(b"RIFF");
-    out.extend_from_slice(&(body.len() as u32).to_le_bytes());
-    out.extend_from_slice(&body);
-    Ok((out, notes))
+    Ok((riff(&body), notes))
 }
 
 #[cfg(test)]
@@ -497,12 +720,12 @@ mod tests {
     }
 
     #[test]
-    fn animation_is_named_and_junk_is_rejected() {
-        // VP8X with the animation flag.
+    fn empty_animation_and_junk_are_rejected() {
+        // VP8X with the animation flag but no frames.
         let mut anim = b"RIFF\x16\0\0\0WEBPVP8X\x0a\0\0\0".to_vec();
         anim.extend_from_slice(&[0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         let e = decode(&anim, &Limits::default(), &NoProgress).unwrap_err();
-        assert_eq!(e.code, ErrorCode::UnsupportedVariant);
+        assert_eq!(e.code, ErrorCode::CorruptFile);
         // A lossy chunk that is not a key frame.
         let mut junk = b"RIFF\x16\0\0\0WEBPVP8 \x0a\0\0\0".to_vec();
         junk.extend_from_slice(&[0; 10]);

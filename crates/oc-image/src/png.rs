@@ -1,6 +1,9 @@
 //! PNG read/write (ISO/IEC 15948 / PNG 1.2): all colour types and bit depths, Adam7.
-//! Not yet: APNG animation (only the default image is read).
+//! APNG: `decode` reads the default image; `decode_animation` and `encode_animation` handle
+//! the frames.
+use crate::anim::{self, Animation};
 use crate::image::{Depth, Image, Layout, SampleWriter};
+use crate::ops;
 use oc_core::{Error, ErrorCode, Limits, Note, Notes, Progress, Result, Severity};
 use oc_io::ByteReader;
 
@@ -206,9 +209,41 @@ fn chunks<'a>(data: &'a [u8], notes: &mut Notes) -> Result<Vec<Chunk<'a>>> {
     Ok(out)
 }
 
-pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(Image, Notes)> {
-    let mut notes = Notes::new();
-    let list = chunks(data, &mut notes)?;
+/// Everything the chunk stream says, with the compressed pixel data still packed.
+struct Parsed {
+    hdr: Header,
+    width: u32,
+    height: u32,
+    plte: Vec<[u8; 3]>,
+    trns: Vec<u8>,
+    meta: crate::image::Metadata,
+    /// The default image's zlib stream.
+    idat: Vec<u8>,
+    /// Number of plays from `acTL`, if the file is animated.
+    plays: Option<u32>,
+    /// Animation frames in order. When the default image is the first one, its `data` is empty
+    /// and `idat` stands in for it.
+    frames: Vec<RawFrame>,
+}
+
+struct RawFrame {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    delay_ms: u32,
+    dispose: u8,
+    blend: u8,
+    data: Vec<u8>,
+}
+
+fn parse(
+    data: &[u8],
+    limits: &Limits,
+    progress: &dyn Progress,
+    notes: &mut Notes,
+) -> Result<Parsed> {
+    let list = chunks(data, notes)?;
     let ihdr = list
         .first()
         .filter(|c| &c.kind == b"IHDR" && c.data.len() == 13)
@@ -237,6 +272,8 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
     let mut idat = Vec::new();
     let mut meta = crate::image::Metadata::default();
     let mut seen_idat_end = false;
+    let mut plays = None;
+    let mut frames: Vec<RawFrame> = Vec::new();
     for c in list.iter().skip(1) {
         match &c.kind {
             b"PLTE" => {
@@ -246,6 +283,49 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
                 plte = c.data.as_chunks::<3>().0.to_vec();
             }
             b"tRNS" => trns = c.data,
+            b"acTL" => {
+                let mut r = ByteReader::new(c.data);
+                if let (Ok(_frames), Ok(n)) = (r.u32_be(), r.u32_be()) {
+                    plays = Some(n);
+                }
+            }
+            b"fcTL" => {
+                let mut r = ByteReader::new(c.data);
+                let (_seq, fw, fh, fx, fy) = (
+                    r.u32_be()?,
+                    r.u32_be()?,
+                    r.u32_be()?,
+                    r.u32_be()?,
+                    r.u32_be()?,
+                );
+                let (num, den) = (u32::from(r.u16_be()?), u32::from(r.u16_be()?));
+                let (dispose, blend) = (r.u8()?, r.u8()?);
+                // A zero denominator means hundredths of a second.
+                let den = if den == 0 { 100 } else { den };
+                limits.check_entries(frames.len() as u64 + 1)?;
+                frames.push(RawFrame {
+                    x: fx,
+                    y: fy,
+                    width: fw,
+                    height: fh,
+                    delay_ms: (u64::from(num) * 1000 / u64::from(den)).min(u64::from(u32::MAX))
+                        as u32,
+                    dispose,
+                    blend,
+                    data: Vec::new(),
+                });
+            }
+            b"fdAT" => {
+                if let (Some(f), Some(body)) = (frames.last_mut(), c.data.get(4..)) {
+                    if f.data.len() as u64 + body.len() as u64 > limits.max_alloc {
+                        return Err(Error::new(
+                            ErrorCode::LimitExceeded,
+                            "APNG frame data is too large",
+                        ));
+                    }
+                    f.data.extend_from_slice(body);
+                }
+            }
             b"IDAT" => {
                 if seen_idat_end {
                     return Err(Error::corrupt("IDAT chunks are not consecutive"));
@@ -297,6 +377,129 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
         return Err(Error::corrupt("palette image without PLTE"));
     }
 
+    Ok(Parsed {
+        hdr,
+        width,
+        height,
+        plte,
+        trns: trns.to_vec(),
+        meta,
+        idat,
+        plays,
+        frames,
+    })
+}
+
+pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(Image, Notes)> {
+    let mut notes = Notes::new();
+    let p = parse(data, limits, progress, &mut notes)?;
+    let mut img = decode_pixels(
+        &p.hdr, p.width, p.height, &p.plte, &p.trns, &p.idat, limits, progress,
+    )?;
+    img.metadata = p.meta;
+    if p.plays.is_some() {
+        notes.push(Note::new(
+            Severity::Warning,
+            "animation_first_frame_only",
+            "only the default image of this animated PNG was read",
+        ));
+    }
+    Ok((img, notes))
+}
+
+/// Whether the file is an animated PNG with more than the default image to show.
+pub fn is_animated(data: &[u8]) -> bool {
+    let mut notes = Notes::new();
+    chunks(data, &mut notes).is_ok_and(|l| l.iter().any(|c| &c.kind == b"acTL"))
+}
+
+/// The frames of an animated PNG, each composited onto the canvas. A PNG that is not animated
+/// yields one frame. A default image that is not part of the animation is left out.
+pub fn decode_animation(
+    data: &[u8],
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<(Animation, Notes)> {
+    let mut notes = Notes::new();
+    let p = parse(data, limits, progress, &mut notes)?;
+    let (w, h) = (p.width, p.height);
+    let mut anim = Animation::new(w, h);
+    anim.metadata = p.meta.clone();
+    let to_rgba = |img: &Image| -> Image {
+        let (e8, _) = ops::convert_depth(img, Depth::Eight);
+        ops::convert_layout(&e8, Layout::Rgba, [0, 0, 0]).0
+    };
+    let Some(plays) = p.plays.filter(|_| !p.frames.is_empty()) else {
+        let img = decode_pixels(&p.hdr, w, h, &p.plte, &p.trns, &p.idat, limits, progress)?;
+        anim::check_frame(limits, w, h, 0)?;
+        anim.frames.push(anim::Frame {
+            image: to_rgba(&img),
+            delay_ms: 0,
+        });
+        anim.loops = 1;
+        return Ok((anim, notes));
+    };
+    anim.loops = plays;
+    let mut canvas = anim::Compositor::new(w, h);
+    for (n, f) in p.frames.iter().enumerate() {
+        if f.width == 0
+            || f.height == 0
+            || u64::from(f.x) + u64::from(f.width) > u64::from(w)
+            || u64::from(f.y) + u64::from(f.height) > u64::from(h)
+        {
+            return Err(Error::corrupt("APNG frame lies outside the canvas"));
+        }
+        anim::check_frame(limits, w, h, anim.frames.len())?;
+        let stream = if n == 0 && f.data.is_empty() {
+            &p.idat
+        } else {
+            &f.data
+        };
+        let img = to_rgba(&decode_pixels(
+            &p.hdr, f.width, f.height, &p.plte, &p.trns, stream, limits, progress,
+        )?);
+        // The first frame cannot restore a previous one; the spec treats that as clearing.
+        let dispose = match (f.dispose, n) {
+            (1, _) | (2, 0) => anim::Dispose::Background,
+            (2, _) => anim::Dispose::Previous,
+            _ => anim::Dispose::Keep,
+        };
+        let rect = (
+            f.x as usize,
+            f.y as usize,
+            f.width as usize,
+            f.height as usize,
+        );
+        let shown = canvas.draw(rect, &img.data, f.blend != 0, dispose).to_vec();
+        anim.frames.push(anim::Frame {
+            image: anim::canvas_image(w, h, shown)?,
+            delay_ms: f.delay_ms,
+        });
+    }
+    if p.hdr.depth == 16 {
+        notes.push(Note::new(
+            Severity::Loss,
+            "png.animation_8bit",
+            "animation frames are composited at 8 bits per channel",
+        ));
+    }
+    Ok((anim, notes))
+}
+
+/// Inflates, unfilters and converts one image's zlib stream (the default image or one frame).
+#[allow(clippy::too_many_arguments)]
+fn decode_pixels(
+    hdr: &Header,
+    width: u32,
+    height: u32,
+    plte: &[[u8; 3]],
+    trns: &[u8],
+    idat: &[u8],
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<Image> {
+    let (ct, depth) = (hdr.ct, hdr.depth);
+    let ch = ct.channels();
     // The expected raw size bounds inflation exactly. DEFLATE's own maximum ratio
     // (about 1032:1) is legitimately reached by solid-colour images, so the generic
     // ratio check is disabled here.
@@ -318,7 +521,7 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
         max_ratio: u64::MAX,
         ..limits.clone()
     };
-    let raw = oc_compress::zlib::decompress(&idat, &lim, progress)?;
+    let raw = oc_compress::zlib::decompress(idat, &lim, progress)?;
     if raw.len() < expected {
         return Err(Error::truncated(
             "PNG image data is shorter than the header implies",
@@ -438,16 +641,7 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
             (l, out_depth, w.data)
         }
     };
-    let mut img = Image::new(width, height, layout, depth_out, samples)?;
-    img.metadata = meta;
-    if list.iter().any(|c| &c.kind == b"acTL") {
-        notes.push(Note::new(
-            Severity::Warning,
-            "animation_first_frame_only",
-            "only the default image of this animated PNG was read",
-        ));
-    }
-    Ok((img, notes))
+    Image::new(width, height, layout, depth_out, samples)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -494,34 +688,20 @@ fn filter_row(kind: u8, row: &[u8], prev: &[u8], bpp: usize, out: &mut Vec<u8>) 
     }
 }
 
-pub fn encode(img: &Image, opts: &EncodeOptions) -> (Vec<u8>, Notes) {
-    let mut notes = Notes::new();
-    let ct = match img.layout {
-        Layout::Gray => 0u8,
-        Layout::GrayAlpha => 4,
-        Layout::Rgb => 2,
-        Layout::Rgba => 6,
-    };
-    let depth: u8 = if img.depth == Depth::Sixteen { 16 } else { 8 };
-    let mut out = SIG.to_vec();
-    let mut ihdr = Vec::with_capacity(13);
-    ihdr.extend_from_slice(&img.width.to_be_bytes());
-    ihdr.extend_from_slice(&img.height.to_be_bytes());
-    ihdr.extend_from_slice(&[depth, ct, 0, 0, 0]);
-    chunk(&mut out, b"IHDR", &ihdr);
-    if let Some(icc) = &img.metadata.icc_profile {
+fn write_metadata(out: &mut Vec<u8>, meta: &crate::image::Metadata, notes: &mut Notes) {
+    if let Some(icc) = &meta.icc_profile {
         let mut body = b"icc\0\0".to_vec();
         body.extend(oc_compress::zlib::compress(icc, 6));
-        chunk(&mut out, b"iCCP", &body);
+        chunk(out, b"iCCP", &body);
     }
-    if let Some((x, y)) = img.metadata.dpi {
+    if let Some((x, y)) = meta.dpi {
         let mut body = Vec::with_capacity(9);
         body.extend_from_slice(&((x / 0.0254).round() as u32).to_be_bytes());
         body.extend_from_slice(&((y / 0.0254).round() as u32).to_be_bytes());
         body.push(1);
-        chunk(&mut out, b"pHYs", &body);
+        chunk(out, b"pHYs", &body);
     }
-    for (k, v) in &img.metadata.text {
+    for (k, v) in &meta.text {
         let (kb, _) = oc_text::encode(k, oc_text::Encoding::Latin1, oc_text::Policy::Replace)
             .unwrap_or_default();
         let (vb, n) = oc_text::encode(v, oc_text::Encoding::Latin1, oc_text::Policy::Replace)
@@ -538,8 +718,12 @@ pub fn encode(img: &Image, opts: &EncodeOptions) -> (Vec<u8>, Notes) {
         let mut body = kb;
         body.push(0);
         body.extend(vb.into_iter().filter(|&b| b != 0));
-        chunk(&mut out, b"tEXt", &body);
+        chunk(out, b"tEXt", &body);
     }
+}
+
+/// Filters every row of the image and deflates the result.
+fn compress_rows(img: &Image, opts: &EncodeOptions) -> Vec<u8> {
     let rb = img.row_bytes();
     let bpp = img.layout.channels() * img.depth.bytes();
     let mut raw = Vec::with_capacity((rb + 1) * img.height as usize);
@@ -571,12 +755,117 @@ pub fn encode(img: &Image, opts: &EncodeOptions) -> (Vec<u8>, Notes) {
         }
         prev.copy_from_slice(row);
     }
-    let z = oc_compress::zlib::compress(&raw, opts.level.min(9));
+    oc_compress::zlib::compress(&raw, opts.level.min(9))
+}
+
+pub fn encode(img: &Image, opts: &EncodeOptions) -> (Vec<u8>, Notes) {
+    let mut notes = Notes::new();
+    let ct = match img.layout {
+        Layout::Gray => 0u8,
+        Layout::GrayAlpha => 4,
+        Layout::Rgb => 2,
+        Layout::Rgba => 6,
+    };
+    let depth: u8 = if img.depth == Depth::Sixteen { 16 } else { 8 };
+    let mut out = SIG.to_vec();
+    let mut ihdr = Vec::with_capacity(13);
+    ihdr.extend_from_slice(&img.width.to_be_bytes());
+    ihdr.extend_from_slice(&img.height.to_be_bytes());
+    ihdr.extend_from_slice(&[depth, ct, 0, 0, 0]);
+    chunk(&mut out, b"IHDR", &ihdr);
+    write_metadata(&mut out, &img.metadata, &mut notes);
+    let z = compress_rows(img, opts);
     for part in z.chunks(1 << 20) {
         chunk(&mut out, b"IDAT", part);
     }
     chunk(&mut out, b"IEND", &[]);
     (out, notes)
+}
+
+/// Writes an animated PNG. Frame 0 is the whole canvas and doubles as the default image; every
+/// later frame replaces the rectangle that changed, so nothing depends on blending.
+pub fn encode_animation(anim: &Animation, opts: &EncodeOptions) -> Result<(Vec<u8>, Notes)> {
+    let mut notes = Notes::new();
+    let (w, h) = (anim.width as usize, anim.height as usize);
+    if anim.frames.is_empty() || w == 0 || h == 0 {
+        return Err(Error::new(
+            ErrorCode::InvalidOptions,
+            "an animation needs frames",
+        ));
+    }
+    let mut shown: Vec<Vec<u8>> = Vec::with_capacity(anim.frames.len());
+    let mut alpha = false;
+    for f in &anim.frames {
+        let (e8, n) = ops::convert_depth(&f.image, Depth::Eight);
+        notes.extend(n);
+        let (rgba, _) = ops::convert_layout(&e8, Layout::Rgba, [255, 255, 255]);
+        if rgba.width as usize != w || rgba.height as usize != h {
+            return Err(Error::new(
+                ErrorCode::InvalidOptions,
+                "animation frames differ in size",
+            ));
+        }
+        alpha |= rgba.data.as_chunks::<4>().0.iter().any(|p| p[3] != 255);
+        shown.push(rgba.data);
+    }
+    let layout = if alpha { Layout::Rgba } else { Layout::Rgb };
+    let mut out = SIG.to_vec();
+    let mut ihdr = Vec::with_capacity(13);
+    ihdr.extend_from_slice(&anim.width.to_be_bytes());
+    ihdr.extend_from_slice(&anim.height.to_be_bytes());
+    ihdr.extend_from_slice(&[8, if alpha { 6 } else { 2 }, 0, 0, 0]);
+    chunk(&mut out, b"IHDR", &ihdr);
+    write_metadata(&mut out, &anim.metadata, &mut notes);
+    let mut actl = (anim.frames.len() as u32).to_be_bytes().to_vec();
+    actl.extend_from_slice(&anim.loops.to_be_bytes());
+    chunk(&mut out, b"acTL", &actl);
+    let blank = anim::blank_canvas(anim.width, anim.height);
+    let mut seq = 0u32;
+    for (i, cur) in shown.iter().enumerate() {
+        let rect = if i == 0 {
+            (0, 0, w, h)
+        } else {
+            let prev = shown.get(i - 1).unwrap_or(&blank);
+            anim::changed_rect(prev, cur, w, h).unwrap_or((0, 0, 1, 1))
+        };
+        let region = anim::crop_rgba(cur, w, rect);
+        let region = if alpha {
+            region
+        } else {
+            anim::rgba_to_rgb(&region)
+        };
+        let img = Image::new(rect.2 as u32, rect.3 as u32, layout, Depth::Eight, region)?;
+        let ms = anim.frames.get(i).map_or(0, |f| f.delay_ms);
+        // Milliseconds when they fit in 16 bits, hundredths of a second otherwise.
+        let (num, den) = if ms <= 0xFFFF {
+            (ms, 1000u16)
+        } else {
+            ((ms / 10).min(0xFFFF), 100)
+        };
+        let mut fctl = Vec::with_capacity(26);
+        fctl.extend_from_slice(&seq.to_be_bytes());
+        seq += 1;
+        for v in [rect.2, rect.3, rect.0, rect.1] {
+            fctl.extend_from_slice(&(v as u32).to_be_bytes());
+        }
+        fctl.extend_from_slice(&(num as u16).to_be_bytes());
+        fctl.extend_from_slice(&den.to_be_bytes());
+        fctl.extend_from_slice(&[0, 0]); // no disposal, replace the region
+        chunk(&mut out, b"fcTL", &fctl);
+        let z = compress_rows(&img, opts);
+        for part in z.chunks(1 << 20) {
+            if i == 0 {
+                chunk(&mut out, b"IDAT", part);
+            } else {
+                let mut body = seq.to_be_bytes().to_vec();
+                seq += 1;
+                body.extend_from_slice(part);
+                chunk(&mut out, b"fdAT", &body);
+            }
+        }
+    }
+    chunk(&mut out, b"IEND", &[]);
+    Ok((out, notes))
 }
 
 #[cfg(test)]

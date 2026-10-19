@@ -151,3 +151,15 @@ name = "vp8"
 path = "fuzz_targets/vp8.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "animation"
+path = "fuzz_targets/animation.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "animation_roundtrip"
+path = "fuzz_targets/animation_roundtrip.rs"
+test = false
+doc = false

@@ -238,31 +238,55 @@ impl Engine {
                 "Decode text -> convert line endings -> encode text".to_string(),
             )
         } else {
-            let (img, n) = image::decode(from, &data, &self.limits, progress)?;
-            notes.extend(n);
-            progress.report(2, 4, "decode");
-            progress.check_cancelled()?;
-            let (img, n) = image::transform(img, &opts, &self.limits)?;
-            notes.extend(n);
-            let (out, n) = image::encode(
-                to,
-                &img,
-                &opts,
-                &req.output
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or_default()
-                    .to_ascii_lowercase(),
-            )?;
-            notes.extend(n);
-            let route_text = if route.edges.is_empty() {
-                // Same format in and out still decodes and re-encodes.
+            let out_ext = req
+                .output
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            // An animation stays one when the output can hold it; otherwise the still path
+            // below reads the first frame and says so.
+            let animation =
+                if image::writes_animation(to, &out_ext) && opts.text("frames") != Some("first") {
+                    image::decode_animation(from, &data, &self.limits, progress)?
+                } else {
+                    None
+                };
+            if let Some((anim, n)) = animation {
+                notes.extend(n);
+                progress.report(2, 4, "decode");
+                progress.check_cancelled()?;
+                let (anim, n) = image::transform_animation(anim, &opts, &self.limits)?;
+                notes.extend(n);
+                let (out, n) = image::encode_animation(to, &anim, &opts)?;
+                notes.extend(n);
                 let name = |id| self.registry.format(id).map_or("image", |f| f.name);
-                format!("Decode {} -> Encode {}", name(from), name(to))
+                (
+                    out,
+                    format!(
+                        "Decode {} animation -> Encode {} animation",
+                        name(from),
+                        name(to)
+                    ),
+                )
             } else {
-                route.explain()
-            };
-            (out, route_text)
+                let (img, n) = image::decode(from, &data, &self.limits, progress)?;
+                notes.extend(n);
+                progress.report(2, 4, "decode");
+                progress.check_cancelled()?;
+                let (img, n) = image::transform(img, &opts, &self.limits)?;
+                notes.extend(n);
+                let (out, n) = image::encode(to, &img, &opts, &out_ext)?;
+                notes.extend(n);
+                let route_text = if route.edges.is_empty() {
+                    // Same format in and out still decodes and re-encodes.
+                    let name = |id| self.registry.format(id).map_or("image", |f| f.name);
+                    format!("Decode {} -> Encode {}", name(from), name(to))
+                } else {
+                    route.explain()
+                };
+                (out, route_text)
+            }
         };
         progress.report(3, 4, "convert");
         progress.check_cancelled()?;
@@ -673,6 +697,57 @@ mod tests {
                 "{k}={v}"
             );
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn anim_fixture(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../oc-image/tests/data/anim")
+            .join(name)
+    }
+
+    fn frame_count(path: &Path) -> usize {
+        let data = std::fs::read(path).unwrap();
+        let e = Engine::new();
+        image::decode_animation(
+            e.format_for_path(path).unwrap(),
+            &data,
+            &e.limits,
+            &NoProgress,
+        )
+        .unwrap()
+        .map_or(1, |(a, _)| a.frames.len())
+    }
+
+    #[test]
+    fn animations_stay_animations_where_the_output_allows() {
+        let dir = tmpdir("anim");
+        let src = anim_fixture("gif_clear_d2.gif");
+        for name in ["a.webp", "a.gif", "a.apng"] {
+            let out = dir.join(name);
+            let rep = run(&src, &out, &[]).unwrap();
+            assert!(rep.route.contains("animation"), "{name}: {}", rep.route);
+            assert_eq!(frame_count(&out), 5, "{name}");
+        }
+        // A plain PNG is a still, and the report says what was dropped.
+        let out = dir.join("a.png");
+        let rep = run(&src, &out, &[]).unwrap();
+        assert!(rep
+            .notes
+            .iter()
+            .any(|n| n.code == "gif.animation_first_frame"));
+        assert_eq!(frame_count(&out), 1);
+        // The user can ask for the first frame even where animation would work.
+        let out = dir.join("first.webp");
+        run(&src, &out, &[("frames", "first")]).unwrap();
+        assert_eq!(frame_count(&out), 1);
+        // Transforms reach every frame.
+        let out = dir.join("small.gif");
+        run(&src, &out, &[("width", "16")]).unwrap();
+        let data = std::fs::read(&out).unwrap();
+        let (a, _) = oc_image::gif::decode_animation(&data, &Limits::default()).unwrap();
+        assert_eq!((a.width, a.height, a.frames.len()), (16, 12, 5));
+        assert!(a.frames.iter().all(|f| f.image.width == 16));
         let _ = std::fs::remove_dir_all(dir);
     }
 
