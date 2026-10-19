@@ -10,6 +10,9 @@ publish = false
 [dependencies]
 oc-core = { path = "../oc-core" }
 oc-io = { path = "../oc-io" }
+oc-checksum = { path = "../oc-checksum" }
+oc-compress = { path = "../oc-compress" }
+oc-text = { path = "../oc-text" }
 
 [lints]
 workspace = true

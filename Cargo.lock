@@ -75,8 +75,11 @@ version = "2.0.0-dev"
 name = "oc-image"
 version = "2.0.0-dev"
 dependencies = [
+ "oc-checksum",
+ "oc-compress",
  "oc-core",
  "oc-io",
+ "oc-text",
 ]
 
 [[package]]
