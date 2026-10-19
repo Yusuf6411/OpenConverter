@@ -192,7 +192,7 @@ fn dist_symbol(dist: u16) -> usize {
 }
 
 /// Code lengths limited to `max_bits`, assigned so frequent symbols get short codes.
-fn code_lengths(freq: &[u32], max_bits: usize) -> Vec<u8> {
+pub(crate) fn code_lengths(freq: &[u32], max_bits: usize) -> Vec<u8> {
     let used: Vec<usize> = (0..freq.len()).filter(|&i| freq[i] > 0).collect();
     let mut lens = vec![0u8; freq.len()];
     match used.len() {

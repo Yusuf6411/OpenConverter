@@ -2123,6 +2123,7 @@ dependencies = [
  "oc-checksum",
  "oc-core",
  "oc-io",
+ "sha2",
 ]
 
 [[package]]
