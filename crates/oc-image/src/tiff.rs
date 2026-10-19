@@ -8,10 +8,14 @@
 //!
 //! CCITT fax (Modified Huffman, Group 3 in 1D or 2D, Group 4) is read for bilevel images.
 //!
-//! Not supported (typed error): JPEG-in-TIFF, YCbCr/Lab, floating point
+//! JPEG-compressed strips and tiles (compression 7, "new style", gray, RGB or YCbCr) are read
+//! through the JPEG decoder.
+//!
+//! Not supported (typed error): old-style JPEG (6), CMYK and alpha in JPEG, Lab, floating point
 //! and 32-bit samples. Orientation is reported in a note and not applied.
 use crate::ccitt;
 use crate::image::{Depth, Image, Layout};
+use crate::jpeg;
 use crate::ops;
 use oc_compress::{lzw, packbits, zlib};
 use oc_core::{Error, ErrorCode, Limits, Note, Notes, Progress, Result, Severity};
@@ -212,6 +216,7 @@ enum Comp {
     Deflate,
     PackBits,
     Fax(ccitt::Mode),
+    Jpeg,
 }
 
 pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(Image, Notes)> {
@@ -280,7 +285,8 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
         5 => Comp::Lzw,
         8 | 32946 => Comp::Deflate,
         32773 => Comp::PackBits,
-        7 | 6 => return Err(unsupported("JPEG compression")),
+        7 => Comp::Jpeg,
+        6 => return Err(unsupported("old-style JPEG compression")),
         c @ 2..=4 => {
             let two_d = get(292).and_then(|f| f.first(e)).unwrap_or(0);
             let t6 = get(293).and_then(|f| f.first(e)).unwrap_or(0);
@@ -302,7 +308,17 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
             "fax compression of anything but bilevel images",
         ));
     }
-    let photometric = num(262, 1);
+    let mut photometric = num(262, 1);
+    let jpeg_is_rgb = photometric == 2;
+    if matches!(compression, Comp::Jpeg) {
+        if bps != 8 || !matches!(spp, 1 | 3) {
+            return Err(unsupported("JPEG compression of this sample layout"));
+        }
+        if photometric == 6 {
+            // The JPEG decoder undoes the YCbCr; what comes out is RGB.
+            photometric = 2;
+        }
+    }
     if !matches!(photometric, 0 | 1 | 2 | 3 | 5) {
         return Err(unsupported("this colour space"));
     }
@@ -375,6 +391,14 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
             Comp::Deflate => zlib::decompress(&chunk, &lim, progress).unwrap_or_default(),
             Comp::PackBits => packbits::decode(&chunk, Some(want)).unwrap_or_default(),
             // Fax strips say how many rows they hold; bits are black = 1 whatever the photometric tag.
+            Comp::Jpeg => jpeg_chunk(
+                &chunk,
+                get(347).map(|f| f.bytes),
+                jpeg_is_rgb && chunk_spp == 3,
+                (cw as usize, rows, chunk_spp),
+                &lim,
+                progress,
+            ),
             Comp::Fax(mode) => {
                 let (mut bits, done) = ccitt::decode(&chunk, cw as usize, rows, mode);
                 bits.truncate(done * row_bytes);
@@ -468,6 +492,40 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
         );
     }
     Ok((img, notes))
+}
+
+/// One JPEG strip or tile as `rows` rows of `width` pixels with `spp` samples each; areas the
+/// stream does not cover stay black.
+fn jpeg_chunk(
+    data: &[u8],
+    tables: Option<&[u8]>,
+    rgb_direct: bool,
+    (width, rows, spp): (usize, usize, usize),
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Vec<u8> {
+    let mut out = vec![0u8; width * rows * spp];
+    let Ok((img, _)) = jpeg::decode_tiff(data, tables, rgb_direct, limits, progress) else {
+        return Vec::new();
+    };
+    if img.layout.channels() != spp {
+        return Vec::new();
+    }
+    let take = (img.width as usize).min(width) * spp;
+    for (y, src) in img
+        .data
+        .chunks_exact(img.width as usize * spp)
+        .take(rows)
+        .enumerate()
+    {
+        if let (Some(d), Some(s)) = (
+            out.get_mut(y * width * spp..y * width * spp + take),
+            src.get(..take),
+        ) {
+            d.copy_from_slice(s);
+        }
+    }
+    out
 }
 
 #[allow(clippy::too_many_arguments)] // all values come straight from tags

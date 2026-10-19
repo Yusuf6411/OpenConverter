@@ -4,5 +4,5 @@ pub mod decode;
 pub mod encode;
 mod tables;
 
-pub use decode::{decode, sniff};
+pub use decode::{decode, decode_tiff, sniff};
 pub use encode::{encode, EncodeOptions, Subsampling};

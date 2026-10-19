@@ -578,6 +578,8 @@ struct Meta {
     adobe_transform: Option<u8>,
     icc: Vec<(u8, u8, Vec<u8>)>,
     orientation: Option<u16>,
+    /// Set by TIFF: three components are RGB (true) or YCbCr (false), whatever the stream says.
+    rgb_override: Option<bool>,
 }
 
 fn parse_exif_orientation(seg: &[u8]) -> Option<u16> {
@@ -615,6 +617,38 @@ fn parse_exif_orientation(seg: &[u8]) -> Option<u16> {
 }
 
 pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(Image, Notes)> {
+    decode_with(data, None, limits, progress)
+}
+
+/// A JPEG stream from inside a TIFF (compression 7): the tables may live in the file's
+/// `JPEGTables` tag, and the TIFF's photometric tag, not the stream, says whether three
+/// components are RGB (`rgb_direct`) or YCbCr.
+pub fn decode_tiff(
+    data: &[u8],
+    tables: Option<&[u8]>,
+    rgb_direct: bool,
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<(Image, Notes)> {
+    if let Some(t) = tables.filter(|t| t.starts_with(&[0xFF, 0xD8]) && sniff(data)) {
+        // Splice the shared tables in after the stream's SOI.
+        let body = t.get(2..).unwrap_or(&[]);
+        let body = body.strip_suffix(&[0xFF, 0xD9]).unwrap_or(body);
+        let mut joined = Vec::with_capacity(data.len() + body.len());
+        joined.extend_from_slice(&[0xFF, 0xD8]);
+        joined.extend_from_slice(body);
+        joined.extend_from_slice(data.get(2..).unwrap_or(&[]));
+        return decode_with(&joined, Some(rgb_direct), limits, progress);
+    }
+    decode_with(data, Some(rgb_direct), limits, progress)
+}
+
+fn decode_with(
+    data: &[u8],
+    rgb_direct: Option<bool>,
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<(Image, Notes)> {
     let mut notes = Notes::new();
     if !sniff(data) {
         return Err(Error::new(ErrorCode::UnsupportedFormat, "not a JPEG file"));
@@ -627,7 +661,10 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
     };
     let mut frame: Option<Frame> = None;
     let mut restart_interval = 0usize;
-    let mut meta = Meta::default();
+    let mut meta = Meta {
+        rgb_override: rgb_direct,
+        ..Meta::default()
+    };
     let mut scans = 0usize;
     let mut starved = false;
 
@@ -1096,10 +1133,11 @@ fn build_image(
         )
         .map(|i| (i, false)),
         3 => {
-            let rgb_direct = match meta.adobe_transform {
-                Some(0) => true,
-                Some(_) => false,
-                None => meta.jfif.is_none() && ids.as_slice() == b"RGB",
+            let rgb_direct = match (meta.rgb_override, meta.adobe_transform) {
+                (Some(v), _) => v,
+                (None, Some(0)) => true,
+                (None, Some(_)) => false,
+                (None, None) => meta.jfif.is_none() && ids.as_slice() == b"RGB",
             };
             let mut out = Vec::with_capacity(n * 3);
             for i in 0..n {
