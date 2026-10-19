@@ -9,6 +9,8 @@ pub mod anim;
 pub mod bc7;
 mod bc7_tables;
 pub mod bmp;
+mod ccitt;
+mod ccitt_tables;
 pub mod dds;
 pub mod gif;
 pub mod hdr;

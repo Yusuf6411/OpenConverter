@@ -1,4 +1,4 @@
-//! TIFF 6.0 (little- and big-endian, classic 32-bit offsets).
+//! TIFF 6.0 (little- and big-endian) and BigTIFF (64-bit offsets, read only).
 //!
 //! Read: the first image of the file, as strips or tiles, chunky or planar, uncompressed,
 //! LZW, Deflate (both codes) or PackBits, with horizontal prediction, 1/2/4/8/16 bits per
@@ -6,8 +6,11 @@
 //! Write: gray, gray+alpha, RGB and RGBA at 8 or 16 bits, in strips, with optional
 //! compression and predictor.
 //!
-//! Not supported (typed error): BigTIFF, JPEG-in-TIFF, CCITT fax, YCbCr/Lab, floating point
+//! CCITT fax (Modified Huffman, Group 3 in 1D or 2D, Group 4) is read for bilevel images.
+//!
+//! Not supported (typed error): JPEG-in-TIFF, YCbCr/Lab, floating point
 //! and 32-bit samples. Orientation is reported in a note and not applied.
+use crate::ccitt;
 use crate::image::{Depth, Image, Layout};
 use crate::ops;
 use oc_compress::{lzw, packbits, zlib};
@@ -15,7 +18,10 @@ use oc_core::{Error, ErrorCode, Limits, Note, Notes, Progress, Result, Severity}
 use std::collections::HashMap;
 
 pub fn sniff(data: &[u8]) -> bool {
-    matches!(data, [b'I', b'I', 42, 0, ..] | [b'M', b'M', 0, 42, ..])
+    matches!(
+        data,
+        [b'I', b'I', 42 | 43, 0, ..] | [b'M', b'M', 0, 42 | 43, ..]
+    )
 }
 
 fn unsupported(what: &str) -> Error {
@@ -28,19 +34,38 @@ fn unsupported(what: &str) -> Error {
 #[derive(Clone, Copy)]
 struct Endian {
     little: bool,
+    /// BigTIFF: 8-byte offsets and counts, 20-byte directory entries.
+    big: bool,
 }
 
 impl Endian {
     fn u16(self, d: &[u8], i: usize) -> Option<u16> {
-        let b = [*d.get(i)?, *d.get(i + 1)?];
+        let b = [*d.get(i)?, *d.get(i.checked_add(1)?)?];
         Some(if self.little {
             u16::from_le_bytes(b)
         } else {
             u16::from_be_bytes(b)
         })
     }
+    fn u64(self, d: &[u8], i: usize) -> Option<u64> {
+        let b: [u8; 8] = d.get(i..i.checked_add(8)?)?.try_into().ok()?;
+        Some(if self.little {
+            u64::from_le_bytes(b)
+        } else {
+            u64::from_be_bytes(b)
+        })
+    }
+    /// An offset or count: 32 bits in classic TIFF, 64 in BigTIFF (saturated to what fits).
+    fn word(self, d: &[u8], i: usize) -> Option<usize> {
+        if self.big {
+            self.u64(d, i)
+                .map(|v| usize::try_from(v).unwrap_or(usize::MAX))
+        } else {
+            self.u32(d, i).map(|v| v as usize)
+        }
+    }
     fn u32(self, d: &[u8], i: usize) -> Option<u32> {
-        let b = [*d.get(i)?, *d.get(i + 1)?, *d.get(i + 2)?, *d.get(i + 3)?];
+        let b = d.get(i..i.checked_add(4)?)?.try_into().ok()?;
         Some(if self.little {
             u32::from_le_bytes(b)
         } else {
@@ -65,6 +90,10 @@ impl Field<'_> {
             4 | 9 => (0..self.count)
                 .filter_map(|i| e.u32(self.bytes, i * 4))
                 .collect(),
+            16..=18 => (0..self.count)
+                .filter_map(|i| e.u64(self.bytes, i * 8))
+                .map(|v| u32::try_from(v).unwrap_or(u32::MAX))
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -82,56 +111,59 @@ impl Field<'_> {
 
 struct Ifd<'a> {
     fields: HashMap<u16, Field<'a>>,
-    next: u32,
+    next: usize,
 }
 
 fn read_ifd<'a>(data: &'a [u8], e: Endian, offset: usize, limits: &Limits) -> Result<Ifd<'a>> {
-    let n = usize::from(
-        e.u16(data, offset)
-            .ok_or_else(|| Error::truncated("TIFF directory"))?,
-    );
+    let (count_size, entry_size, inline) = if e.big { (8, 20, 8) } else { (2, 12, 4) };
+    let n = if e.big {
+        e.u64(data, offset)
+            .map(|v| usize::try_from(v).unwrap_or(usize::MAX))
+    } else {
+        e.u16(data, offset).map(usize::from)
+    }
+    .ok_or_else(|| Error::truncated("TIFF directory"))?;
     limits.check_entries(n as u64)?;
     let mut fields = HashMap::new();
     for i in 0..n {
-        let at = offset + 2 + i * 12;
-        let (Some(tag), Some(kind), Some(count)) =
-            (e.u16(data, at), e.u16(data, at + 2), e.u32(data, at + 4))
-        else {
+        let at = offset.saturating_add(count_size + i * entry_size);
+        let (Some(tag), Some(kind), Some(count)) = (
+            e.u16(data, at),
+            e.u16(data, at.saturating_add(2)),
+            e.word(data, at.saturating_add(4)),
+        ) else {
             return Err(Error::truncated("TIFF directory entry"));
         };
+        let value = at.saturating_add(if e.big { 12 } else { 8 });
         let size = match kind {
             1 | 2 | 6 | 7 => 1usize,
             3 | 8 => 2,
             4 | 9 | 11 => 4,
-            5 | 10 | 12 => 8,
-            _ => continue, // unknown or 64-bit types: ignore the tag
+            5 | 10 | 12 | 16..=18 => 8,
+            _ => continue, // unknown types: ignore the tag
         };
         let total = size
-            .checked_mul(count as usize)
+            .checked_mul(count)
             .ok_or_else(|| Error::corrupt("TIFF tag is too large"))?;
         limits.check_alloc(total as u64)?;
-        let bytes = if total <= 4 {
-            data.get(at + 8..at + 8 + total)
+        let bytes = if total <= inline {
+            value
+                .checked_add(total)
+                .and_then(|end| data.get(value..end))
         } else {
             let off = e
-                .u32(data, at + 8)
-                .ok_or_else(|| Error::truncated("TIFF directory entry"))?
-                as usize;
+                .word(data, value)
+                .ok_or_else(|| Error::truncated("TIFF directory entry"))?;
             off.checked_add(total).and_then(|end| data.get(off..end))
         };
         // A tag pointing outside the file is dropped; whether it matters is decided later.
         if let Some(bytes) = bytes {
-            fields.insert(
-                tag,
-                Field {
-                    kind,
-                    count: count as usize,
-                    bytes,
-                },
-            );
+            fields.insert(tag, Field { kind, count, bytes });
         }
     }
-    let next = e.u32(data, offset + 2 + n * 12).unwrap_or(0);
+    let next = e
+        .word(data, offset.saturating_add(count_size + n * entry_size))
+        .unwrap_or(0);
     Ok(Ifd { fields, next })
 }
 
@@ -179,32 +211,35 @@ enum Comp {
     Lzw,
     Deflate,
     PackBits,
+    Fax(ccitt::Mode),
 }
 
 pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(Image, Notes)> {
     let mut notes = Notes::new();
     if !sniff(data) {
-        if matches!(data, [b'I', b'I', 43, 0, ..] | [b'M', b'M', 0, 43, ..]) {
-            return Err(unsupported("BigTIFF"));
-        }
         return Err(Error::new(ErrorCode::UnsupportedFormat, "not a TIFF file"));
     }
-    let e = Endian {
-        little: data.starts_with(b"II"),
-    };
+    let little = data.starts_with(b"II");
+    let big = data.get(2..4).is_some_and(|m| m.contains(&43));
+    let e = Endian { little, big };
+    if big && (e.u16(data, 4) != Some(8) || e.u16(data, 6) != Some(0)) {
+        return Err(Error::corrupt(
+            "BigTIFF header has an unexpected offset size",
+        ));
+    }
     let first = e
-        .u32(data, 4)
-        .ok_or_else(|| Error::truncated("TIFF header"))? as usize;
+        .word(data, if big { 8 } else { 4 })
+        .ok_or_else(|| Error::truncated("TIFF header"))?;
     let ifd = read_ifd(data, e, first, limits)?;
 
     // Count further pages (bounded, cycle-safe) so a note can say they were left out.
-    let (mut pages, mut next, mut seen) = (1usize, ifd.next as usize, vec![first]);
+    let (mut pages, mut next, mut seen) = (1usize, ifd.next, vec![first]);
     while next != 0 && pages < 4096 && !seen.contains(&next) {
         seen.push(next);
         match read_ifd(data, e, next, limits) {
             Ok(i) => {
                 pages += 1;
-                next = i.next as usize;
+                next = i.next;
             }
             Err(_) => break,
         }
@@ -246,9 +281,27 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
         8 | 32946 => Comp::Deflate,
         32773 => Comp::PackBits,
         7 | 6 => return Err(unsupported("JPEG compression")),
-        2..=4 => return Err(unsupported("fax compression")),
+        c @ 2..=4 => {
+            let two_d = get(292).and_then(|f| f.first(e)).unwrap_or(0);
+            let t6 = get(293).and_then(|f| f.first(e)).unwrap_or(0);
+            if (c == 3 && two_d & 2 != 0) || (c == 4 && t6 & 2 != 0) {
+                return Err(unsupported("fax uncompressed mode"));
+            }
+            Comp::Fax(match c {
+                2 => ccitt::Mode::ModifiedHuffman,
+                3 => ccitt::Mode::Group3 {
+                    two_d: two_d & 1 != 0,
+                },
+                _ => ccitt::Mode::Group4,
+            })
+        }
         _ => return Err(unsupported("this compression")),
     };
+    if matches!(compression, Comp::Fax(_)) && (bps != 1 || spp != 1) {
+        return Err(unsupported(
+            "fax compression of anything but bilevel images",
+        ));
+    }
     let photometric = num(262, 1);
     if !matches!(photometric, 0 | 1 | 2 | 3 | 5) {
         return Err(unsupported("this colour space"));
@@ -321,6 +374,12 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
             Comp::Lzw => lzw::decode(&chunk, lzw::Config::tiff(), &lim).unwrap_or_default(),
             Comp::Deflate => zlib::decompress(&chunk, &lim, progress).unwrap_or_default(),
             Comp::PackBits => packbits::decode(&chunk, Some(want)).unwrap_or_default(),
+            // Fax strips say how many rows they hold; bits are black = 1 whatever the photometric tag.
+            Comp::Fax(mode) => {
+                let (mut bits, done) = ccitt::decode(&chunk, cw as usize, rows, mode);
+                bits.truncate(done * row_bytes);
+                bits
+            }
         };
         if raw.len() < want {
             short = true;
@@ -654,7 +713,10 @@ pub fn encode(img: &Image, opts: &EncodeOptions) -> Result<(Vec<u8>, Notes)> {
         if predictor {
             if sixteen {
                 let words = row.len() / 2;
-                let le = Endian { little: true };
+                let le = Endian {
+                    little: true,
+                    big: false,
+                };
                 for i in (spp..words).rev() {
                     let (Some(cur), Some(prev)) =
                         (le.u16(&row, i * 2), le.u16(&row, (i - spp) * 2))
@@ -988,6 +1050,13 @@ mod tests {
             ..Limits::default()
         };
         assert!(decode(&good, &tight, &NoProgress).is_err());
+        // Offsets near the top of the address space must not overflow (found by the fuzzer).
+        assert!(decode(
+            b"II\x2b\x00\x08\x00\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff",
+            &Limits::default(),
+            &NoProgress
+        )
+        .is_err());
         assert_eq!(
             decode(
                 b"II\x2b\x00\x08\x00\x00\x00",
@@ -996,7 +1065,7 @@ mod tests {
             )
             .err()
             .map(|e| e.code),
-            Some(ErrorCode::UnsupportedVariant)
+            Some(ErrorCode::TruncatedFile)
         );
     }
 }
