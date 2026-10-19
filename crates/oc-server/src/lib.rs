@@ -105,51 +105,63 @@ pub fn router(app: Arc<App>) -> Router {
         .with_state(app)
 }
 
-/// Starts the server and blocks until it is stopped with Ctrl+C.
-pub fn run(cfg: Config) -> Result<(), String> {
+fn check_host(cfg: &Config) -> Result<(), String> {
     if !is_loopback(&cfg.host) && !cfg.allow_remote {
         return Err(format!(
             "refusing to listen on {}: anyone who can reach this computer could use the server. Add --allow-remote to do it anyway (an access token is then required).",
             cfg.host
         ));
     }
+    Ok(())
+}
+
+async fn bind(cfg: &Config) -> Result<(tokio::net::TcpListener, Arc<App>, String), String> {
+    let remote = !is_loopback(&cfg.host);
+    let app = App::new(cfg.clone(), remote).map_err(|e| e.to_string())?;
+    let addr: SocketAddr = format!(
+        "{}:{}",
+        if cfg.host.contains(':') && !cfg.host.starts_with('[') {
+            format!("[{}]", cfg.host)
+        } else {
+            cfg.host.clone()
+        },
+        cfg.port
+    )
+    .parse()
+    .or_else(|_| {
+        // A host name such as "localhost".
+        use std::net::ToSocketAddrs;
+        (cfg.host.as_str(), cfg.port)
+            .to_socket_addrs()
+            .map_err(|e| e.to_string())?
+            .next()
+            .ok_or_else(|| "cannot resolve the host".to_string())
+    })?;
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| format!("cannot listen on {addr}: {e}"))?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    app.set_port(port);
+    let url = match &app.token {
+        Some(t) => format!("http://{}:{port}/?token={t}", cfg.host),
+        None => format!("http://{}:{port}/", cfg.host),
+    };
+    Ok((listener, app, url))
+}
+
+/// Starts the server and blocks until it is stopped with Ctrl+C.
+pub fn run(cfg: Config) -> Result<(), String> {
+    check_host(&cfg)?;
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
     rt.block_on(async move {
-        let remote = !is_loopback(&cfg.host);
-        let app = App::new(cfg.clone(), remote).map_err(|e| e.to_string())?;
-        let addr: SocketAddr = format!(
-            "{}:{}",
-            if cfg.host.contains(':') && !cfg.host.starts_with('[') {
-                format!("[{}]", cfg.host)
-            } else {
-                cfg.host.clone()
-            },
-            cfg.port
-        )
-        .parse()
-        .or_else(|_| {
-            // A host name such as "localhost".
-            use std::net::ToSocketAddrs;
-            (cfg.host.as_str(), cfg.port)
-                .to_socket_addrs()
-                .map_err(|e| e.to_string())?
-                .next()
-                .ok_or_else(|| "cannot resolve the host".to_string())
-        })?;
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .map_err(|e| format!("cannot listen on {addr}: {e}"))?;
-        let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-        app.set_port(port);
-        let url = match &app.token {
-            Some(t) => format!("http://{}:{port}/?token={t}", cfg.host),
-            None => format!("http://{}:{port}/", cfg.host),
-        };
-        if remote {
-            eprintln!("WARNING: listening on {addr}, which other computers may reach. Keep the access token private.");
+        let (listener, app, url) = bind(&cfg).await?;
+        if app.token.is_some() {
+            eprintln!(
+                "WARNING: listening beyond this computer. Keep the access token in the address private."
+            );
         }
         println!("OpenConverter is running at {url}");
         println!("Press Ctrl+C to stop.");
@@ -163,6 +175,64 @@ pub fn run(cfg: Config) -> Result<(), String> {
             })
             .await
             .map_err(|e| e.to_string())
+    })
+}
+
+/// A server running on its own thread, for the desktop app.
+pub struct Running {
+    /// Where the UI is (with the access token when one is needed).
+    pub url: String,
+    pub port: u16,
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        if let Some(s) = self.stop.take() {
+            let _ = s.send(());
+        }
+    }
+}
+
+/// Starts the server on a background thread and returns once it is listening.
+pub fn start(cfg: Config) -> Result<Running, String> {
+    check_host(&cfg)?;
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(String, u16), String>>();
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    std::thread::spawn(move || {
+        let rt = match tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                let _ = ready_tx.send(Err(e.to_string()));
+                return;
+            }
+        };
+        rt.block_on(async move {
+            let (listener, app, url) = match bind(&cfg).await {
+                Ok(v) => v,
+                Err(e) => {
+                    let _ = ready_tx.send(Err(e));
+                    return;
+                }
+            };
+            let port = listener.local_addr().map_or(0, |a| a.port());
+            app.start_cleanup();
+            let _ = ready_tx.send(Ok((url, port)));
+            let _ = axum::serve(listener, router(app))
+                .with_graceful_shutdown(async {
+                    let _ = stop_rx.await;
+                })
+                .await;
+        });
+    });
+    let (url, port) = ready_rx.recv().map_err(|e| e.to_string())??;
+    Ok(Running {
+        url,
+        port,
+        stop: Some(stop_tx),
     })
 }
 

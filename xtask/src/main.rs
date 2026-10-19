@@ -91,6 +91,12 @@ fn check_deps() -> Result<(), String> {
             .and_then(|p| p["name"].as_str())
             .unwrap_or("")
             .to_string();
+        // The desktop window shell (ADR-0005) is OS glue, not conversion code; its
+        // windowing stack pulls image/png/xml helpers for icons and bundling that never
+        // touch user files. Its subtree is exempt; everything else is checked.
+        if name == "tauri" || name.starts_with("tauri-") || name == "wry" || name == "tao" {
+            continue;
+        }
         if BANNED.contains(&name.as_str()) {
             bad.push(name);
         }
