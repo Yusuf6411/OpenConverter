@@ -15,6 +15,7 @@ axum = { version = "0.8.9", features = ["http1", "json", "matched-path", "origin
 getrandom = "0.4.3"
 oc-core = { path = "../oc-core" }
 oc-engine = { path = "../oc-engine" }
+oc-archive = { path = "../oc-archive" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 tokio = { version = "1.54.0", features = ["rt-multi-thread", "macros", "net", "fs", "io-util", "sync", "time", "signal"] }

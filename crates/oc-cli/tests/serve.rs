@@ -290,3 +290,80 @@ fn listening_beyond_this_computer_needs_consent_and_a_token() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("--allow-remote"));
 }
+
+fn wait_job(s: &Server, job_id: &str) -> serde_like::Json {
+    for _ in 0..200 {
+        let (_, _, b) = s.request("GET", &format!("/api/jobs/{job_id}"), &[], b"");
+        let text = String::from_utf8_lossy(&b).to_string();
+        if text.contains("\"state\":\"done\"") || text.contains("\"state\":\"failed\"") {
+            return serde_like::Json(text);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("job did not finish");
+}
+
+#[test]
+fn archives_through_the_api() {
+    let s = Server::start("archives");
+    let (_, a) = s.upload("a.txt", b"alpha");
+    let (_, b) = s.upload("a.txt", b"beta beta");
+    let (_, c) = s.upload("notes.xyz", b"gamma");
+    let ids = [a.str("file_id"), b.str("file_id"), c.str("file_id")];
+    let body = format!(
+        "{{\"file_ids\":[\"{}\",\"{}\",\"{}\"],\"target_format\":\"zip\"}}",
+        ids[0], ids[1], ids[2]
+    );
+    let (st, job) = s.json("POST", "/api/archives", &body);
+    assert_eq!(st, 201, "{}", job.0);
+    let done = wait_job(&s, &job.str("job_id"));
+    assert!(done.has("\"state\":\"done\""), "{}", done.0);
+    let out = done.str("output_id");
+    let (st, _, zip) = s.request("GET", &format!("/api/outputs/{out}/download"), &[], b"");
+    assert_eq!(st, 200);
+    assert_eq!(&zip[..2], b"PK");
+
+    // Upload the result and look inside.
+    let (st, up) = s.upload("bundle.zip", &zip);
+    assert_eq!(st, 200, "{}", up.0);
+    let zid = up.str("file_id");
+    let (st, list) = s.json("POST", &format!("/api/files/{zid}/entries"), "{}");
+    assert_eq!(st, 200, "{}", list.0);
+    assert!(list.has("\"path\":\"a.txt\""), "{}", list.0);
+    assert!(list.has("\"path\":\"a (2).txt\""), "{}", list.0);
+    assert!(list.has("\"path\":\"notes.xyz\""), "{}", list.0);
+
+    // One entry comes back as itself, several as a ZIP.
+    let (st, one) = s.json("POST", &format!("/api/files/{zid}/extract"), "{\"paths\":[\"notes.xyz\"]}");
+    assert_eq!(st, 200, "{}", one.0);
+    assert_eq!(one.str("output_name"), "notes.xyz");
+    let (_, _, data) = s.request("GET", &format!("/api/outputs/{}/download", one.str("output_id")), &[], b"");
+    assert_eq!(data, b"gamma");
+    let (st, all) = s.json("POST", &format!("/api/files/{zid}/extract"), "{}");
+    assert_eq!(st, 200, "{}", all.0);
+    assert_eq!(all.str("output_name"), "bundle-files.zip");
+    let (st, none) = s.json("POST", &format!("/api/files/{zid}/extract"), "{\"paths\":[\"missing\"]}");
+    assert_eq!(st, 400, "{}", none.0);
+
+    // Not an archive; and a password-protected ZIP asks for its password.
+    let (_, bmp) = s.upload("p.bmp", &png_1x1());
+    let (st, _) = s.json("POST", &format!("/api/files/{}/entries", bmp.str("file_id")), "{}");
+    assert_eq!(st, 415);
+    let body = format!(
+        "{{\"file_ids\":[\"{}\"],\"target_format\":\"zip\",\"options\":{{\"password\":\"hunter2\"}}}}",
+        ids[0]
+    );
+    let (st, job) = s.json("POST", "/api/archives", &body);
+    assert_eq!(st, 201, "{}", job.0);
+    let done = wait_job(&s, &job.str("job_id"));
+    let (_, _, enc) = s.request("GET", &format!("/api/outputs/{}/download", done.str("output_id")), &[], b"");
+    let (_, up) = s.upload("secret.zip", &enc);
+    let eid = up.str("file_id");
+    let (st, r) = s.json("POST", &format!("/api/files/{eid}/extract"), "{}");
+    assert_eq!(st, 401, "{}", r.0);
+    assert!(r.has("encrypted_need_password"), "{}", r.0);
+    let (st, _) = s.json("POST", &format!("/api/files/{eid}/extract"), "{\"password\":\"nope\"}");
+    assert_eq!(st, 401);
+    let (st, _) = s.json("POST", &format!("/api/files/{eid}/extract"), "{\"password\":\"hunter2\"}");
+    assert_eq!(st, 200);
+}

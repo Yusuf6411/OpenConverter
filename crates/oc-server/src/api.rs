@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use oc_core::options::{OptionKind, OptionSpec};
 use oc_core::{CancelToken, Category, ErrorCode, FormatId};
-use oc_engine::isolated::{convert_isolated, run_worker};
+use oc_engine::isolated::{convert_isolated, create_isolated, extract_isolated, list_isolated, run_worker};
 use oc_engine::ConvertRequest;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
@@ -635,6 +635,62 @@ fn set_state(app: &App, id: &str, f: impl FnOnce(&mut Map<String, Value>)) {
     }
 }
 
+/// Options for a job: the request's, with the user's saved defaults for what it leaves out.
+fn job_options(
+    app: &App,
+    to: FormatId,
+    out_path: &std::path::Path,
+    given: Option<&Value>,
+) -> R<Vec<(String, oc_core::options::OptionValue)>> {
+    let schema = app
+        .engine
+        .registry()
+        .format(to)
+        .map(|d| d.writer_options.clone())
+        .unwrap_or_default();
+    let mut raw: Vec<(String, String)> = Vec::new();
+    if let Some(opts) = given {
+        let Value::Object(opts) = opts else {
+            return Err(ApiErr::bad("options must be an object."));
+        };
+        for (k, v) in opts {
+            if !schema.specs.iter().any(|s| s.key == k) {
+                return Err(ApiErr::bad(format!("Unknown option '{k}'.")));
+            }
+            let s = match v {
+                Value::String(s) => s.clone(),
+                Value::Number(n) => n.to_string(),
+                Value::Bool(b) => b.to_string(),
+                _ => return Err(ApiErr::bad(format!("Invalid value for option '{k}'."))),
+            };
+            raw.push((k.clone(), s));
+        }
+    }
+    for (key, setting) in [
+        ("quality", "default_jpeg_quality"),
+        ("level", "default_png_level"),
+        ("background", "alpha_background"),
+    ] {
+        if schema.specs.iter().any(|s| s.key == key) && !raw.iter().any(|(k, _)| k == key) {
+            let v = lock(&app.settings)[setting].clone();
+            let text = match v {
+                Value::String(s) => s,
+                other => other.to_string(),
+            };
+            raw.push((key.to_string(), text));
+        }
+    }
+    let options = app
+        .engine
+        .parse_options(out_path, &raw)
+        .map_err(|e| ApiErr::bad(e.message))?;
+    // Re-check the values against ranges now, so a bad one fails the request, not the job.
+    schema
+        .validate(&options)
+        .map_err(|e| ApiErr::bad(e.message))?;
+    Ok(options)
+}
+
 pub async fn create_job(
     State(app): State<Arc<App>>,
     Json(body): Json<Value>,
@@ -682,53 +738,7 @@ pub async fn create_job(
         .data_dir
         .join("outputs")
         .join(format!("{out_id}.{ext}"));
-    // Options: the request's, with the user's saved defaults for what it leaves out.
-    let schema = app
-        .engine
-        .registry()
-        .format(to)
-        .map(|d| d.writer_options.clone())
-        .unwrap_or_default();
-    let mut raw: Vec<(String, String)> = Vec::new();
-    if let Some(opts) = body.get("options") {
-        let Value::Object(opts) = opts else {
-            return Err(ApiErr::bad("options must be an object."));
-        };
-        for (k, v) in opts {
-            if !schema.specs.iter().any(|s| s.key == k) {
-                return Err(ApiErr::bad(format!("Unknown option '{k}'.")));
-            }
-            let s = match v {
-                Value::String(s) => s.clone(),
-                Value::Number(n) => n.to_string(),
-                Value::Bool(b) => b.to_string(),
-                _ => return Err(ApiErr::bad(format!("Invalid value for option '{k}'."))),
-            };
-            raw.push((k.clone(), s));
-        }
-    }
-    for (key, setting) in [
-        ("quality", "default_jpeg_quality"),
-        ("level", "default_png_level"),
-        ("background", "alpha_background"),
-    ] {
-        if schema.specs.iter().any(|s| s.key == key) && !raw.iter().any(|(k, _)| k == key) {
-            let v = lock(&app.settings)[setting].clone();
-            let text = match v {
-                Value::String(s) => s,
-                other => other.to_string(),
-            };
-            raw.push((key.to_string(), text));
-        }
-    }
-    let options = app
-        .engine
-        .parse_options(&out_path, &raw)
-        .map_err(|e| ApiErr::bad(e.message))?;
-    // Re-check the values against ranges now, so a bad one fails the request, not the job.
-    schema
-        .validate(&options)
-        .map_err(|e| ApiErr::bad(e.message))?;
+    let options = job_options(&app, to, &out_path, body.get("options"))?;
 
     let job_id = new_id();
     let cancel = CancelToken::new();
@@ -747,7 +757,7 @@ pub async fn create_job(
     let target_s = target.to_string();
     tokio::spawn(async move {
         run_job(
-            app2, jid, meta, target_s, in_path, out_path, out_id, options, cancel,
+            app2, jid, meta, target_s, in_path, out_path, out_id, options, None, cancel,
         )
         .await;
     });
@@ -764,6 +774,7 @@ async fn run_job(
     out_path: std::path::PathBuf,
     out_id: String,
     options: Vec<(String, oc_core::options::OptionValue)>,
+    pack: Option<(std::path::PathBuf, Vec<std::path::PathBuf>)>,
     cancel: CancelToken,
 ) {
     let permit = app.sem.acquire().await;
@@ -781,7 +792,11 @@ async fn run_job(
     let c2 = cancel.clone();
     let (ip, op) = (in_path.clone(), out_path.clone());
     let display_name = file["original_name"].as_str().map(str::to_string);
+    let pack_dir = pack.clone();
     let result = tokio::task::spawn_blocking(move || {
+        if let Some((_, sources)) = &pack {
+            return create_isolated(&app2.engine, &app2.isolation(), sources, &op, true, &options, &c2);
+        }
         let req = ConvertRequest {
             input: ip,
             output: op,
@@ -792,6 +807,9 @@ async fn run_job(
         convert_isolated(&app2.engine, &app2.isolation(), &req, &c2)
     })
     .await;
+    if let Some((dir, _)) = &pack_dir {
+        let _ = std::fs::remove_dir_all(dir);
+    }
     drop(permit);
     let duration_ms = started.elapsed().as_millis() as u64;
     let input_size = file["size"].as_u64().unwrap_or(0);
@@ -1119,4 +1137,277 @@ pub async fn delete_history(State(app): State<Arc<App>>, Path(id): Path<String>)
     }
     app.save_history();
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn engine_err(e: oc_core::Error) -> ApiErr {
+    let status = match e.code {
+        ErrorCode::EncryptedNeedPassword | ErrorCode::WrongPassword => StatusCode::UNAUTHORIZED,
+        ErrorCode::UnsupportedFormat | ErrorCode::UnsupportedVariant => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        ErrorCode::InvalidOptions => StatusCode::BAD_REQUEST,
+        ErrorCode::Cancelled => StatusCode::CONFLICT,
+        ErrorCode::LimitExceeded => StatusCode::PAYLOAD_TOO_LARGE,
+        ErrorCode::CorruptFile | ErrorCode::TruncatedFile => StatusCode::UNPROCESSABLE_ENTITY,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    ApiErr::new(status, e.code.as_str(), e.message)
+}
+
+fn password_of(body: &Value) -> Option<String> {
+    body.get("password")
+        .and_then(Value::as_str)
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+}
+
+fn archive_file(app: &App, id: &str) -> R<(std::path::PathBuf, Value)> {
+    if !valid_id(id) {
+        return Err(ApiErr::not_found());
+    }
+    let files = lock(&app.files);
+    let f = files.get(id).ok_or_else(ApiErr::not_found)?;
+    let is_arc = app
+        .engine
+        .format_by_name(f.format)
+        .is_some_and(|fid| oc_engine::archive::is_archive(fid) && fid != oc_engine::archive::FILE);
+    if !is_arc {
+        return Err(ApiErr::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "unsupported_format",
+            "This file is not an archive.",
+        ));
+    }
+    Ok((f.path.clone(), f.meta.clone()))
+}
+
+/// `POST /api/files/{id}/entries`: what an archive contains, without unpacking it.
+pub async fn archive_entries(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    body: Option<Json<Value>>,
+) -> R<Json<Value>> {
+    let body = body.map_or(Value::Null, |Json(b)| b);
+    let (path, meta) = archive_file(&app, &id)?;
+    let password = password_of(&body);
+    let app2 = app.clone();
+    let permit = app.sem.acquire().await;
+    let listed = tokio::task::spawn_blocking(move || {
+        list_isolated(&app2.engine, &app2.isolation(), &path, password.as_deref(), &CancelToken::new())
+    })
+    .await;
+    drop(permit);
+    let (fmt, entries) = listed
+        .map_err(|_| ApiErr::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "The listing stopped unexpectedly."))?
+        .map_err(engine_err)?;
+    let kind = |c: char| match c {
+        'd' => "dir",
+        'l' => "link",
+        _ => "file",
+    };
+    let total: u64 = entries.iter().filter(|e| e.kind == 'f').map(|e| e.size).sum();
+    let list: Vec<Value> = entries
+        .iter()
+        .map(|e| {
+            json!({"path": e.path, "kind": kind(e.kind), "size": e.size, "mode": e.mode,
+                   "mtime": e.mtime, "encrypted": e.encrypted, "link": e.link})
+        })
+        .collect();
+    Ok(Json(json!({
+        "file_id": id,
+        "name": meta["original_name"],
+        "format": fmt.0,
+        "count": list.len(),
+        "total_size": total,
+        "encrypted": entries.iter().any(|e| e.encrypted),
+        "entries": list,
+    })))
+}
+
+/// `POST /api/files/{id}/extract`: unpack chosen entries (or everything) and offer the result
+/// as a download: the file itself when it is a single one, a ZIP of the tree otherwise.
+pub async fn archive_extract(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> R<Json<Value>> {
+    let (path, meta) = archive_file(&app, &id)?;
+    let password = password_of(&body);
+    let mut only: Vec<String> = Vec::new();
+    if let Some(v) = body.get("paths") {
+        let arr = v.as_array().ok_or_else(|| ApiErr::bad("paths must be a list."))?;
+        if arr.len() > 100_000 {
+            return Err(ApiErr::bad("Too many paths."));
+        }
+        for p in arr {
+            only.push(p.as_str().ok_or_else(|| ApiErr::bad("paths must be strings."))?.to_string());
+        }
+    }
+    let out_id = new_id();
+    let work = app.cfg.data_dir.join("previews").join(format!("x-{out_id}"));
+    let orig = meta["original_name"].as_str().unwrap_or("archive").to_string();
+    let stem = orig.split('.').next().filter(|s| !s.is_empty()).unwrap_or("archive").to_string();
+    let outputs = app.cfg.data_dir.join("outputs");
+    let app2 = app.clone();
+    let out_id2 = out_id.clone();
+    let permit = app.sem.acquire().await;
+    let done = tokio::task::spawn_blocking(move || -> Result<(std::path::PathBuf, String, u64, usize, Vec<Value>), oc_core::Error> {
+        let cancel = CancelToken::new();
+        let iso = app2.isolation();
+        let dest = work.join("tree");
+        std::fs::create_dir_all(&dest)?;
+        let opts = oc_archive::safety::ExtractOptions { only, ..Default::default() };
+        let report = extract_isolated(&iso, &path, &dest, &opts, password.as_deref(), &cancel);
+        let result = report.and_then(|report| {
+            let skipped: Vec<Value> = report
+                .skipped
+                .iter()
+                .map(|(p, why)| json!({"path": p, "reason": why}))
+                .collect();
+            if report.files == 0 && report.dirs == 0 && report.symlinks == 0 {
+                return Err(oc_core::Error::new(ErrorCode::InvalidOptions, "Nothing matched the selection."));
+            }
+            let tops: Vec<std::path::PathBuf> = std::fs::read_dir(&dest)?
+                .flatten()
+                .map(|e| e.path())
+                .collect();
+            if tops.len() == 1 && report.files == 1 && tops[0].is_file() {
+                let name = tops[0].file_name().map_or_else(|| "file".into(), |n| n.to_string_lossy().into_owned());
+                let out = outputs.join(format!("{out_id2}.bin"));
+                std::fs::rename(&tops[0], &out)?;
+                let size = std::fs::metadata(&out)?.len();
+                return Ok((out, name, size, 1, skipped));
+            }
+            let out = outputs.join(format!("{out_id2}.zip"));
+            let rep = create_isolated(&app2.engine, &iso, &tops, &out, true, &[], &cancel)?;
+            Ok((out, format!("{stem}-files.zip"), rep.bytes_out, report.files as usize, skipped))
+        });
+        let _ = std::fs::remove_dir_all(&work);
+        result
+    })
+    .await;
+    drop(permit);
+    let (out, name, size, files, skipped) = done
+        .map_err(|_| ApiErr::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "The extraction stopped unexpectedly."))?
+        .map_err(engine_err)?;
+    let name = safe_name(&name);
+    let fmt: &'static str = if name.ends_with(".zip") && out.extension().is_some_and(|e| e == "zip") {
+        app.engine.format_by_name("zip").map_or("", |f| f.0)
+    } else {
+        oc_engine::archive::FILE.0
+    };
+    lock(&app.outputs).insert(
+        out_id.clone(),
+        OutRec { path: out, name: name.clone(), format: fmt, created: now() },
+    );
+    Ok(Json(json!({
+        "output_id": out_id, "output_name": name, "size": size,
+        "files": files, "skipped": skipped,
+    })))
+}
+
+/// `POST /api/archives`: pack several uploads into one archive. A job like any other, so
+/// progress, cancelling, history and download work the same way.
+pub async fn create_archive(
+    State(app): State<Arc<App>>,
+    Json(body): Json<Value>,
+) -> R<(StatusCode, Json<Value>)> {
+    let Value::Object(body) = body else {
+        return Err(ApiErr::bad("The request must be a JSON object."));
+    };
+    for k in body.keys() {
+        if !matches!(k.as_str(), "file_ids" | "target_format" | "options" | "name") {
+            return Err(ApiErr::bad(format!("Unknown field '{k}'.")));
+        }
+    }
+    let target = body.get("target_format").and_then(Value::as_str).unwrap_or("");
+    let to = app
+        .engine
+        .format_by_name(target)
+        .filter(|f| oc_engine::archive::is_archive(*f) && *f != oc_engine::archive::FILE)
+        .ok_or_else(|| ApiErr::bad("Choose an archive format."))?;
+    let ids = body.get("file_ids").and_then(Value::as_array).ok_or_else(|| ApiErr::bad("file_ids must be a list."))?;
+    if ids.is_empty() || ids.len() > 5000 {
+        return Err(ApiErr::bad("Choose between 1 and 5000 files."));
+    }
+    let mut picked: Vec<(std::path::PathBuf, String, u64)> = Vec::new();
+    {
+        let files = lock(&app.files);
+        for v in ids {
+            let id = v.as_str().filter(|i| valid_id(i)).ok_or_else(ApiErr::not_found)?;
+            let f = files.get(id).ok_or_else(ApiErr::not_found)?;
+            picked.push((
+                f.path.clone(),
+                safe_name(f.meta["original_name"].as_str().unwrap_or("file")),
+                f.meta["size"].as_u64().unwrap_or(0),
+            ));
+        }
+    }
+    let ext = format_ext(&app, to);
+    let out_id = new_id();
+    let out_path = app.cfg.data_dir.join("outputs").join(format!("{out_id}.{ext}"));
+    let options = job_options(&app, to, &out_path, body.get("options"))?;
+
+    // Stage copies under their original names; two uploads called a.txt become a.txt and a (2).txt.
+    let stage = app.cfg.data_dir.join("previews").join(format!("p-{out_id}"));
+    let stage2 = stage.clone();
+    let staged = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<std::path::PathBuf>> {
+        std::fs::create_dir_all(&stage2)?;
+        let mut used = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for (src, name, _) in picked {
+            let mut cand = name.clone();
+            let mut n = 2;
+            while !used.insert(cand.to_lowercase()) {
+                cand = match name.rsplit_once('.') {
+                    Some((s, e)) if !s.is_empty() => format!("{s} ({n}).{e}"),
+                    _ => format!("{name} ({n})"),
+                };
+                n += 1;
+            }
+            let dst = stage2.join(&cand);
+            std::fs::copy(&src, &dst)?;
+            out.push(dst);
+        }
+        Ok(out)
+    })
+    .await;
+    let sources = match staged {
+        Ok(Ok(s)) => s,
+        _ => {
+            let _ = std::fs::remove_dir_all(&stage);
+            return Err(ApiErr::new(StatusCode::INTERNAL_SERVER_ERROR, "io_error", "The files could not be prepared."));
+        }
+    };
+    let total: u64 = ids.iter().filter_map(|v| v.as_str()).filter_map(|i| lock(&app.files).get(i).map(|f| f.meta["size"].as_u64().unwrap_or(0))).sum();
+    let label = body
+        .get("name")
+        .and_then(Value::as_str)
+        .map(safe_name)
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| {
+            if sources.len() == 1 {
+                sources[0].file_name().map_or_else(|| "archive".into(), |n| n.to_string_lossy().into_owned())
+            } else {
+                "archive".into()
+            }
+        });
+    let meta = json!({
+        "file_id": null, "detected_format": "file", "original_name": label,
+        "size": total,
+    });
+    let job_id = new_id();
+    let cancel = CancelToken::new();
+    let (tx, _rx) = tokio::sync::watch::channel(job_snapshot(&job_id, &meta, target, "queued", 0.0, "queued"));
+    lock(&app.jobs).insert(job_id.clone(), JobRec { cancel: cancel.clone(), tx });
+    let app2 = app.clone();
+    let jid = job_id.clone();
+    let target_s = target.to_string();
+    tokio::spawn(async move {
+        let first = out_path.clone();
+        run_job(
+            app2, jid, meta, target_s, first, out_path, out_id, options,
+            Some((stage, sources)), cancel,
+        )
+        .await;
+    });
+    Ok((StatusCode::CREATED, Json(json!({"job_id": job_id}))))
 }
