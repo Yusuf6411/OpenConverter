@@ -114,3 +114,9 @@ name = "jpeg"
 path = "fuzz_targets/jpeg.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "ico"
+path = "fuzz_targets/ico.rs"
+test = false
+doc = false

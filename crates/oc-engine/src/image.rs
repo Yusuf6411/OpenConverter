@@ -9,7 +9,7 @@ use oc_core::{
     Capabilities, Category, Error, ErrorCode, FormatDescriptor, FormatId, Limits, Note, Notes,
     Ownership, Progress, Result, Severity, Sniffer,
 };
-use oc_image::{bmp, gif, jpeg, netpbm, ops, png, qoi, tga, Image};
+use oc_image::{bmp, gif, ico, jpeg, netpbm, ops, png, qoi, tga, Image};
 
 pub const PNG: FormatId = FormatId("png");
 pub const BMP: FormatId = FormatId("bmp");
@@ -18,10 +18,11 @@ pub const QOI: FormatId = FormatId("qoi");
 pub const PNM: FormatId = FormatId("pnm");
 pub const GIF: FormatId = FormatId("gif");
 pub const JPEG: FormatId = FormatId("jpeg");
+pub const ICO: FormatId = FormatId("ico");
 /// Internal hub; never shown to users.
 pub const IMAGE_IR: FormatId = FormatId("image-ir");
 
-pub const FORMATS: [FormatId; 7] = [PNG, JPEG, BMP, TGA, QOI, PNM, GIF];
+pub const FORMATS: [FormatId; 8] = [PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO];
 
 pub fn is_image(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -220,6 +221,36 @@ pub fn register(registry: &mut Registry) {
             "ITU T.81 (baseline and progressive decode, baseline encode)",
         ),
         describe(
+            ICO,
+            "ICO / CUR",
+            &["ico", "cur"],
+            &["image/vnd.microsoft.icon"],
+            // Reserved 0, type 1 (icon) or 2 (cursor): weak on its own.
+            vec![
+                Sniffer {
+                    offset: 0,
+                    magic: &[0, 0, 1, 0],
+                    confidence: 70,
+                },
+                Sniffer {
+                    offset: 0,
+                    magic: &[0, 0, 2, 0],
+                    confidence: 70,
+                },
+            ],
+            false,
+            schema(vec![OptionSpec {
+                key: "sizes",
+                label: "Icon sizes",
+                help: "Comma-separated square sizes from 1 to 256, e.g. 16,32,48,256; empty keeps the image size",
+                i18n_key: "opt.ico.sizes",
+                kind: OptionKind::Text {
+                    default: String::new(),
+                },
+            }]),
+            "Microsoft ICO / CUR",
+        ),
+        describe(
             BMP,
             "BMP",
             &["bmp", "dib"],
@@ -343,6 +374,7 @@ fn decode_description(name: &str) -> &'static str {
         "QOI" => "Decode QOI",
         "GIF" => "Decode GIF",
         "JPEG" => "Decode JPEG",
+        "ICO / CUR" => "Decode ICO",
         _ => "Decode Netpbm",
     }
 }
@@ -355,6 +387,7 @@ fn encode_description(name: &str) -> &'static str {
         "QOI" => "Encode QOI",
         "GIF" => "Encode GIF",
         "JPEG" => "Encode JPEG",
+        "ICO / CUR" => "Encode ICO",
         _ => "Encode Netpbm",
     }
 }
@@ -372,6 +405,7 @@ pub fn decode(
         QOI => qoi::decode(data, limits).map(|i| (i, Notes::new())),
         GIF => gif::decode(data, limits),
         JPEG => jpeg::decode(data, limits, progress),
+        ICO => ico::decode(data, limits, progress),
         PNM => netpbm::decode(data, limits),
         other => Err(Error::new(
             ErrorCode::UnsupportedFormat,
@@ -448,6 +482,26 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
             },
         ),
         QOI => qoi::encode(img),
+        ICO => {
+            let sizes = opts
+                .text("sizes")
+                .unwrap_or_default()
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    s.parse::<u32>()
+                        .map_err(|_| Error::invalid_option("sizes", format!("'{s}' is not a size")))
+                })
+                .collect::<Result<Vec<u32>>>()?;
+            ico::encode(
+                img,
+                &ico::EncodeOptions {
+                    sizes,
+                    cursor: ext == "cur",
+                },
+            )?
+        }
         JPEG => {
             let quality = opts.int("quality").unwrap_or(85).clamp(1, 100) as u8;
             let (bytes, mut n) = jpeg::encode(

@@ -43,6 +43,16 @@ fn masked(v: u32, mask: u32) -> u8 {
 }
 
 pub fn decode(data: &[u8], limits: &Limits) -> Result<(Image, Notes)> {
+    decode_impl(data, limits, false)
+}
+
+/// Decode a DIB wrapped in a synthetic file header, as stored inside ICO/CUR files: 32-bit
+/// pixels carry alpha, and the result is always RGBA so the caller can apply the AND mask.
+pub(crate) fn decode_icon_dib(data: &[u8], limits: &Limits) -> Result<Image> {
+    decode_impl(data, limits, true).map(|(i, _)| i)
+}
+
+fn decode_impl(data: &[u8], limits: &Limits, icon: bool) -> Result<(Image, Notes)> {
     let mut r = ByteReader::new(data);
     if r.take(2)? != b"BM" {
         return Err(Error::new(ErrorCode::UnsupportedFormat, "not a BMP file"));
@@ -128,7 +138,12 @@ pub fn decode(data: &[u8], limits: &Limits) -> Result<(Image, Notes)> {
         masks = [0x7C00, 0x03E0, 0x001F, 0];
     }
     if compression == 0 && bpp == 32 && masks[0] == 0 {
-        masks = [0x00FF_0000, 0x0000_FF00, 0x0000_00FF, 0];
+        masks = [
+            0x00FF_0000,
+            0x0000_FF00,
+            0x0000_00FF,
+            if icon { 0xFF00_0000 } else { 0 },
+        ];
     }
     if bpp == 24 {
         masks = [0x00FF_0000, 0x0000_FF00, 0x0000_00FF, 0];
@@ -316,6 +331,9 @@ pub fn decode(data: &[u8], limits: &Limits) -> Result<(Image, Notes)> {
         has_alpha_mask = false;
     }
     let img = Image::new(width, height, Layout::Rgba, Depth::Eight, rgba)?;
+    if icon {
+        return Ok((img, Notes::new()));
+    }
     let layout = if has_alpha_mask && img.has_translucency() {
         Layout::Rgba
     } else {

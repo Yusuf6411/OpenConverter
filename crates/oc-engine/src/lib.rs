@@ -490,7 +490,7 @@ mod tests {
         for fixture in ["rgb8", "pal8_trns"] {
             let src = png_fixture(&format!("{fixture}.png"));
             let want = std::fs::read(png_fixture(&format!("{fixture}.rgba"))).unwrap();
-            for ext in ["png", "bmp", "tga", "qoi", "pam", "ppm", "gif"] {
+            for ext in ["png", "bmp", "tga", "qoi", "pam", "ppm", "gif", "ico"] {
                 if ext == "ppm" && fixture == "pal8_trns" {
                     continue; // PPM has no alpha
                 }
@@ -543,6 +543,30 @@ mod tests {
             )
             .err()
             .map(|e| e.code),
+            Some(ErrorCode::InvalidOptions)
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ico_sizes_option() {
+        let dir = tmpdir("ico");
+        let out = dir.join("o.ico");
+        run(&png_fixture("rgb8.png"), &out, &[("sizes", "16, 32,64")]).unwrap();
+        let e = Engine::new();
+        let (img, n) = image::decode(
+            image::ICO,
+            &std::fs::read(&out).unwrap(),
+            &e.limits,
+            &NoProgress,
+        )
+        .unwrap();
+        assert_eq!((img.width, img.height), (64, 64));
+        assert!(n.iter().any(|n| n.code == "ico.largest_image"));
+        assert_eq!(
+            run(&png_fixture("rgb8.png"), &out, &[("sizes", "abc")])
+                .err()
+                .map(|e| e.code),
             Some(ErrorCode::InvalidOptions)
         );
         let _ = std::fs::remove_dir_all(dir);
