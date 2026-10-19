@@ -169,3 +169,9 @@ name = "icns"
 path = "fuzz_targets/icns.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "dds"
+path = "fuzz_targets/dds.rs"
+test = false
+doc = false

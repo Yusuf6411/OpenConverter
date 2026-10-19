@@ -10,7 +10,7 @@ use oc_core::{
     Ownership, Progress, Result, Severity, Sniffer,
 };
 use oc_image::anim::{self, Animation};
-use oc_image::{bmp, gif, icns, ico, jpeg, netpbm, ops, png, qoi, tga, tiff, webp, Image};
+use oc_image::{bmp, dds, gif, icns, ico, jpeg, netpbm, ops, png, qoi, tga, tiff, webp, Image};
 
 pub const PNG: FormatId = FormatId("png");
 pub const BMP: FormatId = FormatId("bmp");
@@ -21,12 +21,15 @@ pub const GIF: FormatId = FormatId("gif");
 pub const JPEG: FormatId = FormatId("jpeg");
 pub const ICO: FormatId = FormatId("ico");
 pub const ICNS: FormatId = FormatId("icns");
+pub const DDS: FormatId = FormatId("dds");
 pub const TIFF: FormatId = FormatId("tiff");
 pub const WEBP: FormatId = FormatId("webp");
 /// Internal hub; never shown to users.
 pub const IMAGE_IR: FormatId = FormatId("image-ir");
 
-pub const FORMATS: [FormatId; 11] = [PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, TIFF, WEBP];
+pub const FORMATS: [FormatId; 12] = [
+    PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, DDS, TIFF, WEBP,
+];
 
 pub fn is_image(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -287,6 +290,29 @@ pub fn register(registry: &mut Registry) {
             "Apple ICNS",
         ),
         describe(
+            DDS,
+            "DDS",
+            &["dds"],
+            &["image/vnd.ms-dds"],
+            vec![Sniffer {
+                offset: 0,
+                magic: b"DDS |\0\0\0",
+                confidence: 100,
+            }],
+            false,
+            schema(vec![OptionSpec {
+                key: "compression",
+                label: "Compression",
+                help: "bc3 (DXT5) and bc1 (DXT1) are lossy block formats GPUs read directly; none stores 32-bit BGRA",
+                i18n_key: "opt.dds.compression",
+                kind: OptionKind::Enum {
+                    choices: vec!["bc3", "bc1", "none"],
+                    default: "bc3",
+                },
+            }]),
+            "Microsoft DDS",
+        ),
+        describe(
             TIFF,
             "TIFF",
             &["tif", "tiff"],
@@ -504,6 +530,7 @@ fn decode_description(name: &str) -> &'static str {
         "WebP" => "Decode WebP",
         "ICO / CUR" => "Decode ICO",
         "ICNS" => "Decode ICNS",
+        "DDS" => "Decode DDS",
         _ => "Decode Netpbm",
     }
 }
@@ -520,6 +547,7 @@ fn encode_description(name: &str) -> &'static str {
         "WebP" => "Encode WebP",
         "ICO / CUR" => "Encode ICO",
         "ICNS" => "Encode ICNS",
+        "DDS" => "Encode DDS",
         _ => "Encode Netpbm",
     }
 }
@@ -541,6 +569,7 @@ pub fn decode(
         WEBP => webp::decode(data, limits, progress),
         ICO => ico::decode(data, limits, progress),
         ICNS => icns::decode(data, limits, progress),
+        DDS => dds::decode(data, limits),
         PNM => netpbm::decode(data, limits),
         other => Err(Error::new(
             ErrorCode::UnsupportedFormat,
@@ -742,6 +771,16 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
             &ico::EncodeOptions {
                 sizes: parse_sizes(opts)?,
                 cursor: ext == "cur",
+            },
+        )?,
+        DDS => dds::encode(
+            img,
+            &dds::EncodeOptions {
+                compression: match opts.text("compression") {
+                    Some("none") => dds::Compression::None,
+                    Some("bc1") => dds::Compression::Bc1,
+                    _ => dds::Compression::Bc3,
+                },
             },
         )?,
         ICNS => icns::encode(
