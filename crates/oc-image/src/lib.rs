@@ -11,5 +11,6 @@ pub mod netpbm;
 pub mod ops;
 pub mod png;
 pub mod qoi;
+pub mod tga;
 
 pub use image::{Depth, Image, Layout, Metadata};
