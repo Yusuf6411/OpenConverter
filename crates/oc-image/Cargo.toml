@@ -7,5 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+oc-core = { path = "../oc-core" }
+oc-io = { path = "../oc-io" }
+
 [lints]
 workspace = true
