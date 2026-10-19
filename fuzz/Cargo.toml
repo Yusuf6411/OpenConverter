@@ -16,6 +16,7 @@ oc-text = { path = "../crates/oc-text" }
 oc-xml = { path = "../crates/oc-xml" }
 oc-image = { path = "../crates/oc-image" }
 oc-vp8 = { path = "../crates/oc-vp8" }
+oc-sheet = { path = "../crates/oc-sheet" }
 
 # Not part of the main workspace: fuzzing needs a nightly toolchain.
 [workspace]
@@ -185,6 +186,12 @@ doc = false
 [[bin]]
 name = "hdr"
 path = "fuzz_targets/hdr.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "table"
+path = "fuzz_targets/table.rs"
 test = false
 doc = false
 

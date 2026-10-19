@@ -53,3 +53,5 @@ The 1.x Python notes are kept in [v1/](v1/).
 
 ## Next step
 Phase 2 continued: the remaining Phase 2 items (BC6H, JPEG extras, tables). `oc-vp8` is ready to take inter frames when video starts. The Windows job failed on two earlier pushes because git rewrote line feeds inside binary test data (`.rgba`); `.gitattributes` now marks test data as binary, and the next push shows whether that was all.
+
+- **Tables (CSV, TSV, JSON)**: `oc-sheet` reads and writes RFC 4180 delimited text (delimiter detection, lenient quotes, BOM, ragged rows padded) and flat JSON tables (own strict parser; arrays of objects or arrays). Engine options mirror 1.x. Fuzz target `table`. Not done: XLSX/ODS.

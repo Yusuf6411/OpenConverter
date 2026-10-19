@@ -11,6 +11,7 @@ publish = false
 oc-core = { path = "../oc-core" }
 oc-text = { path = "../oc-text" }
 oc-image = { path = "../oc-image" }
+oc-sheet = { path = "../oc-sheet" }
 
 [lints]
 workspace = true

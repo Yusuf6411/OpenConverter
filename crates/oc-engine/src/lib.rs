@@ -1,12 +1,13 @@
 //! Engine: assembles the format registry and runs conversions.
 //!
-//! Covers text files (encoding and line-ending conversion) and raster images (PNG, BMP,
-//! TGA, QOI, Netpbm). Further crates register their formats here as they are written.
+//! Covers text files (encoding and line-ending conversion), tables (CSV, TSV, JSON) and
+//! raster images. Further crates register their formats here as they are written.
 //! Process isolation is provided by [`isolated`]; the CLI runs every conversion through it.
 #![deny(unsafe_code)]
 
 pub mod image;
 pub mod isolated;
+pub mod table;
 
 use oc_core::options::{OptionKind, OptionSchema, OptionSpec, OptionValue, Options};
 use oc_core::planner::{Edge, EdgeKind, Registry};
@@ -119,6 +120,7 @@ impl Engine {
             description: "Decode text -> convert line endings -> encode text",
         });
         image::register(&mut registry);
+        table::register(&mut registry);
         Self {
             registry,
             limits: Limits::default(),
@@ -167,6 +169,7 @@ impl Engine {
     fn registry_formats(&self) -> impl Iterator<Item = &FormatDescriptor> {
         std::iter::once(TXT)
             .chain(image::FORMATS)
+            .chain(table::FORMATS)
             .filter_map(|id| self.registry.format(id))
     }
 
@@ -229,7 +232,12 @@ impl Engine {
         }
         let route = self.registry.plan(from, to, false)?;
 
-        let (out, route_text) = if from == TXT {
+        let (out, route_text) = if table::is_table(from) {
+            let (out, n) = table::convert(from, to, &data, &opts, &self.limits, progress)?;
+            notes.extend(n);
+            let name = |id| self.registry.format(id).map_or("table", |f| f.name);
+            (out, format!("Read {} -> Write {}", name(from), name(to)))
+        } else if from == TXT {
             let (out, n) = convert_text(&data, &opts)?;
             notes.extend(n);
             // Same-format conversions plan to an empty route; describe the actual work.
