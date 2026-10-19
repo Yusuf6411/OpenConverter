@@ -491,7 +491,7 @@ mod tests {
             let src = png_fixture(&format!("{fixture}.png"));
             let want = std::fs::read(png_fixture(&format!("{fixture}.rgba"))).unwrap();
             for ext in [
-                "png", "bmp", "tga", "qoi", "pam", "ppm", "gif", "ico", "tiff",
+                "png", "bmp", "tga", "qoi", "pam", "ppm", "gif", "ico", "tiff", "webp",
             ] {
                 if ext == "ppm" && fixture == "pal8_trns" {
                     continue; // PPM has no alpha
@@ -571,6 +571,59 @@ mod tests {
                 .map(|e| e.code),
             Some(ErrorCode::InvalidOptions)
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn webp_options_and_metadata() {
+        let dir = tmpdir("webp");
+        let src = png_fixture("pal8_trns.png");
+        let want = std::fs::read(png_fixture("pal8_trns.rgba")).unwrap();
+        let mut sizes = Vec::new();
+        for effort in ["0", "4", "6"] {
+            let out = dir.join(format!("e{effort}.webp"));
+            let rep = run(&src, &out, &[("effort", effort)]).unwrap();
+            assert!(!rep.notes.has_loss());
+            assert_eq!(decode_rgba(&out), want, "effort {effort}");
+            sizes.push(std::fs::metadata(&out).unwrap().len());
+        }
+        assert!(sizes[2] <= sizes[0], "{sizes:?}");
+        assert_eq!(
+            run(&src, &dir.join("bad.webp"), &[("effort", "9")])
+                .err()
+                .map(|e| e.code),
+            Some(ErrorCode::InvalidOptions)
+        );
+        // Hidden colour under transparent pixels is cleared on request, and only then.
+        let keep = dir.join("keep.webp");
+        let clean = dir.join("clean.webp");
+        run(&src, &keep, &[]).unwrap();
+        run(&src, &clean, &[("clean_transparent", "true")]).unwrap();
+        for (path, cleaned) in [(&keep, false), (&clean, true)] {
+            let got = decode_rgba(path);
+            for (g, w) in got.chunks(4).zip(want.chunks(4)) {
+                assert_eq!(g[3], w[3]);
+                if w[3] == 0 && cleaned {
+                    assert_eq!(&g[..3], &[0, 0, 0]);
+                } else if w[3] != 0 || !cleaned {
+                    assert_eq!(g, w);
+                }
+            }
+        }
+        // The colour profile travels in the file.
+        let e = Engine::new();
+        let (mut img, _) = image::decode(
+            image::PNG,
+            &std::fs::read(&src).unwrap(),
+            &e.limits,
+            &NoProgress,
+        )
+        .unwrap();
+        img.metadata.icc_profile = Some(vec![1, 2, 3, 4, 5]);
+        let (bytes, notes) = image::encode(image::WEBP, &img, &Options::default(), "webp").unwrap();
+        assert!(!notes.iter().any(|n| n.code == "image.icc_dropped"));
+        let (back, _) = image::decode(image::WEBP, &bytes, &e.limits, &NoProgress).unwrap();
+        assert_eq!(back.metadata.icc_profile, Some(vec![1, 2, 3, 4, 5]));
         let _ = std::fs::remove_dir_all(dir);
     }
 

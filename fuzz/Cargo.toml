@@ -126,3 +126,15 @@ name = "tiff"
 path = "fuzz_targets/tiff.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "webp"
+path = "fuzz_targets/webp.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "webp_roundtrip"
+path = "fuzz_targets/webp_roundtrip.rs"
+test = false
+doc = false

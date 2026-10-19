@@ -9,7 +9,7 @@ use oc_core::{
     Capabilities, Category, Error, ErrorCode, FormatDescriptor, FormatId, Limits, Note, Notes,
     Ownership, Progress, Result, Severity, Sniffer,
 };
-use oc_image::{bmp, gif, ico, jpeg, netpbm, ops, png, qoi, tga, tiff, Image};
+use oc_image::{bmp, gif, ico, jpeg, netpbm, ops, png, qoi, tga, tiff, webp, Image};
 
 pub const PNG: FormatId = FormatId("png");
 pub const BMP: FormatId = FormatId("bmp");
@@ -20,10 +20,11 @@ pub const GIF: FormatId = FormatId("gif");
 pub const JPEG: FormatId = FormatId("jpeg");
 pub const ICO: FormatId = FormatId("ico");
 pub const TIFF: FormatId = FormatId("tiff");
+pub const WEBP: FormatId = FormatId("webp");
 /// Internal hub; never shown to users.
 pub const IMAGE_IR: FormatId = FormatId("image-ir");
 
-pub const FORMATS: [FormatId; 9] = [PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, TIFF];
+pub const FORMATS: [FormatId; 10] = [PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, TIFF, WEBP];
 
 pub fn is_image(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -291,6 +292,39 @@ pub fn register(registry: &mut Registry) {
             "TIFF 6.0",
         ),
         describe(
+            WEBP,
+            "WebP",
+            &["webp"],
+            &["image/webp"],
+            vec![Sniffer {
+                offset: 8,
+                magic: b"WEBP",
+                confidence: 100,
+            }],
+            true,
+            schema(vec![
+                OptionSpec {
+                    key: "effort",
+                    label: "Compression effort",
+                    help: "0 is fastest, 6 gives the smallest files",
+                    i18n_key: "opt.webp.effort",
+                    kind: OptionKind::Int {
+                        min: 0,
+                        max: 6,
+                        default: 4,
+                    },
+                },
+                bool_spec(
+                    "clean_transparent",
+                    "Clear hidden colour",
+                    "Zero the colour of fully transparent pixels: smaller files, no visible change",
+                    "opt.webp.clean_transparent",
+                    false,
+                ),
+            ]),
+            "RFC 9649 (lossless VP8L)",
+        ),
+        describe(
             BMP,
             "BMP",
             &["bmp", "dib"],
@@ -415,6 +449,7 @@ fn decode_description(name: &str) -> &'static str {
         "GIF" => "Decode GIF",
         "JPEG" => "Decode JPEG",
         "TIFF" => "Decode TIFF",
+        "WebP" => "Decode WebP",
         "ICO / CUR" => "Decode ICO",
         _ => "Decode Netpbm",
     }
@@ -429,6 +464,7 @@ fn encode_description(name: &str) -> &'static str {
         "GIF" => "Encode GIF",
         "JPEG" => "Encode JPEG",
         "TIFF" => "Encode TIFF",
+        "WebP" => "Encode WebP (lossless)",
         "ICO / CUR" => "Encode ICO",
         _ => "Encode Netpbm",
     }
@@ -448,6 +484,7 @@ pub fn decode(
         GIF => gif::decode(data, limits),
         JPEG => jpeg::decode(data, limits, progress),
         TIFF => tiff::decode(data, limits, progress),
+        WEBP => webp::decode(data, limits, progress),
         ICO => ico::decode(data, limits, progress),
         PNM => netpbm::decode(data, limits),
         other => Err(Error::new(
@@ -537,6 +574,13 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
                 predictor: opts.bool("predictor").unwrap_or(true),
             },
         )?,
+        WEBP => webp::encode(
+            img,
+            &webp::EncodeOptions {
+                effort: opts.int("effort").unwrap_or(4).clamp(0, 6) as u8,
+                clean_transparent: opts.bool("clean_transparent").unwrap_or(false),
+            },
+        )?,
         ICO => {
             let sizes = opts
                 .text("sizes")
@@ -607,7 +651,7 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
         }
     };
     if fmt != PNG {
-        if img.metadata.icc_profile.is_some() && fmt != JPEG {
+        if img.metadata.icc_profile.is_some() && fmt != JPEG && fmt != WEBP {
             notes.push(Note::new(
                 Severity::Loss,
                 "image.icc_dropped",
