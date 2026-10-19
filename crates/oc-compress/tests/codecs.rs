@@ -123,3 +123,27 @@ fn xz_size_against_the_reference() {
         }
     }
 }
+
+#[test]
+fn zstd_decodes_python_files() {
+    for (name, comp, raw) in cases("zstd", "zst") {
+        let got = oc_compress::zstd::decompress(&comp, &Limits::default(), &NoProgress).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(got == raw, "{name}");
+    }
+}
+
+#[test]
+fn lz4_decodes_python_files() {
+    for (name, comp, raw) in cases("lz4", "lz4") {
+        let got = oc_compress::lz4::decompress(&comp, &Limits::default(), &NoProgress).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(got == raw, "{name}");
+    }
+}
+
+#[test]
+fn compress_z_decodes_files_checked_with_uncompress() {
+    for (name, comp, raw) in cases("compress", "Z") {
+        let got = oc_compress::compress_z::decompress(&comp, &Limits::default(), &NoProgress).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(got == raw, "{name}");
+    }
+}

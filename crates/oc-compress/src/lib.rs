@@ -2,14 +2,17 @@
 #![forbid(unsafe_code)]
 
 pub mod bcj;
+pub mod compress_z;
 pub mod bzip2;
 pub mod deflate;
 pub mod gzip;
 pub mod inflate;
+pub mod lz4;
 pub mod lzma;
 pub mod lzw;
 pub(crate) mod sais;
 pub(crate) mod msb;
 pub mod packbits;
 pub mod xz;
+pub mod zstd;
 pub mod zlib;

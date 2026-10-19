@@ -247,11 +247,70 @@ pub fn xxhash64(data: &[u8], seed: u64) -> u64 {
     h ^ (h >> 32)
 }
 
+const Q1: u32 = 2_654_435_761;
+const Q2: u32 = 2_246_822_519;
+const Q3: u32 = 3_266_489_917;
+const Q4: u32 = 668_265_263;
+const Q5: u32 = 374_761_393;
+
+/// One-shot xxHash32.
+pub fn xxhash32(data: &[u8], seed: u32) -> u32 {
+    let mut rest = data;
+    let mut h = if data.len() >= 16 {
+        let mut v = [
+            seed.wrapping_add(Q1).wrapping_add(Q2),
+            seed.wrapping_add(Q2),
+            seed,
+            seed.wrapping_sub(Q1),
+        ];
+        while rest.len() >= 16 {
+            for (i, vi) in v.iter_mut().enumerate() {
+                *vi = vi
+                    .wrapping_add(le32(rest.get(i * 4..).unwrap_or(&[])).wrapping_mul(Q2))
+                    .rotate_left(13)
+                    .wrapping_mul(Q1);
+            }
+            rest = rest.get(16..).unwrap_or(&[]);
+        }
+        v[0].rotate_left(1)
+            .wrapping_add(v[1].rotate_left(7))
+            .wrapping_add(v[2].rotate_left(12))
+            .wrapping_add(v[3].rotate_left(18))
+    } else {
+        seed.wrapping_add(Q5)
+    };
+    h = h.wrapping_add(data.len() as u32);
+    while rest.len() >= 4 {
+        h = h
+            .wrapping_add(le32(rest).wrapping_mul(Q3))
+            .rotate_left(17)
+            .wrapping_mul(Q4);
+        rest = rest.get(4..).unwrap_or(&[]);
+    }
+    for &b in rest {
+        h = h
+            .wrapping_add(u32::from(b).wrapping_mul(Q5))
+            .rotate_left(11)
+            .wrapping_mul(Q1);
+    }
+    h ^= h >> 15;
+    h = h.wrapping_mul(Q2);
+    h ^= h >> 13;
+    h = h.wrapping_mul(Q3);
+    h ^ (h >> 16)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const CHECK: &[u8] = b"123456789";
+
+    #[test]
+    fn xxhash32_known_values() {
+        assert_eq!(xxhash32(b"", 0), 0x02CC_5D05);
+        assert_eq!(xxhash32(CHECK, 0), 0x937B_AD67);
+    }
 
     #[test]
     fn crc_check_values() {

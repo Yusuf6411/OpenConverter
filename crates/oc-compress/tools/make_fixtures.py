@@ -46,5 +46,5 @@ for name, raw in samples().items():
         import lz4.frame, lz4.block
         for lv in (0, 9):
             put("lz4", f"{name}-{lv}", raw, lz4.frame.compress(raw, compression_level=lv), "lz4")
-        put("lz4", f"{name}-nocontent", raw, lz4.frame.compress(raw, content_size=False, block_linked=False, content_checksum=True, block_checksum=True), "lz4")
+        put("lz4", f"{name}-nocontent", raw, lz4.frame.compress(raw, block_linked=False, content_checksum=True, block_checksum=True), "lz4")
 print("fixtures written")
