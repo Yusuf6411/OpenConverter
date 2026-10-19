@@ -9,7 +9,7 @@ use oc_core::{
     Capabilities, Category, Error, ErrorCode, FormatDescriptor, FormatId, Limits, Note, Notes,
     Ownership, Progress, Result, Severity, Sniffer,
 };
-use oc_image::{bmp, gif, ico, jpeg, netpbm, ops, png, qoi, tga, Image};
+use oc_image::{bmp, gif, ico, jpeg, netpbm, ops, png, qoi, tga, tiff, Image};
 
 pub const PNG: FormatId = FormatId("png");
 pub const BMP: FormatId = FormatId("bmp");
@@ -19,10 +19,11 @@ pub const PNM: FormatId = FormatId("pnm");
 pub const GIF: FormatId = FormatId("gif");
 pub const JPEG: FormatId = FormatId("jpeg");
 pub const ICO: FormatId = FormatId("ico");
+pub const TIFF: FormatId = FormatId("tiff");
 /// Internal hub; never shown to users.
 pub const IMAGE_IR: FormatId = FormatId("image-ir");
 
-pub const FORMATS: [FormatId; 8] = [PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO];
+pub const FORMATS: [FormatId; 9] = [PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, TIFF];
 
 pub fn is_image(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -251,6 +252,45 @@ pub fn register(registry: &mut Registry) {
             "Microsoft ICO / CUR",
         ),
         describe(
+            TIFF,
+            "TIFF",
+            &["tif", "tiff"],
+            &["image/tiff"],
+            vec![
+                Sniffer {
+                    offset: 0,
+                    magic: b"II*\0",
+                    confidence: 100,
+                },
+                Sniffer {
+                    offset: 0,
+                    magic: b"MM\0*",
+                    confidence: 100,
+                },
+            ],
+            true,
+            schema(vec![
+                OptionSpec {
+                    key: "compression",
+                    label: "Compression",
+                    help: "lzw and deflate are lossless and usually smallest; packbits is simple and fast",
+                    i18n_key: "opt.tiff.compression",
+                    kind: OptionKind::Enum {
+                        choices: vec!["none", "lzw", "deflate", "packbits"],
+                        default: "lzw",
+                    },
+                },
+                bool_spec(
+                    "predictor",
+                    "Horizontal predictor",
+                    "Improves lzw and deflate on photographs",
+                    "opt.tiff.predictor",
+                    true,
+                ),
+            ]),
+            "TIFF 6.0",
+        ),
+        describe(
             BMP,
             "BMP",
             &["bmp", "dib"],
@@ -374,6 +414,7 @@ fn decode_description(name: &str) -> &'static str {
         "QOI" => "Decode QOI",
         "GIF" => "Decode GIF",
         "JPEG" => "Decode JPEG",
+        "TIFF" => "Decode TIFF",
         "ICO / CUR" => "Decode ICO",
         _ => "Decode Netpbm",
     }
@@ -387,6 +428,7 @@ fn encode_description(name: &str) -> &'static str {
         "QOI" => "Encode QOI",
         "GIF" => "Encode GIF",
         "JPEG" => "Encode JPEG",
+        "TIFF" => "Encode TIFF",
         "ICO / CUR" => "Encode ICO",
         _ => "Encode Netpbm",
     }
@@ -405,6 +447,7 @@ pub fn decode(
         QOI => qoi::decode(data, limits).map(|i| (i, Notes::new())),
         GIF => gif::decode(data, limits),
         JPEG => jpeg::decode(data, limits, progress),
+        TIFF => tiff::decode(data, limits, progress),
         ICO => ico::decode(data, limits, progress),
         PNM => netpbm::decode(data, limits),
         other => Err(Error::new(
@@ -482,6 +525,18 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
             },
         ),
         QOI => qoi::encode(img),
+        TIFF => tiff::encode(
+            img,
+            &tiff::EncodeOptions {
+                compression: match opts.text("compression") {
+                    Some("none") => tiff::Compression::None,
+                    Some("deflate") => tiff::Compression::Deflate,
+                    Some("packbits") => tiff::Compression::PackBits,
+                    _ => tiff::Compression::Lzw,
+                },
+                predictor: opts.bool("predictor").unwrap_or(true),
+            },
+        )?,
         ICO => {
             let sizes = opts
                 .text("sizes")

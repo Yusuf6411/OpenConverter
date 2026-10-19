@@ -490,7 +490,9 @@ mod tests {
         for fixture in ["rgb8", "pal8_trns"] {
             let src = png_fixture(&format!("{fixture}.png"));
             let want = std::fs::read(png_fixture(&format!("{fixture}.rgba"))).unwrap();
-            for ext in ["png", "bmp", "tga", "qoi", "pam", "ppm", "gif", "ico"] {
+            for ext in [
+                "png", "bmp", "tga", "qoi", "pam", "ppm", "gif", "ico", "tiff",
+            ] {
                 if ext == "ppm" && fixture == "pal8_trns" {
                     continue; // PPM has no alpha
                 }

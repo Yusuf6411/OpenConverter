@@ -16,5 +16,6 @@ pub mod png;
 pub mod qoi;
 pub mod quant;
 pub mod tga;
+pub mod tiff;
 
 pub use image::{Depth, Image, Layout, Metadata};
