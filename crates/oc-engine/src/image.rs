@@ -260,8 +260,22 @@ pub fn register(registry: &mut Registry) {
                         default: "4:2:0",
                     },
                 },
+                bool_spec(
+                    "optimize",
+                    "Optimise Huffman tables",
+                    "Builds the entropy tables from the picture; smaller files, a little slower",
+                    "opt.jpeg.optimize",
+                    false,
+                ),
+                bool_spec(
+                    "progressive",
+                    "Progressive",
+                    "Stores the picture in refining passes so a partial download shows a preview; also smaller",
+                    "opt.jpeg.progressive",
+                    false,
+                ),
             ]),
-            "ITU T.81 (baseline and progressive decode, baseline encode)",
+            "ITU T.81 (baseline and progressive, encode and decode)",
         ),
         describe(
             ICO,
@@ -983,6 +997,8 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
                         _ => jpeg::Subsampling::S420,
                     },
                     background: [br, bg, bb],
+                    optimize: opts.bool("optimize") == Some(true),
+                    progressive: opts.bool("progressive") == Some(true),
                 },
             )?;
             n.push(Note::new(
