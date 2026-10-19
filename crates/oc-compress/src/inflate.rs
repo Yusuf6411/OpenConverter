@@ -159,13 +159,24 @@ pub struct Inflated {
 
 /// Inflate a raw DEFLATE stream, ignoring any trailing input.
 pub fn inflate(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<Inflated> {
-    inflate_impl(input, limits, progress, false)
+    inflate_impl(input, limits, progress, false, &[])
+}
+
+/// Inflate a raw DEFLATE stream whose matches may reach into `dict` (the preceding output
+/// of an earlier block, as in Microsoft CAB "MSZIP"). Only the new bytes are returned.
+pub fn inflate_with_dict(
+    input: &[u8],
+    dict: &[u8],
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<Inflated> {
+    inflate_impl(input, limits, progress, false, dict)
 }
 
 /// Inflate a Deflate64 ("enhanced deflate") stream: 64 KiB window, 16-bit extra length
 /// bits on symbol 285 and two more distance codes.
 pub fn inflate64(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<Inflated> {
-    inflate_impl(input, limits, progress, true)
+    inflate_impl(input, limits, progress, true, &[])
 }
 
 fn inflate_impl(
@@ -173,10 +184,11 @@ fn inflate_impl(
     limits: &Limits,
     progress: &dyn Progress,
     d64: bool,
+    dict: &[u8],
 ) -> Result<Inflated> {
     let mut b = Bits::new(input);
-    let mut out: Vec<u8> = Vec::new();
-    let mut checked = 0usize;
+    let mut out: Vec<u8> = dict.to_vec();
+    let mut checked = out.len();
     loop {
         let last = b.bits(1)? == 1;
         match b.bits(2)? {
@@ -281,6 +293,7 @@ fn inflate_impl(
         }
     }
     b.align();
+    out.drain(..dict.len().min(out.len()));
     Ok(Inflated {
         data: out,
         consumed: b.pos,

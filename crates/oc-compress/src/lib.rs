@@ -9,6 +9,7 @@ pub mod gzip;
 pub mod inflate;
 pub mod lz4;
 pub mod lzma;
+pub mod lzx;
 pub mod lzw;
 pub(crate) mod sais;
 pub(crate) mod msb;
