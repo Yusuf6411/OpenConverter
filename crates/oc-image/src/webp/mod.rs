@@ -1,6 +1,7 @@
-//! WebP: RIFF container plus the lossless (VP8L) codec.
+//! WebP: RIFF container, the lossless (VP8L) codec and lossy (VP8) key frames.
 //!
-//! Lossy WebP (VP8) and animation are not supported yet and fail with a typed error.
+//! Animation is not supported yet and fails with a typed error.
+mod lossy;
 mod prefix;
 mod vp8l;
 mod vp8l_enc;
@@ -57,7 +58,9 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
     let mut vp8x_alpha = false;
     let mut canvas: Option<(u32, u32)> = None;
     let mut icc: Option<Vec<u8>> = None;
-    let mut lossless: Option<&[u8]> = None;
+    // The first image chunk decides between the lossless and the lossy codec.
+    let mut image: Option<(bool, &[u8])> = None;
+    let mut alph: Option<&[u8]> = None;
     for c in &list {
         match &c.tag {
             b"VP8X" => {
@@ -77,13 +80,9 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
                 canvas = Some((le24(4) + 1, le24(7) + 1));
             }
             b"ICCP" => icc = Some(c.body.to_vec()),
-            b"VP8L" if lossless.is_none() => lossless = Some(c.body),
-            b"VP8 " | b"ALPH" if lossless.is_none() => {
-                return Err(Error::new(
-                    ErrorCode::UnsupportedVariant,
-                    "lossy WebP (VP8) is not supported yet",
-                ));
-            }
+            b"VP8L" if image.is_none() => image = Some((true, c.body)),
+            b"VP8 " if image.is_none() => image = Some((false, c.body)),
+            b"ALPH" if alph.is_none() => alph = Some(c.body),
             b"ANMF" | b"ANIM" => {
                 return Err(Error::new(
                     ErrorCode::UnsupportedVariant,
@@ -93,30 +92,64 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
             _ => {}
         }
     }
-    let body = lossless.ok_or_else(|| Error::corrupt("WebP file has no image data"))?;
-    let d = vp8l::decode(body, limits, progress)?;
-    if let Some((cw, ch)) = canvas {
-        if (cw, ch) != (d.width, d.height) {
-            return Err(Error::corrupt(
-                "WebP canvas size differs from the image size",
-            ));
+    let (is_lossless, body) = image.ok_or_else(|| Error::corrupt("WebP file has no image data"))?;
+    let mut img = if is_lossless {
+        let d = vp8l::decode(body, limits, progress)?;
+        check_canvas(canvas, d.width, d.height)?;
+        let alpha = d.has_alpha_hint || vp8x_alpha;
+        let channels = if alpha { 4 } else { 3 };
+        let mut bytes = Vec::with_capacity(d.argb.len() * channels);
+        for &p in &d.argb {
+            bytes.push((p >> 16) as u8);
+            bytes.push((p >> 8) as u8);
+            bytes.push(p as u8);
+            if alpha {
+                bytes.push((p >> 24) as u8);
+            }
         }
-    }
-    let alpha = d.has_alpha_hint || vp8x_alpha;
-    let channels = if alpha { 4 } else { 3 };
-    let mut bytes = Vec::with_capacity(d.argb.len() * channels);
-    for &p in &d.argb {
-        bytes.push((p >> 16) as u8);
-        bytes.push((p >> 8) as u8);
-        bytes.push(p as u8);
-        if alpha {
-            bytes.push((p >> 24) as u8);
+        let layout = if alpha { Layout::Rgba } else { Layout::Rgb };
+        Image::new(d.width, d.height, layout, Depth::Eight, bytes)?
+    } else {
+        let (w, h) = oc_vp8::dimensions(body)?;
+        let (w, h) = (w as u32, h as u32);
+        check_canvas(canvas, w, h)?;
+        let px = limits.check_pixels(w, h)?;
+        limits.check_alloc(px * 4)?;
+        let frame = oc_vp8::decode(body, progress)?;
+        let rgb = lossy::frame_to_rgb(&frame);
+        let alpha = match alph {
+            Some(chunk) => Some(lossy::decode_alpha(
+                chunk,
+                frame.width,
+                frame.height,
+                limits,
+                progress,
+            )?),
+            None => None,
+        };
+        if alpha.is_some() || vp8x_alpha {
+            let plane = alpha.unwrap_or_else(|| vec![255; frame.width * frame.height]);
+            let mut bytes = Vec::with_capacity(rgb.len() / 3 * 4);
+            for (px, &a) in rgb.as_chunks::<3>().0.iter().zip(&plane) {
+                bytes.extend_from_slice(px);
+                bytes.push(a);
+            }
+            Image::new(w, h, Layout::Rgba, Depth::Eight, bytes)?
+        } else {
+            Image::new(w, h, Layout::Rgb, Depth::Eight, rgb)?
         }
-    }
-    let layout = if alpha { Layout::Rgba } else { Layout::Rgb };
-    let mut img = Image::new(d.width, d.height, layout, Depth::Eight, bytes)?;
+    };
     img.metadata.icc_profile = icc;
     Ok((img, notes))
+}
+
+fn check_canvas(canvas: Option<(u32, u32)>, w: u32, h: u32) -> Result<()> {
+    match canvas {
+        Some(c) if c != (w, h) => Err(Error::corrupt(
+            "WebP canvas size differs from the image size",
+        )),
+        _ => Ok(()),
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -240,6 +273,37 @@ mod tests {
         }
     }
 
+    fn lossy_fixtures() -> Vec<std::path::PathBuf> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/webp_lossy");
+        let mut v: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|e| e == "webp"))
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn lossy_matches_libwebp_via_pillow() {
+        let files = lossy_fixtures();
+        assert!(files.len() >= 30, "fixtures missing");
+        for f in files {
+            let data = std::fs::read(&f).unwrap();
+            let (img, _) = decode(&data, &Limits::default(), &NoProgress)
+                .unwrap_or_else(|e| panic!("{}: {e}", f.display()));
+            let rgba = rgba_of(&img);
+            let sum = std::fs::read_to_string(f.with_extension("sum")).unwrap();
+            let want: Vec<&str> = sum.split_whitespace().collect();
+            let got = [
+                rgba.len().to_string(),
+                format!("{:08x}", oc_checksum::crc32(&rgba)),
+                format!("{:08x}", oc_checksum::adler32(&rgba)),
+            ];
+            assert_eq!(got.as_slice(), want.as_slice(), "{}", f.display());
+        }
+    }
+
     #[test]
     fn distance_table_matches_libwebp_encoding() {
         // libwebp stores each entry as (y << 4) | (8 - x).
@@ -326,7 +390,7 @@ mod tests {
             max_pixels: 1 << 22,
             ..Limits::default()
         };
-        for f in fixtures() {
+        for f in fixtures().into_iter().chain(lossy_fixtures()) {
             let data = std::fs::read(&f).unwrap();
             // Every cut either decodes (a prefix that happens to be complete) or errors.
             for cut in (0..data.len()).step_by(data.len() / 60 + 1) {
@@ -344,12 +408,17 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_variants_are_named() {
-        let mut lossy = b"RIFF\x16\0\0\0WEBPVP8 \x0a\0\0\0".to_vec();
-        lossy.extend_from_slice(&[0; 10]);
-        let e = decode(&lossy, &Limits::default(), &NoProgress).unwrap_err();
+    fn animation_is_named_and_junk_is_rejected() {
+        // VP8X with the animation flag.
+        let mut anim = b"RIFF\x16\0\0\0WEBPVP8X\x0a\0\0\0".to_vec();
+        anim.extend_from_slice(&[0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let e = decode(&anim, &Limits::default(), &NoProgress).unwrap_err();
         assert_eq!(e.code, ErrorCode::UnsupportedVariant);
-        assert!(sniff(&lossy));
+        // A lossy chunk that is not a key frame.
+        let mut junk = b"RIFF\x16\0\0\0WEBPVP8 \x0a\0\0\0".to_vec();
+        junk.extend_from_slice(&[0; 10]);
+        assert!(decode(&junk, &Limits::default(), &NoProgress).is_err());
+        assert!(sniff(&junk));
         assert!(!sniff(b"RIFF....WAVE"));
     }
 }

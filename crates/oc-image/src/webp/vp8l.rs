@@ -720,12 +720,21 @@ pub(crate) fn read_header(data: &[u8]) -> Result<(u32, u32, bool)> {
     Ok((w, h, alpha))
 }
 
-pub(crate) fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<Decoded> {
-    let (width, height, has_alpha_hint) = read_header(data)?;
+/// An image stream without the five-byte header, as stored by the WebP `ALPH` chunk.
+pub(crate) fn decode_headerless(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<Vec<u32>> {
     let ctx = Ctx { limits, progress };
     check_dims(&ctx, width, height)?;
     let mut br = Bits::new(data);
-    br.read(8 + 14 + 14 + 1 + 3);
+    decode_stream(&mut br, width, height, &ctx)
+}
+
+fn decode_stream(br: &mut Bits, width: u32, height: u32, ctx: &Ctx) -> Result<Vec<u32>> {
     let mut transforms: Vec<Transform> = Vec::new();
     let mut xsize = width;
     let mut seen = [false; 4];
@@ -741,11 +750,11 @@ pub(crate) fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> R
             0 | 1 => {
                 let bits = br.read(3) + 2;
                 let data = decode_coded(
-                    &mut br,
+                    br,
                     sub_size(xsize, bits),
                     sub_size(height, bits),
                     false,
-                    &ctx,
+                    ctx,
                 )?;
                 transforms.push(if kind == 0 {
                     Transform::Predictor { bits, data }
@@ -756,7 +765,7 @@ pub(crate) fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> R
             2 => transforms.push(Transform::SubtractGreen),
             _ => {
                 let n = br.read(8) as usize + 1;
-                let mut table = decode_coded(&mut br, n as u32, 1, false, &ctx)?;
+                let mut table = decode_coded(br, n as u32, 1, false, ctx)?;
                 for i in 1..table.len() {
                     let prev = table.get(i - 1).copied().unwrap_or(0);
                     if let Some(t) = table.get_mut(i) {
@@ -776,7 +785,7 @@ pub(crate) fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> R
         }
         br.check()?;
     }
-    let mut argb = decode_coded(&mut br, xsize, height, true, &ctx)?;
+    let mut argb = decode_coded(br, xsize, height, true, ctx)?;
     let mut cur_w = xsize as usize;
     let h = height as usize;
     for t in transforms.iter().rev() {
@@ -794,6 +803,16 @@ pub(crate) fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> R
             }
         }
     }
+    Ok(argb)
+}
+
+pub(crate) fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<Decoded> {
+    let (width, height, has_alpha_hint) = read_header(data)?;
+    let ctx = Ctx { limits, progress };
+    check_dims(&ctx, width, height)?;
+    let mut br = Bits::new(data);
+    br.read(8 + 14 + 14 + 1 + 3);
+    let argb = decode_stream(&mut br, width, height, &ctx)?;
     Ok(Decoded {
         width,
         height,

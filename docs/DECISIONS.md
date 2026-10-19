@@ -14,3 +14,8 @@ Consequences: the push gate runs before each PR update; CI is checked on the PR.
 Context: CI runs the newest stable toolchain, whose clippy added a lint the local 1.97 did not have (`chunks_exact_to_as_chunks`) and failed the first Phase 1 push.
 Decision: keep `channel = "stable"` and run the push gate with `RUSTUP_TOOLCHAIN=stable` after `rustup update`; fix new lints when they appear. Revisit and pin if this becomes noisy.
 Consequences: a toolchain update can turn CI red without a code change.
+
+## ADR-0004: VP8 constant tables come from a libwebp binary, checked into source
+Context: rfc-editor.org is unreachable from the build environment, and the VP8 specification (RFC 6386) is mostly tables: quantizer steps, token probabilities, key-frame mode probabilities.
+Decision: `crates/oc-vp8/tools/gen_tables.py` reads those tables from a system libwebp shared object, asserts their known first and last values, and writes `src/tables.rs`. Nothing at runtime depends on libwebp. The decoder and its tests compare against libwebp output at development time only (`tools/make_fixtures.py`, `crates/oc-image/tools/make_lossy_webp_fixtures.py`).
+Consequences: the tables are numeric constants of the format; the tool documents where they came from so they can be re-checked against the RFC text when network access allows.

@@ -13,6 +13,7 @@ oc-io = { path = "../oc-io" }
 oc-checksum = { path = "../oc-checksum" }
 oc-compress = { path = "../oc-compress" }
 oc-text = { path = "../oc-text" }
+oc-vp8 = { path = "../oc-vp8" }
 
 [lints]
 workspace = true

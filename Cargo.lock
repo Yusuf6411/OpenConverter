@@ -81,6 +81,7 @@ dependencies = [
  "oc-core",
  "oc-io",
  "oc-text",
+ "oc-vp8",
 ]
 
 [[package]]
@@ -136,6 +137,9 @@ version = "2.0.0-dev"
 [[package]]
 name = "oc-vp8"
 version = "2.0.0-dev"
+dependencies = [
+ "oc-core",
+]
 
 [[package]]
 name = "oc-worker"
