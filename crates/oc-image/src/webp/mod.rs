@@ -159,6 +159,8 @@ pub struct EncodeOptions {
     /// Zero the colour of fully transparent pixels, which compresses better and
     /// cannot be seen.
     pub clean_transparent: bool,
+    /// `Some(q)` with `q` in 0..=100 encodes lossily (VP8); `None` is lossless.
+    pub quality: Option<f32>,
 }
 
 impl Default for EncodeOptions {
@@ -166,6 +168,7 @@ impl Default for EncodeOptions {
         Self {
             effort: 4,
             clean_transparent: false,
+            quality: None,
         }
     }
 }
@@ -198,6 +201,9 @@ pub fn encode(img: &Image, opts: &EncodeOptions) -> Result<(Vec<u8>, Notes)> {
     let (px, n) = ops::convert_layout(&e8, target, [255, 255, 255]);
     notes.extend(n);
     let alpha = px.has_translucency();
+    if let Some(quality) = opts.quality {
+        return encode_lossy(img, px, alpha, opts, quality, notes);
+    }
     let ch = px.layout.channels();
     let argb: Vec<u32> = px
         .data
@@ -226,6 +232,88 @@ pub fn encode(img: &Image, opts: &EncodeOptions) -> Result<(Vec<u8>, Notes)> {
         chunk(&mut body, b"ICCP", icc);
     }
     chunk(&mut body, b"VP8L", &stream);
+    let mut out = Vec::with_capacity(body.len() + 8);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+    out.extend_from_slice(&body);
+    Ok((out, notes))
+}
+
+fn vp8x(alpha: bool, icc: bool, w: u32, h: u32) -> Vec<u8> {
+    let flags = if icc { 0x20 } else { 0 } | if alpha { 0x10 } else { 0 };
+    let mut x = vec![flags, 0, 0, 0];
+    x.extend((w - 1).to_le_bytes().iter().take(3));
+    x.extend((h - 1).to_le_bytes().iter().take(3));
+    x
+}
+
+/// Lossy WebP: a VP8 key frame, with the alpha channel (if any) in a separate lossless chunk.
+fn encode_lossy(
+    img: &Image,
+    mut px: Image,
+    alpha: bool,
+    opts: &EncodeOptions,
+    quality: f32,
+    mut notes: Notes,
+) -> Result<(Vec<u8>, Notes)> {
+    if px.width > 16383 || px.height > 16383 {
+        return Err(Error::new(
+            ErrorCode::UnsupportedVariant,
+            "lossy WebP images are at most 16383 pixels on a side",
+        ));
+    }
+    if !(0.0..=100.0).contains(&quality) {
+        return Err(Error::invalid_option(
+            "quality",
+            "must be between 0 and 100",
+        ));
+    }
+    let (w, h) = (px.width as usize, px.height as usize);
+    let mut plane = None;
+    if alpha {
+        lossy::flatten_transparent(&mut px.data, w, h);
+        plane = Some(
+            px.data
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| c[3])
+                .collect::<Vec<u8>>(),
+        );
+    }
+    let frame = lossy::rgb_to_yuv(&px.data, w, h, px.layout.channels());
+    let params = oc_vp8::Params {
+        quality,
+        effort: opts.effort.min(6),
+        ..oc_vp8::Params::default()
+    };
+    let vp8 = oc_vp8::encode(&frame, &params, &oc_core::NoProgress)?;
+    notes.push(oc_core::Note::new(
+        oc_core::Severity::Info,
+        "image.lossy_compression",
+        format!("lossy WebP at quality {quality}"),
+    ));
+    let mut body = Vec::new();
+    body.extend_from_slice(b"WEBP");
+    let icc = img.metadata.icc_profile.as_deref();
+    if icc.is_some() || alpha {
+        chunk(
+            &mut body,
+            b"VP8X",
+            &vp8x(alpha, icc.is_some(), px.width, px.height),
+        );
+    }
+    if let Some(icc) = icc {
+        chunk(&mut body, b"ICCP", icc);
+    }
+    if let Some(plane) = &plane {
+        chunk(
+            &mut body,
+            b"ALPH",
+            &lossy::encode_alpha(plane, w, h, opts.effort),
+        );
+    }
+    chunk(&mut body, b"VP8 ", &vp8);
     let mut out = Vec::with_capacity(body.len() + 8);
     out.extend_from_slice(b"RIFF");
     out.extend_from_slice(&(body.len() as u32).to_le_bytes());
@@ -368,6 +456,7 @@ mod tests {
                     &EncodeOptions {
                         effort,
                         clean_transparent: false,
+                        quality: None,
                     },
                 )
                 .unwrap();

@@ -628,6 +628,55 @@ mod tests {
     }
 
     #[test]
+    fn webp_lossy_quality_and_alpha() {
+        let dir = tmpdir("webp_lossy");
+        for name in ["rgb8.png", "pal8_trns.png"] {
+            let src = png_fixture(name);
+            let want = std::fs::read(png_fixture(&name.replace(".png", ".rgba"))).unwrap();
+            let mut sizes = Vec::new();
+            for quality in ["10", "60", "95"] {
+                let out = dir.join(format!("{name}_{quality}.webp"));
+                let rep = run(&src, &out, &[("lossless", "false"), ("quality", quality)]).unwrap();
+                assert!(rep
+                    .notes
+                    .iter()
+                    .any(|n| n.code == "image.lossy_compression"));
+                let got = decode_rgba(&out);
+                assert_eq!(got.len(), want.len());
+                let (mut err, mut alpha_ok) = (0u64, true);
+                for (g, w) in got.chunks(4).zip(want.chunks(4)) {
+                    alpha_ok &= g[3] == w[3];
+                    if w[3] != 0 {
+                        for k in 0..3 {
+                            err += u64::from(g[k].abs_diff(w[k]));
+                        }
+                    }
+                }
+                assert!(alpha_ok, "{name} q{quality}: alpha must survive exactly");
+                let mean = err as f64 / want.len() as f64 * 4.0 / 3.0;
+                assert!(mean < 40.0, "{name} q{quality}: mean error {mean}");
+                sizes.push(std::fs::metadata(&out).unwrap().len());
+            }
+            assert!(sizes[0] <= sizes[2], "{name}: {sizes:?}");
+        }
+        let out = dir.join("bad.webp");
+        for (k, v) in [("quality", "101"), ("quality", "-1")] {
+            assert_eq!(
+                run(
+                    &png_fixture("rgb8.png"),
+                    &out,
+                    &[("lossless", "false"), (k, v)]
+                )
+                .err()
+                .map(|e| e.code),
+                Some(ErrorCode::InvalidOptions),
+                "{k}={v}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn gif_output_reports_quantisation() {
         let dir = tmpdir("gifq");
         let out = dir.join("o.gif");

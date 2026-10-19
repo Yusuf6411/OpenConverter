@@ -9,12 +9,13 @@
 )]
 
 use crate::bool::BoolReader;
-use crate::filter::{filter_mb, FilterInfo, PlaneMut};
+use crate::filter::{filter_mb, strengths, FilterInfo, PlaneMut};
 use crate::predict::{predict_4x4, predict_block, DC_PRED, H_PRED, TM_PRED, V_PRED};
+use crate::recon::Planes;
 use crate::tables::{
     AC_TABLE, BANDS, BMODE_PROBS, COEFF_PROBS, COEFF_UPDATE_PROBS, DC_TABLE, ZIGZAG,
 };
-use crate::transform::{idct_add, iwht};
+use crate::transform::iwht;
 use oc_core::{Error, Progress, Result};
 
 /// A decoded frame as three tightly packed planes; chroma is subsampled by two both ways,
@@ -201,14 +202,6 @@ fn nz_code(nz: usize, dc: i16) -> u8 {
     }
 }
 
-struct Planes {
-    y: Vec<u8>,
-    u: Vec<u8>,
-    v: Vec<u8>,
-    ys: usize,
-    uvs: usize,
-}
-
 pub fn decode(data: &[u8], progress: &dyn Progress) -> Result<Frame> {
     let tag = parse_tag(data)?;
     let part0 = data
@@ -345,66 +338,19 @@ pub fn decode(data: &[u8], progress: &dyn Progress) -> Result<Frame> {
         return Err(Error::truncated("VP8 frame header"));
     }
 
-    // Loop filter strengths per segment and per prediction kind.
-    let mut fstrength = [[FilterInfo::default(); 2]; 4];
-    if filter_type > 0 {
-        for (s, row) in fstrength.iter_mut().enumerate() {
-            let base = if seg.enabled {
-                let mut b = seg.filter[s];
-                if !seg.absolute {
-                    b += fh.level;
-                }
-                b
-            } else {
-                fh.level
-            };
-            for (i4, info) in row.iter_mut().enumerate() {
-                let mut level = base;
-                if fh.use_delta {
-                    level += fh.ref_delta[0];
-                    if i4 == 1 {
-                        level += fh.mode_delta[0];
-                    }
-                }
-                let level = level.clamp(0, 63);
-                if level > 0 {
-                    let mut il = level;
-                    if fh.sharpness > 0 {
-                        il >>= if fh.sharpness > 4 { 2 } else { 1 };
-                        il = il.min(9 - fh.sharpness);
-                    }
-                    let il = il.max(1);
-                    info.ilevel = il as u8;
-                    info.limit = (2 * level + il) as u8;
-                    info.hev_thresh = if level >= 40 {
-                        2
-                    } else if level >= 15 {
-                        1
-                    } else {
-                        0
-                    };
-                }
-                info.inner = i4 == 1;
-            }
-        }
-    }
-
-    // Planes with a one-pixel border above and to the left.
-    let ys = mb_w * 16 + 1;
-    let uvs = mb_w * 8 + 1;
-    let mut pl = Planes {
-        y: vec![0; ys * (mb_h * 16 + 1)],
-        u: vec![0; uvs * (mb_h * 8 + 1)],
-        v: vec![0; uvs * (mb_h * 8 + 1)],
-        ys,
-        uvs,
+    let fstrength = if filter_type > 0 {
+        strengths(
+            fh.level,
+            fh.sharpness,
+            seg.enabled.then_some((&seg.filter, seg.absolute)),
+            fh.use_delta.then_some((fh.ref_delta[0], fh.mode_delta[0])),
+        )
+    } else {
+        [[FilterInfo::default(); 2]; 4]
     };
-    for (buf, stride) in [(&mut pl.y, ys), (&mut pl.u, uvs), (&mut pl.v, uvs)] {
-        buf[..stride].fill(127);
-        for row in buf.chunks_exact_mut(stride).skip(1) {
-            row[0] = 129;
-        }
-    }
+
+    let mut pl = Planes::new(mb_w, mb_h);
+    let (ys, uvs) = (pl.ys, pl.uvs);
 
     let mut top_modes = vec![0u8; mb_w * 4];
     let mut top_nz = vec![Nz::default(); mb_w];
@@ -577,9 +523,7 @@ pub fn decode(data: &[u8], progress: &dyn Progress) -> Result<Frame> {
             }
 
             // Reconstruction.
-            reconstruct_luma(
-                &mut pl, mb_x, mb_y, mb_w, is_i4, ymode, &bmodes, &coeffs, &codes,
-            );
+            reconstruct_luma(&mut pl, mb_x, mb_y, is_i4, ymode, &bmodes, &coeffs, &codes);
             reconstruct_chroma(&mut pl, mb_x, mb_y, uvmode, &coeffs, &codes);
         }
         if br.eof() {
@@ -647,71 +591,30 @@ fn reconstruct_luma(
     pl: &mut Planes,
     mb_x: usize,
     mb_y: usize,
-    mb_w: usize,
     is_i4: bool,
     ymode: u8,
     bmodes: &[u8; 16],
     coeffs: &[i16; 384],
     codes: &[u8; 24],
 ) {
-    let stride = pl.ys;
-    let ox = mb_x * 16 + 1;
-    let oy = mb_y * 16 + 1;
-    let origin = oy * stride + ox;
     if !is_i4 {
-        let mut top = [0u8; 16];
-        let mut left = [0u8; 16];
-        top.copy_from_slice(&pl.y[origin - stride..origin - stride + 16]);
-        for (r, l) in left.iter_mut().enumerate() {
-            *l = pl.y[origin + r * stride - 1];
-        }
-        let tl = pl.y[origin - stride - 1];
+        let (top, left, tl) = pl.luma_edges(mb_x, mb_y);
         let mut pred = [0u8; 256];
         predict_block(ymode, 16, &top, &left, tl, mb_y > 0, mb_x > 0, &mut pred);
-        for r in 0..16 {
-            pl.y[origin + r * stride..origin + r * stride + 16]
-                .copy_from_slice(&pred[r * 16..r * 16 + 16]);
-        }
+        pl.put_luma(mb_x, mb_y, &pred);
         for b in 0..16 {
             if codes[b] != 0 {
-                let pos = origin + (b / 4) * 4 * stride + (b % 4) * 4;
-                idct_add(&coeffs[b * 16..b * 16 + 16], &mut pl.y, pos, stride);
+                pl.add_luma_block(mb_x, mb_y, b, &coeffs[b * 16..b * 16 + 16]);
             }
         }
         return;
     }
-    // Above-right samples for the right-hand column of sub-blocks.
-    let tr: [u8; 4] = if mb_y == 0 {
-        [127; 4]
-    } else if mb_x == mb_w - 1 {
-        [pl.y[origin - stride + 15]; 4]
-    } else {
-        let s = origin - stride + 16;
-        [pl.y[s], pl.y[s + 1], pl.y[s + 2], pl.y[s + 3]]
-    };
+    let tr = pl.top_right(mb_x, mb_y);
     for b in 0..16 {
-        let (bx, by) = (b % 4, b / 4);
-        let pos = origin + by * 4 * stride + bx * 4;
-        let mut top = [0u8; 8];
-        top[..4].copy_from_slice(&pl.y[pos - stride..pos - stride + 4]);
-        if bx < 3 {
-            top[4..].copy_from_slice(&pl.y[pos - stride + 4..pos - stride + 8]);
-        } else {
-            top[4..].copy_from_slice(&tr);
-        }
-        let left = [
-            pl.y[pos - 1],
-            pl.y[pos + stride - 1],
-            pl.y[pos + 2 * stride - 1],
-            pl.y[pos + 3 * stride - 1],
-        ];
-        let x = pl.y[pos - stride - 1];
-        let pred = predict_4x4(bmodes[b], x, &top, &left);
-        for r in 0..4 {
-            pl.y[pos + r * stride..pos + r * stride + 4].copy_from_slice(&pred[r * 4..r * 4 + 4]);
-        }
+        let (top, left, x) = pl.i4_edges(mb_x, mb_y, b, &tr);
+        pl.put_4x4(mb_x, mb_y, b, &predict_4x4(bmodes[b], x, &top, &left));
         if codes[b] != 0 {
-            idct_add(&coeffs[b * 16..b * 16 + 16], &mut pl.y, pos, stride);
+            pl.add_luma_block(mb_x, mb_y, b, &coeffs[b * 16..b * 16 + 16]);
         }
     }
 }
@@ -724,28 +627,15 @@ fn reconstruct_chroma(
     coeffs: &[i16; 384],
     codes: &[u8; 24],
 ) {
-    let stride = pl.uvs;
-    let origin = (mb_y * 8 + 1) * stride + mb_x * 8 + 1;
     for ch in 0..2 {
-        let plane = if ch == 0 { &mut pl.u } else { &mut pl.v };
-        let mut top = [0u8; 8];
-        let mut left = [0u8; 8];
-        top.copy_from_slice(&plane[origin - stride..origin - stride + 8]);
-        for (r, l) in left.iter_mut().enumerate() {
-            *l = plane[origin + r * stride - 1];
-        }
-        let tl = plane[origin - stride - 1];
+        let (top, left, tl) = pl.chroma_edges(ch, mb_x, mb_y);
         let mut pred = [0u8; 64];
         predict_block(mode, 8, &top, &left, tl, mb_y > 0, mb_x > 0, &mut pred);
-        for r in 0..8 {
-            plane[origin + r * stride..origin + r * stride + 8]
-                .copy_from_slice(&pred[r * 8..r * 8 + 8]);
-        }
+        pl.put_chroma(ch, mb_x, mb_y, &pred);
         for b in 0..4 {
             let blk = 16 + ch * 4 + b;
             if codes[blk] != 0 {
-                let pos = origin + (b / 2) * 4 * stride + (b % 2) * 4;
-                idct_add(&coeffs[blk * 16..blk * 16 + 16], plane, pos, stride);
+                pl.add_chroma_block(ch, mb_x, mb_y, b, &coeffs[blk * 16..blk * 16 + 16]);
             }
         }
     }

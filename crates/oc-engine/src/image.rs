@@ -303,6 +303,24 @@ pub fn register(registry: &mut Registry) {
             }],
             true,
             schema(vec![
+                bool_spec(
+                    "lossless",
+                    "Lossless",
+                    "Keep every pixel exactly; turn off for smaller, lossy files",
+                    "opt.webp.lossless",
+                    true,
+                ),
+                OptionSpec {
+                    key: "quality",
+                    label: "Quality",
+                    help: "Lossy only: 0 is smallest, 100 is best",
+                    i18n_key: "opt.webp.quality",
+                    kind: OptionKind::Int {
+                        min: 0,
+                        max: 100,
+                        default: 75,
+                    },
+                },
                 OptionSpec {
                     key: "effort",
                     label: "Compression effort",
@@ -322,7 +340,7 @@ pub fn register(registry: &mut Registry) {
                     false,
                 ),
             ]),
-            "RFC 9649 (lossless VP8L)",
+            "RFC 9649 (VP8L), RFC 6386 (VP8 key frames)",
         ),
         describe(
             BMP,
@@ -464,7 +482,7 @@ fn encode_description(name: &str) -> &'static str {
         "GIF" => "Encode GIF",
         "JPEG" => "Encode JPEG",
         "TIFF" => "Encode TIFF",
-        "WebP" => "Encode WebP (lossless)",
+        "WebP" => "Encode WebP",
         "ICO / CUR" => "Encode ICO",
         _ => "Encode Netpbm",
     }
@@ -579,6 +597,11 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
             &webp::EncodeOptions {
                 effort: opts.int("effort").unwrap_or(4).clamp(0, 6) as u8,
                 clean_transparent: opts.bool("clean_transparent").unwrap_or(false),
+                quality: if opts.bool("lossless").unwrap_or(true) {
+                    None
+                } else {
+                    Some(opts.int("quality").unwrap_or(75).clamp(0, 100) as f32)
+                },
             },
         )?,
         ICO => {

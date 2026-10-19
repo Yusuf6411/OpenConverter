@@ -15,6 +15,7 @@ oc-compress = { path = "../crates/oc-compress" }
 oc-text = { path = "../crates/oc-text" }
 oc-xml = { path = "../crates/oc-xml" }
 oc-image = { path = "../crates/oc-image" }
+oc-vp8 = { path = "../crates/oc-vp8" }
 
 # Not part of the main workspace: fuzzing needs a nightly toolchain.
 [workspace]
@@ -136,5 +137,17 @@ doc = false
 [[bin]]
 name = "webp_roundtrip"
 path = "fuzz_targets/webp_roundtrip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "webp_lossy_roundtrip"
+path = "fuzz_targets/webp_lossy_roundtrip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "vp8"
+path = "fuzz_targets/vp8.rs"
 test = false
 doc = false

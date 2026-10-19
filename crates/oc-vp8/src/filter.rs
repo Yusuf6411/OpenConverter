@@ -17,6 +17,53 @@ pub struct FilterInfo {
     pub inner: bool,
 }
 
+/// Filter parameters per segment and per prediction kind (`[segment][is_i4x4]`).
+/// `segments` carries the per-segment strengths and whether they replace the base level;
+/// `delta` the reference-frame and mode adjustments of intra blocks.
+pub fn strengths(
+    level: i32,
+    sharpness: i32,
+    segments: Option<(&[i32; 4], bool)>,
+    delta: Option<(i32, i32)>,
+) -> [[FilterInfo; 2]; 4] {
+    let mut out = [[FilterInfo::default(); 2]; 4];
+    for (s, row) in out.iter_mut().enumerate() {
+        let base = match segments {
+            Some((strength, absolute)) => strength[s] + if absolute { 0 } else { level },
+            None => level,
+        };
+        for (i4, info) in row.iter_mut().enumerate() {
+            let mut lv = base;
+            if let Some((reference, mode)) = delta {
+                lv += reference;
+                if i4 == 1 {
+                    lv += mode;
+                }
+            }
+            let lv = lv.clamp(0, 63);
+            if lv > 0 {
+                let mut il = lv;
+                if sharpness > 0 {
+                    il >>= if sharpness > 4 { 2 } else { 1 };
+                    il = il.min(9 - sharpness);
+                }
+                let il = il.max(1);
+                info.ilevel = il as u8;
+                info.limit = (2 * lv + il) as u8;
+                info.hev_thresh = if lv >= 40 {
+                    2
+                } else if lv >= 15 {
+                    1
+                } else {
+                    0
+                };
+            }
+            info.inner = i4 == 1;
+        }
+    }
+    out
+}
+
 fn sclip1(v: i32) -> i32 {
     v.clamp(-128, 127)
 }

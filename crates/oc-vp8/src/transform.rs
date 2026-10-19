@@ -13,67 +13,75 @@ pub fn clip8(v: i32) -> u8 {
 }
 
 fn mul1(a: i32) -> i32 {
-    ((a * 20091) >> 16) + a
+    (a.wrapping_mul(20091) >> 16).wrapping_add(a)
 }
 
 fn mul2(a: i32) -> i32 {
-    (a * 35468) >> 16
+    a.wrapping_mul(35468) >> 16
 }
 
 /// Adds the inverse DCT of `coeffs` (row-major 4x4) to the 4x4 pixels at `pos`.
+///
+/// Corrupt streams can carry coefficients large enough to overflow 32 bits; like libwebp's C
+/// code the arithmetic wraps, so such streams decode to the same pixels everywhere.
 pub fn idct_add(coeffs: &[i16], dst: &mut [u8], pos: usize, stride: usize) {
     let mut tmp = [0i32; 16];
     for i in 0..4 {
         let c = |k: usize| i32::from(coeffs[i + 4 * k]);
-        let a = c(0) + c(2);
-        let b = c(0) - c(2);
-        let cc = mul2(c(1)) - mul1(c(3));
-        let d = mul1(c(1)) + mul2(c(3));
-        tmp[4 * i] = a + d;
-        tmp[4 * i + 1] = b + cc;
-        tmp[4 * i + 2] = b - cc;
-        tmp[4 * i + 3] = a - d;
+        let a = c(0).wrapping_add(c(2));
+        let b = c(0).wrapping_sub(c(2));
+        let cc = mul2(c(1)).wrapping_sub(mul1(c(3)));
+        let d = mul1(c(1)).wrapping_add(mul2(c(3)));
+        tmp[4 * i] = a.wrapping_add(d);
+        tmp[4 * i + 1] = b.wrapping_add(cc);
+        tmp[4 * i + 2] = b.wrapping_sub(cc);
+        tmp[4 * i + 3] = a.wrapping_sub(d);
     }
     for i in 0..4 {
-        let dc = tmp[i] + 4;
-        let a = dc + tmp[i + 8];
-        let b = dc - tmp[i + 8];
-        let c = mul2(tmp[i + 4]) - mul1(tmp[i + 12]);
-        let d = mul1(tmp[i + 4]) + mul2(tmp[i + 12]);
+        let dc = tmp[i].wrapping_add(4);
+        let a = dc.wrapping_add(tmp[i + 8]);
+        let b = dc.wrapping_sub(tmp[i + 8]);
+        let c = mul2(tmp[i + 4]).wrapping_sub(mul1(tmp[i + 12]));
+        let d = mul1(tmp[i + 4]).wrapping_add(mul2(tmp[i + 12]));
         let row = pos + i * stride;
-        let out = [a + d, b + c, b - c, a - d];
+        let out = [
+            a.wrapping_add(d),
+            b.wrapping_add(c),
+            b.wrapping_sub(c),
+            a.wrapping_sub(d),
+        ];
         for (x, v) in out.into_iter().enumerate() {
-            dst[row + x] = clip8(i32::from(dst[row + x]) + (v >> 3));
+            dst[row + x] = clip8(i32::from(dst[row + x]).wrapping_add(v >> 3));
         }
     }
 }
 
 /// Inverse Walsh-Hadamard transform of the sixteen luma DC values; `out[16 * k]` receives the
-/// DC of block `k`.
+/// DC of block `k`. Arithmetic wraps like `idct_add`'s.
 pub fn iwht(input: &[i16], out: &mut [i16]) {
     let mut tmp = [0i32; 16];
     for i in 0..4 {
         let g = |k: usize| i32::from(input[k + i]);
-        let a0 = g(0) + g(12);
-        let a1 = g(4) + g(8);
-        let a2 = g(4) - g(8);
-        let a3 = g(0) - g(12);
-        tmp[i] = a0 + a1;
-        tmp[8 + i] = a0 - a1;
-        tmp[4 + i] = a3 + a2;
-        tmp[12 + i] = a3 - a2;
+        let a0 = g(0).wrapping_add(g(12));
+        let a1 = g(4).wrapping_add(g(8));
+        let a2 = g(4).wrapping_sub(g(8));
+        let a3 = g(0).wrapping_sub(g(12));
+        tmp[i] = a0.wrapping_add(a1);
+        tmp[8 + i] = a0.wrapping_sub(a1);
+        tmp[4 + i] = a3.wrapping_add(a2);
+        tmp[12 + i] = a3.wrapping_sub(a2);
     }
     for i in 0..4 {
-        let dc = tmp[i * 4] + 3;
-        let a0 = dc + tmp[3 + i * 4];
-        let a1 = tmp[1 + i * 4] + tmp[2 + i * 4];
-        let a2 = tmp[1 + i * 4] - tmp[2 + i * 4];
-        let a3 = dc - tmp[3 + i * 4];
+        let dc = tmp[i * 4].wrapping_add(3);
+        let a0 = dc.wrapping_add(tmp[3 + i * 4]);
+        let a1 = tmp[1 + i * 4].wrapping_add(tmp[2 + i * 4]);
+        let a2 = tmp[1 + i * 4].wrapping_sub(tmp[2 + i * 4]);
+        let a3 = dc.wrapping_sub(tmp[3 + i * 4]);
         let base = i * 64;
-        out[base] = ((a0 + a1) >> 3) as i16;
-        out[base + 16] = ((a3 + a2) >> 3) as i16;
-        out[base + 32] = ((a0 - a1) >> 3) as i16;
-        out[base + 48] = ((a3 - a2) >> 3) as i16;
+        out[base] = (a0.wrapping_add(a1) >> 3) as i16;
+        out[base + 16] = (a3.wrapping_add(a2) >> 3) as i16;
+        out[base + 32] = (a0.wrapping_sub(a1) >> 3) as i16;
+        out[base + 48] = (a3.wrapping_sub(a2) >> 3) as i16;
     }
 }
 

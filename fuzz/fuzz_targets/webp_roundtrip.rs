@@ -16,7 +16,7 @@ fuzz_target!(|data: &[u8]| {
         px.push(it.next().copied().unwrap_or(0));
     }
     let Ok(img) = Image::new(w as u32, h as u32, layout, Depth::Eight, px) else { return };
-    let opts = oc_image::webp::EncodeOptions { effort: effort % 7, clean_transparent: false };
+    let opts = oc_image::webp::EncodeOptions { effort: effort % 7, clean_transparent: false, quality: None };
     let (bytes, _) = oc_image::webp::encode(&img, &opts).expect("encode");
     let (back, _) = oc_image::webp::decode(&bytes, &Limits::default(), &NoProgress).expect("own output decodes");
     let (a, _) = oc_image::ops::convert_layout(&back, Layout::Rgba, [0, 0, 0]);
