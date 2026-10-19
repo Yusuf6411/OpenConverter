@@ -1,4 +1,6 @@
-//! Developer tasks: `cargo xtask check-deps`.
+//! Developer tasks: `cargo xtask check-deps | sbom <file> | checksums <dir> | deb <outdir> <cli> [desktop]`.
+mod package;
+use std::path::Path;
 use std::process::{Command, ExitCode};
 
 /// Crates that must never appear in a shipped binary's dependency tree (MASTER_PROMPT §5.1, §5.3).
@@ -128,9 +130,33 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Some("sbom") => finish(package::sbom(Path::new(&arg(2)))),
+        Some("checksums") => finish(package::checksums(Path::new(&arg(2)))),
+        Some("deb") => {
+            let desktop = std::env::args().nth(4);
+            finish(package::deb(
+                Path::new(&arg(2)),
+                Path::new(&arg(3)),
+                desktop.as_deref().map(Path::new),
+            ))
+        }
         _ => {
-            eprintln!("usage: cargo xtask check-deps");
+            eprintln!("usage: cargo xtask check-deps | sbom <file> | checksums <dir> | deb <outdir> <cli> [desktop]");
             ExitCode::from(2)
+        }
+    }
+}
+
+fn arg(n: usize) -> String {
+    std::env::args().nth(n).unwrap_or_default()
+}
+
+fn finish(r: Result<(), String>) -> ExitCode {
+    match r {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
         }
     }
 }
