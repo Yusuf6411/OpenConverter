@@ -48,9 +48,13 @@ The 1.x Python notes are kept in [v1/](v1/).
 
 ## Known gaps
 - 1.x Python test cases are not ported yet; they are available at tag v1.0.0. Port them as each Rust codec lands (M1.x, M2.x).
-- cargo-deny not run locally (not installed).
+- cargo-deny passes locally (advisories, bans, licenses, sources); the Tauri tree is allowed through named wrappers (ADR-0005).
+
+- [~] M2.6 serve mode and desktop app. `openconverter serve` (crates `oc-server`, axum 0.8 on loopback with a per-run option for a token): upload (own streaming multipart parser, because axum's multipart pulls a banned crate), format list with option schemas, jobs with progress over server-sent events and cancellation, outputs, previews (thumbnails from sandboxed workers), history with retention, settings; the shared UI in `ui/` is embedded in the binary. Security: Host allow-list, CSRF header plus Origin check, strict CSP, no remote bind without `--allow-remote` and a token. Documented in [API.md](API.md); `crates/oc-server/tests/ui_safety.rs` keeps innerHTML, inline scripts and remote URLs out of `ui/`; 3 end-to-end tests drive the real binary. Desktop (`oc-desktop`, Tauri v2): a window on the embedded server (ADR-0005), icons, bundle config; renders the UI under Xvfb. Not done: single-instance and file arguments, native file dialogs, "show in folder".
+- [~] M2.7 packaging: `cargo xtask deb|sbom|checksums`, and `.github/workflows/release.yml` (musl and macOS and Windows CLI archives, Tauri bundles: .deb, .rpm, AppImage, NSIS, MSI, dmg, a portable Windows zip; CycloneDX SBOM and SHA256SUMS). Only the .deb, SBOM and checksums were built here; the workflow itself has never run, and the Windows installers need the MSVC toolchain.
+- [~] M2.8 [COMPATIBILITY.md](COMPATIBILITY.md) is generated from the registry by `tools/gen_compat.py`; screenshots of the UI are in `docs/screenshots/`.
 
 ## Next step
-Phase 2 continued: the image formats are complete; what is left of Phase 2 is the desktop app, packaging and release (M2.6 to M2.9). `oc-vp8` is ready to take inter frames when video starts. The Windows job failed on two earlier pushes because git rewrote line feeds inside binary test data (`.rgba`); `.gitattributes` now marks test data as binary, and the next push shows whether that was all.
+Phase 3: archives, compression formats and spreadsheets. `oc-vp8` is ready to take inter frames when video starts. The Windows job failed on two earlier pushes because git rewrote line feeds inside binary test data (`.rgba`); `.gitattributes` now marks test data as binary, and the next push shows whether that was all.
 
 - **Tables (CSV, TSV, JSON)**: `oc-sheet` reads and writes RFC 4180 delimited text (delimiter detection, lenient quotes, BOM, ragged rows padded) and flat JSON tables (own strict parser; arrays of objects or arrays). Engine options mirror 1.x. Fuzz target `table`. Not done: XLSX/ODS.
