@@ -6,6 +6,8 @@
 #![forbid(unsafe_code)]
 
 pub mod anim;
+mod bc6h;
+mod bc6h_layout;
 pub mod bc7;
 mod bc7_tables;
 pub mod bmp;

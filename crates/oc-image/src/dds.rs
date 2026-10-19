@@ -3,7 +3,7 @@
 //! Read: the first surface (no mipmaps, cube faces or array slices beyond it) of uncompressed
 //! RGB(A), luminance and alpha formats with any channel masks up to 32 bits, and BC1-BC5
 //! (DXT1-5, ATI1/2) and BC7, both from the classic header and from the DX10 extension. BC4 and BC5
-//! become gray and red-green images. Not read: BC6H, signed BC4/BC5, floating-point and
+//! become gray and red-green images. Not read: signed BC4/BC5, floating-point and
 //! 16-bit formats, palettes and volume textures beyond their first slice.
 //! Write: uncompressed 32-bit BGRA, or BC1 / BC3 with a principal-axis endpoint fit.
 // Block and header offsets are fixed; every caller checks the lengths first (the header is
@@ -37,6 +37,10 @@ enum Block {
     Bc4,
     Bc5,
     Bc7,
+    /// HDR colour, unsigned or signed half floats; shown as clipped sRGB.
+    Bc6h {
+        signed: bool,
+    },
 }
 
 impl Block {
@@ -88,7 +92,8 @@ fn dxgi_format(code: u32) -> Result<Format> {
             luminance: true,
         },
         65 => masked(8, [0, 0, 0, 0xFF]),
-        94 | 95 => return Err(unsupported("BC6H")),
+        94 | 95 => Format::Compressed(Block::Bc6h { signed: false }),
+        96 => Format::Compressed(Block::Bc6h { signed: true }),
         98 | 99 => Format::Compressed(Block::Bc7),
         81 | 84 => return Err(unsupported("signed BC4/BC5")),
         other => return Err(unsupported(&format!("DXGI {other}"))),
@@ -168,7 +173,8 @@ fn decode_channel(block: &[u8]) -> [u8; 16] {
     out
 }
 
-fn decode_block(kind: Block, block: &[u8]) -> [[u8; 4]; 16] {
+/// `srgb` is the table of `hdr::srgb_table`, only used by BC6H.
+fn decode_block(kind: Block, block: &[u8], srgb: &[u8]) -> [[u8; 4]; 16] {
     let mut px = [[0u8; 4]; 16];
     match kind {
         Block::Bc1 | Block::Bc2 | Block::Bc3 => {
@@ -203,6 +209,16 @@ fn decode_block(kind: Block, block: &[u8]) -> [[u8; 4]; 16] {
             }
         }
         Block::Bc7 => px = crate::bc7::decode_block(block),
+        Block::Bc6h { signed } => {
+            for (p, c) in px.iter_mut().zip(crate::bc6h::decode_block(block, signed)) {
+                *p = [
+                    crate::hdr::to_code(srgb, c[0]),
+                    crate::hdr::to_code(srgb, c[1]),
+                    crate::hdr::to_code(srgb, c[2]),
+                    255,
+                ];
+            }
+        }
         Block::Bc5 => {
             let (r, g) = (decode_channel(&block[..8]), decode_channel(&block[8..16]));
             for (i, p) in px.iter_mut().enumerate() {
@@ -219,6 +235,11 @@ fn decode_blocks(kind: Block, data: &[u8], w: usize, h: usize) -> Result<Vec<u8>
     let data = data
         .get(..need)
         .ok_or_else(|| Error::truncated("DDS pixel data"))?;
+    let srgb = if matches!(kind, Block::Bc6h { .. }) {
+        crate::hdr::srgb_table()
+    } else {
+        Vec::new()
+    };
     let mut out = vec![0u8; w * h * 4];
     for by in 0..bh {
         for bx in 0..bw {
@@ -227,7 +248,7 @@ fn decode_blocks(kind: Block, data: &[u8], w: usize, h: usize) -> Result<Vec<u8>
             if block.len() < kind.bytes() {
                 continue;
             }
-            let px = decode_block(kind, block);
+            let px = decode_block(kind, block, &srgb);
             for (i, p) in px.iter().enumerate() {
                 let (x, y) = (bx * 4 + i % 4, by * 4 + i / 4);
                 if x < w && y < h {
@@ -391,6 +412,13 @@ pub fn decode(data: &[u8], limits: &Limits) -> Result<(Image, Notes)> {
         Format::Compressed(kind) => {
             let rgba = decode_blocks(kind, body, w, h)?;
             let img = Image::new(width, height, Layout::Rgba, Depth::Eight, rgba)?;
+            if matches!(kind, Block::Bc6h { .. }) {
+                notes.push(Note::new(
+                    Severity::Info,
+                    "dds.hdr",
+                    "BC6H holds linear HDR colour; values above 1.0 were clipped and the rest encoded as sRGB",
+                ));
+            }
             let target = match kind {
                 Block::Bc4 => Layout::Gray,
                 Block::Bc5 => Layout::Rgb,
@@ -716,6 +744,58 @@ mod tests {
         }
     }
 
+    /// BC6H in a DX10 file comes out as clipped sRGB with a note.
+    #[test]
+    fn bc6h_is_shown_as_srgb() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/bc6h");
+        for (name, dxgi, signed) in [("uf16_mixed", 95u32, false), ("sf16_mixed", 96, true)] {
+            let blocks = std::fs::read(dir.join(format!("{name}.blocks"))).unwrap();
+            let half = std::fs::read(dir.join(format!("{name}.half"))).unwrap();
+            let n = 8;
+            let mut file = b"DDS ".to_vec();
+            let words: [u32; 31] = {
+                let mut w = [0u32; 31];
+                w[0] = 124;
+                w[1] = 0x1007 | 0x8_0000;
+                w[2] = 4;
+                w[3] = 4 * n as u32;
+                w[4] = 16 * n as u32;
+                w[6] = 1;
+                w[18] = 32;
+                w[19] = DDPF_FOURCC;
+                w[20] = u32::from_le_bytes(*b"DX10");
+                w[26] = 0x1000;
+                w
+            };
+            for v in words {
+                file.extend_from_slice(&v.to_le_bytes());
+            }
+            for v in [dxgi, 3, 0, 1, 0] {
+                file.extend_from_slice(&v.to_le_bytes());
+            }
+            file.extend_from_slice(&blocks[..16 * n]);
+            let (img, notes) = decode(&file, &Limits::default()).unwrap();
+            assert!(notes.iter().any(|n| n.code == "dds.hdr"));
+            assert_eq!((img.width, img.height), (4 * n as u32, 4));
+            let table = crate::hdr::srgb_table();
+            let rgb = ops::convert_layout(&img, Layout::Rgb, [0, 0, 0]).0;
+            for b in 0..n {
+                let want = crate::bc6h::decode_block(&blocks[b * 16..b * 16 + 16], signed);
+                for (i, p) in want.iter().enumerate() {
+                    let at = (((i / 4) * 4 * n) + b * 4 + i % 4) * 3;
+                    for c in 0..3 {
+                        let h = u16::from_le_bytes([
+                            half[(b * 48 + i * 3 + c) * 2],
+                            half[(b * 48 + i * 3 + c) * 2 + 1],
+                        ]);
+                        assert_eq!(p[c], crate::bc6h::half_to_f32(h));
+                        assert_eq!(rgb.data[at + c], crate::hdr::to_code(&table, p[c]));
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn alpha_and_colour_blocks_decode() {
         // A BC3 block: alpha 255..0 ramp, colour block of one flat colour.
@@ -725,7 +805,7 @@ mod tests {
         b.extend_from_slice(&c.to_le_bytes());
         b.extend_from_slice(&c.to_le_bytes());
         b.extend_from_slice(&[0; 4]);
-        let px = decode_block(Block::Bc3, &b);
+        let px = decode_block(Block::Bc3, &b, &[]);
         assert_eq!(px[0], [255, 0, 0, 255]);
         assert_eq!(px[1], [255, 0, 0, 0]);
         let pal = alpha_palette(255, 0);
