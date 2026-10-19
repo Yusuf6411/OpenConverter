@@ -11,27 +11,23 @@ permissions:
 
 jobs:
   test:
-    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
-        python: ["3.12", "3.13"]
-    defaults:
-      run:
-        shell: bash
+        os: [windows-latest, ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          python-version: ${{ matrix.python }}
-      - name: Compile
-        run: python -m compileall -q openconverter
-      - name: Tests
-        run: python -m unittest discover -s tests -v 2>&1 | tee test-output.txt
-      - name: Report failing tests as annotations
-        if: failure()
-        run: python scripts/ci_annotate.py test-output.txt
-      - name: Release verifier
-        run: python scripts/verify_release.py --ci
+          components: rustfmt, clippy
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo xtask check-deps
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2

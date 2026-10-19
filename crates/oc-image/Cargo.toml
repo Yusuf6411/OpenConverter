@@ -1,0 +1,11 @@
+[package]
+name = "oc-image"
+description = "OpenConverter: oc-image"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true

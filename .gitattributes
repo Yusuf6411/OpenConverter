@@ -1,12 +1,10 @@
 * text=auto
-*.py text eol=lf
 *.md text eol=lf
 *.html text eol=lf
 *.css text eol=lf
 *.js text eol=lf
 *.json text eol=lf
 *.svg text eol=lf
-*.ps1 text eol=crlf
 *.png binary
 *.jpg binary
 *.jpeg binary
@@ -19,3 +17,5 @@
 *.pbm binary
 *.bin binary
 tests/fixtures/** binary
+*.rs text eol=lf
+*.toml text eol=lf

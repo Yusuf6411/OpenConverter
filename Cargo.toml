@@ -1,0 +1,50 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/oc-core",
+    "crates/oc-io",
+    "crates/oc-simd",
+    "crates/oc-checksum",
+    "crates/oc-compress",
+    "crates/oc-text",
+    "crates/oc-xml",
+    "crates/oc-image",
+    "crates/oc-audio",
+    "crates/oc-vp8",
+    "crates/oc-video",
+    "crates/oc-container",
+    "crates/oc-archive",
+    "crates/oc-font",
+    "crates/oc-raster",
+    "crates/oc-document",
+    "crates/oc-sheet",
+    "crates/oc-pdf",
+    "crates/oc-svg",
+    "crates/oc-subtitle",
+    "crates/oc-engine",
+    "crates/oc-worker",
+    "crates/oc-cli",
+    "crates/oc-server",
+    "crates/oc-desktop",
+    "crates/oc-python",    "xtask",
+]
+
+[workspace.package]
+version = "2.0.0-dev"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Yusuf6411/OpenConverter"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+indexing_slicing = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
