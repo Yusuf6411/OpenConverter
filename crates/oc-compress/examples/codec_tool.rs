@@ -14,6 +14,8 @@ fn main() {
         ("xz", "c") => oc_compress::xz::compress(&data, level, oc_compress::xz::Check::Crc64),
         ("zstd", "d") => oc_compress::zstd::decompress(&data, &l, &NoProgress).unwrap(),
         ("zstd", "c") => oc_compress::zstd::compress(&data, level as i32, true),
+        ("lz4", "d") => oc_compress::lz4::decompress(&data, &l, &NoProgress).unwrap(),
+        ("lz4", "c") => oc_compress::lz4::compress(&data, level),
         _ => panic!("unknown codec/mode"),
     };
     std::fs::write(&a[5], out).unwrap();
