@@ -371,8 +371,23 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
         if is_dir {
             e = Entry::dir(name);
         } else {
-            // Encryption.
             let encrypted = c.flags & 1 != 0;
+            if cx.list_only && is_link && encrypted && cx.password.is_none() {
+                archive.entries.push(Entry::symlink(name, String::new()));
+                continue;
+            }
+            if cx.list_only && !is_link {
+                budget.add_output(c.usize)?;
+                let mut le = Entry::listed(name, c.usize);
+                le.encrypted = encrypted;
+                le.mtime = mtime;
+                if unix && mode_full & 0o7777 != 0 {
+                    le.mode = mode_full & 0o7777;
+                }
+                archive.entries.push(le);
+                continue;
+            }
+            // Encryption.
             let mut method = c.method;
             let mut body: Vec<u8> = Vec::new();
             let mut check_crc = true;

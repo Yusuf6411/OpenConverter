@@ -260,9 +260,14 @@ fn requests_are_checked() {
     assert!(head.contains("text/html"));
     assert!(String::from_utf8_lossy(&body).contains("OpenConverter"));
     // Unsupported content is refused per file, with a typed error.
-    let (st, up) = s.upload("notes.pdf", b"%PDF-1.4 hello");
+    let (st, up) = s.upload("broken.png", b"this is not a picture");
     assert_eq!(st, 200);
     assert!(up.has("unsupported_format"), "{}", up.0);
+    // A file of an unknown type is accepted as a plain file that can go into an archive.
+    let (st, up) = s.upload("notes.xyz", b"hello");
+    assert_eq!(st, 200);
+    assert!(!up.has("unsupported_format"), "{}", up.0);
+    assert!(up.has("zip"), "{}", up.0);
     // Bad option values fail the request, not the job.
     let (_, ok) = s.upload("p.bmp", &png_1x1());
     let (st, _) = s.json(

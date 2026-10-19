@@ -12,6 +12,7 @@ oc-core = { path = "../oc-core" }
 oc-text = { path = "../oc-text" }
 oc-image = { path = "../oc-image" }
 oc-sheet = { path = "../oc-sheet" }
+oc-archive = { path = "../oc-archive" }
 
 [lints]
 workspace = true

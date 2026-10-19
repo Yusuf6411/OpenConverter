@@ -5,6 +5,7 @@
 //! Process isolation is provided by [`isolated`]; the CLI runs every conversion through it.
 #![deny(unsafe_code)]
 
+pub mod archive;
 pub mod image;
 pub mod isolated;
 pub mod table;
@@ -129,6 +130,11 @@ impl Engine {
         });
         image::register(&mut registry);
         table::register(&mut registry);
+        let packable: Vec<FormatId> = std::iter::once(TXT)
+            .chain(image::FORMATS)
+            .chain(table::FORMATS)
+            .collect();
+        archive::register(&mut registry, &packable);
         Self {
             registry,
             limits: Limits::default(),
@@ -137,6 +143,9 @@ impl Engine {
 
     /// Look up a registered format by its id string.
     pub fn format_by_name(&self, name: &str) -> Option<FormatId> {
+        if name == archive::FILE.0 {
+            return Some(archive::FILE);
+        }
         self.registry_formats()
             .find(|f| f.id.0 == name)
             .map(|f| f.id)
@@ -167,17 +176,23 @@ impl Engine {
     }
 
     /// Identify a format from a path's extension.
+    /// The longest matching suffix wins, so `a.tar.gz` is a tar.gz, not a gz.
     pub fn format_for_path(&self, path: &Path) -> Option<FormatId> {
-        let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+        let name = path.file_name()?.to_str()?.to_ascii_lowercase();
         self.registry_formats()
-            .find(|f| f.extensions.contains(&ext.as_str()))
-            .map(|f| f.id)
+            .flat_map(|f| f.extensions.iter().map(move |e| (f.id, *e)))
+            .filter(|(_, e)| {
+                name.len() > e.len() && name.ends_with(&format!(".{}", e.to_ascii_lowercase()))
+            })
+            .max_by_key(|(_, e)| e.len())
+            .map(|(id, _)| id)
     }
 
     fn registry_formats(&self) -> impl Iterator<Item = &FormatDescriptor> {
         std::iter::once(TXT)
             .chain(image::FORMATS)
             .chain(table::FORMATS)
+            .chain(archive::FORMATS)
             .filter_map(|id| self.registry.format(id))
     }
 
@@ -186,14 +201,18 @@ impl Engine {
     }
 
     pub fn convert(&self, req: &ConvertRequest, progress: &dyn Progress) -> Result<ConvertReport> {
-        let ext_from = self.format_for_path(&req.input).ok_or_else(|| {
-            Error::new(ErrorCode::UnsupportedFormat, "unknown input file type")
-                .with_detail(req.input.display().to_string())
-        })?;
         let to = self.format_for_path(&req.output).ok_or_else(|| {
             Error::new(ErrorCode::UnsupportedFormat, "unknown output file type")
                 .with_detail(req.output.display().to_string())
         })?;
+        // Any file can be stored in an archive, whatever its type.
+        let ext_from = self
+            .format_for_path(&req.input)
+            .or_else(|| archive::is_archive(to).then_some(archive::FILE))
+            .ok_or_else(|| {
+                Error::new(ErrorCode::UnsupportedFormat, "unknown input file type")
+                    .with_detail(req.input.display().to_string())
+            })?;
         // Fail early on impossible pairs, before reading anything.
         self.registry.plan(ext_from, to, false)?;
         if req.output.exists() && !req.overwrite {
@@ -238,9 +257,27 @@ impl Engine {
                 }
             }
         }
+        if archive::is_archive(from) {
+            if let Some(found) = archive::sniff_conflict(ext_from, &data) {
+                notes.push(
+                    Note::new(
+                        Severity::Warning,
+                        "format_mismatch",
+                        format!(
+                            "the file extension says {} but the content is {}",
+                            ext_from.0, found.0
+                        ),
+                    )
+                    .with_detail(found.0),
+                );
+                from = found;
+            }
+        }
         let route = self.registry.plan(from, to, false)?;
 
-        let (out, route_text) = if table::is_table(from) {
+        let (out, route_text) = if archive::is_archive(to) {
+            archive::convert(from, to, &data, &req.input, &opts, &self.limits, progress, &mut notes)?
+        } else if table::is_table(from) {
             let (out, n) = table::convert(from, to, &data, &opts, &self.limits, progress)?;
             notes.extend(n);
             let name = |id| self.registry.format(id).map_or("table", |f| f.name);
@@ -353,6 +390,78 @@ impl Engine {
     pub fn detect(&self, data: &[u8], name: &Path) -> Option<FormatId> {
         self.detect_image(data)
             .or_else(|| self.format_for_path(name).filter(|f| !image::is_image(*f)))
+            .or_else(|| {
+                oc_archive::Format::sniff(data).and_then(archive::id_of)
+            })
+            // A file of a type we do not know can still be stored in an archive, but a file
+            // that claims a known type and does not match it is refused.
+            .or_else(|| {
+                self.format_for_path(name)
+                    .is_none()
+                    .then_some(archive::FILE)
+            })
+    }
+
+    /// Entries of an archive without reading their contents where the format allows.
+    pub fn archive_list(
+        &self,
+        path: &Path,
+        password: Option<&str>,
+        progress: &dyn Progress,
+    ) -> Result<(FormatId, Vec<archive::EntryInfo>)> {
+        archive::list(path, password, &self.limits, progress)
+    }
+
+    /// Extract an archive below `dest`, refusing unsafe paths and links.
+    pub fn archive_extract(
+        &self,
+        path: &Path,
+        dest: &Path,
+        opts: &oc_archive::safety::ExtractOptions,
+        password: Option<&str>,
+        progress: &dyn Progress,
+    ) -> Result<oc_archive::safety::ExtractReport> {
+        archive::extract(path, dest, opts, password, &self.limits, progress)
+    }
+
+    /// Create an archive at `output` (format chosen by its name) from files and folders.
+    pub fn archive_create(
+        &self,
+        sources: &[PathBuf],
+        output: &Path,
+        overwrite: bool,
+        options: &[(String, OptionValue)],
+        progress: &dyn Progress,
+    ) -> Result<ConvertReport> {
+        let to = self.format_for_path(output).filter(|f| archive::is_archive(*f)).ok_or_else(|| {
+            Error::new(ErrorCode::UnsupportedFormat, "unknown archive type")
+                .with_detail(output.display().to_string())
+        })?;
+        if output.exists() && !overwrite {
+            return Err(Error::new(ErrorCode::OutputExists, "output file already exists")
+                .with_detail(output.display().to_string()));
+        }
+        let schema = &self
+            .registry
+            .format(to)
+            .ok_or_else(|| Error::new(ErrorCode::InternalError, "format vanished"))?
+            .writer_options;
+        let opts = schema.validate(options)?;
+        let (bytes, n) = archive::create(sources, to, &opts, &self.limits, progress)?;
+        let tmp = output.with_extension("oc-partial");
+        std::fs::write(&tmp, &bytes)?;
+        if let Err(e) = std::fs::rename(&tmp, output) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
+        }
+        Ok(ConvertReport {
+            input_format: archive::FILE,
+            output_format: to,
+            route: format!("Collect {n} entries -> Write archive"),
+            bytes_in: 0,
+            bytes_out: bytes.len() as u64,
+            notes: Notes::new(),
+        })
     }
 
     /// Formats a file of format `from` can be converted to (same format included when it

@@ -22,6 +22,8 @@ pub struct Entry {
     pub link: Option<String>,
     /// Whether the member was stored encrypted (informational).
     pub encrypted: bool,
+    /// Size of a member whose contents were not read (listing mode); `data` is then empty.
+    pub list_size: Option<u64>,
 }
 
 impl Entry {
@@ -34,6 +36,7 @@ impl Entry {
             mtime: None,
             link: None,
             encrypted: false,
+            list_size: None,
         }
     }
     pub fn dir(path: impl Into<String>) -> Self {
@@ -45,6 +48,7 @@ impl Entry {
             mtime: None,
             link: None,
             encrypted: false,
+            list_size: None,
         }
     }
     pub fn symlink(path: impl Into<String>, target: impl Into<String>) -> Self {
@@ -56,10 +60,25 @@ impl Entry {
             mtime: None,
             link: Some(target.into()),
             encrypted: false,
+            list_size: None,
         }
     }
     pub fn size(&self) -> u64 {
-        self.data.len() as u64
+        self.list_size.unwrap_or(self.data.len() as u64)
+    }
+    /// A file entry for listing: the size is recorded but the bytes are not.
+    pub fn listed(path: impl Into<String>, size: u64) -> Self {
+        let mut e = Self::file(path, Vec::new());
+        e.list_size = Some(size);
+        e
+    }
+    /// A file entry holding `body`, or only its size when `list_only`.
+    pub fn from_body(path: impl Into<String>, body: &[u8], list_only: bool) -> Self {
+        if list_only {
+            Self::listed(path, body.len() as u64)
+        } else {
+            Self::file(path, body.to_vec())
+        }
     }
 }
 

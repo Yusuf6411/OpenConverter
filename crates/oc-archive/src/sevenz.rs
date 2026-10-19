@@ -724,26 +724,33 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
                 }
             }
             let (fi, si, off) = sub_cursor;
-            if folder_data.as_ref().map(|(k, _)| *k) != Some(fi) {
-                let d = decode_folder_at(&streams, fi, data, cx, &budget)?;
-                budget.add_output(d.len() as u64)?;
-                folder_data = Some((fi, d));
-            }
             let (size, crc) = streams.subs.get(fi).and_then(|v| v.get(si)).copied().unwrap_or((0, None));
-            let fd = folder_data.as_ref().map(|(_, d)| d.as_slice()).unwrap_or(&[]);
             let end = off.checked_add(size as usize).ok_or_else(|| Error::corrupt("7z: size overflow"))?;
-            let body = fd.get(off..end).ok_or_else(|| Error::corrupt("7z: stream beyond folder"))?;
-            if let Some(c) = crc {
-                if crc32(body) != c {
-                    return Err(Error::corrupt(format!("7z: CRC mismatch in '{name}'")));
-                }
-            }
-            sub_cursor = (fi, si + 1, end);
-            e = if unix_mode.is_some_and(|m| m & 0o170_000 == 0o120_000) {
-                Entry::symlink(name, String::from_utf8_lossy(body).into_owned())
+            let is_link = unix_mode.is_some_and(|m| m & 0o170_000 == 0o120_000);
+            if cx.list_only {
+                budget.add_output(size)?;
+                sub_cursor = (fi, si + 1, end);
+                e = if is_link { Entry::symlink(name, String::new()) } else { Entry::listed(name, size) };
             } else {
-                Entry::file(name, body.to_vec())
-            };
+                if folder_data.as_ref().map(|(k, _)| *k) != Some(fi) {
+                    let d = decode_folder_at(&streams, fi, data, cx, &budget)?;
+                    budget.add_output(d.len() as u64)?;
+                    folder_data = Some((fi, d));
+                }
+                let fd = folder_data.as_ref().map(|(_, d)| d.as_slice()).unwrap_or(&[]);
+                let body = fd.get(off..end).ok_or_else(|| Error::corrupt("7z: stream beyond folder"))?;
+                if let Some(c) = crc {
+                    if crc32(body) != c {
+                        return Err(Error::corrupt(format!("7z: CRC mismatch in '{name}'")));
+                    }
+                }
+                sub_cursor = (fi, si + 1, end);
+                e = if is_link {
+                    Entry::symlink(name, String::from_utf8_lossy(body).into_owned())
+                } else {
+                    Entry::file(name, body.to_vec())
+                };
+            }
             e.encrypted = streams.folders.get(fi).is_some_and(Folder::uses_aes);
         }
         e.mtime = mtimes.get(i).copied().flatten();

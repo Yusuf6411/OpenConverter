@@ -5,7 +5,7 @@ use oc_core::{ErrorCode, Limits, NoProgress};
 use std::path::PathBuf;
 
 fn cx(limits: &Limits) -> Context<'_> {
-    Context { limits, progress: &NoProgress, password: None }
+    Context { limits, progress: &NoProgress, password: None, list_only: false }
 }
 
 fn data(name: &str) -> Vec<u8> {
@@ -294,4 +294,35 @@ fn garbage_never_panics() {
             let _ = format::read(*f, &bad, &cx(&limits), None);
         }
     }
+}
+
+#[test]
+fn listing_mode_reports_the_same_names_and_sizes_without_contents() {
+    let limits = Limits::default();
+    let lcx = Context { limits: &limits, progress: &NoProgress, password: None, list_only: true };
+    let arc = sample();
+    for f in [Format::Tar, Format::Zip, Format::SevenZ, Format::Cpio, Format::TarCompressed(oc_archive::Codec::Xz)] {
+        let bytes = format::write(f, &arc, &WriteOpts::default(), &cx(&limits)).unwrap();
+        let full = format::read(f, &bytes, &cx(&limits), None).unwrap();
+        let list = format::read(f, &bytes, &lcx, None).unwrap();
+        assert_eq!(full.entries.len(), list.entries.len(), "{f:?}");
+        for (a, b) in full.entries.iter().zip(&list.entries) {
+            assert_eq!(a.path, b.path);
+            assert_eq!(a.kind, b.kind);
+            assert_eq!(a.size(), b.size(), "{f:?} {}", a.path);
+            if b.kind == EntryKind::File {
+                assert!(b.data.is_empty());
+            }
+        }
+    }
+    for name in ["mszip.cab", "lzx_aligned.cab"] {
+        let b = format::read(Format::Cab, &data(name), &lcx, None).unwrap();
+        let a = format::read(Format::Cab, &data(name), &cx(&limits), None).unwrap();
+        assert_eq!(a.entries.iter().map(|e| e.size()).collect::<Vec<_>>(), b.entries.iter().map(|e| e.size()).collect::<Vec<_>>());
+    }
+    // An encrypted ZIP lists without a password.
+    let opts = zip::WriteOptions { password: Some("pw".into()), ..Default::default() };
+    let enc = zip::write(&arc, &opts, &cx(&limits)).unwrap();
+    let l = zip::read(&enc, &lcx).unwrap();
+    assert!(l.entries.iter().any(|e| e.encrypted));
 }

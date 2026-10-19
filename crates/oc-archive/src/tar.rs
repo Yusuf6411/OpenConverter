@@ -233,7 +233,7 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
         let name = name.trim_end_matches('/').to_string();
         let kind_dir = typeflag == b'5' || (typeflag == 0 && h.first() != Some(&0) && cstr(field(h, 0, 100)).ends_with('/'));
         let mut entry = match typeflag {
-            b'0' | 0 | b'7' if !kind_dir => Entry::file(name, body.to_vec()),
+            b'0' | 0 | b'7' if !kind_dir => Entry::from_body(name, body, cx.list_only),
             b'5' => Entry::dir(name),
             _ if kind_dir => Entry::dir(name),
             b'2' => Entry::symlink(name, linkname),
@@ -244,7 +244,11 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
                     .iter()
                     .find(|e| e.path == src && e.kind == EntryKind::File)
                     .ok_or_else(|| Error::corrupt("hard link to unknown member"))?;
-                let mut e = Entry::file(name, found.data.clone());
+                let mut e = if cx.list_only {
+                    Entry::listed(name, found.size())
+                } else {
+                    Entry::file(name, found.data.clone())
+                };
                 e.mode = found.mode;
                 e
             }

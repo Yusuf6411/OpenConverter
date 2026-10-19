@@ -8,7 +8,7 @@ fn main() {
     let a: Vec<String> = std::env::args().collect();
     let limits = Limits::default();
     let pw = std::env::var("OC_PASSWORD").ok();
-    let cx = Context { limits: &limits, progress: &NoProgress, password: pw.as_deref() };
+    let cx = Context { limits: &limits, progress: &NoProgress, password: pw.as_deref(), list_only: std::env::var("OC_LIST_ONLY").is_ok() };
     let load = |p: &str| -> oc_archive::Archive {
         let data = std::fs::read(p).unwrap();
         let f = Format::from_name(p).or_else(|| Format::sniff(&data)).expect("unknown format");

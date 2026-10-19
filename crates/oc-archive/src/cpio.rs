@@ -64,14 +64,14 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
         let mut e = match mode & 0o170_000 {
             0o040_000 => Entry::dir(name),
             0o120_000 => Entry::symlink(name, String::from_utf8_lossy(body).into_owned()),
-            0o100_000 => Entry::file(name, body.to_vec()),
+            0o100_000 => Entry::from_body(name, body, cx.list_only),
             _ => continue,
         };
         e.mode = (mode & 0o7777) as u32;
         e.mtime = i64::try_from(mtime).ok();
         budget.entry()?;
         budget.add_output(size)?;
-        if e.kind == EntryKind::File && body.is_empty() && fields == 13 {
+        if e.kind == EntryKind::File && body.is_empty() && fields == 13 && !cx.list_only {
             links.push((ino, archive.entries.len()));
         }
         archive.entries.push(e);

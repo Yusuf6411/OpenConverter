@@ -183,6 +183,13 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
             return Err(Error::new(ErrorCode::UnsupportedVariant, "CAB: file continues from another cabinet"));
         }
         let fi = usize::from(f.folder);
+        if cx.list_only {
+            budget.add_output(u64::from(f.size))?;
+            let mut e = Entry::listed(f.name.trim_start_matches('/').to_string(), u64::from(f.size));
+            e.mtime = f.mtime;
+            archive.entries.push(e);
+            continue;
+        }
         if cache.as_ref().map(|(k, _)| *k) != Some(fi) {
             let fold = folders.get(fi).ok_or_else(|| Error::corrupt("CAB: file refers to a missing folder"))?;
             let expected = files

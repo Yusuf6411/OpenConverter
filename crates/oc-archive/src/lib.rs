@@ -24,4 +24,7 @@ pub struct Context<'a> {
     pub limits: &'a Limits,
     pub progress: &'a dyn Progress,
     pub password: Option<&'a str>,
+    /// Read only names, sizes and metadata; file contents are skipped (and so are the
+    /// decompression and password they would need, where the format allows it).
+    pub list_only: bool,
 }

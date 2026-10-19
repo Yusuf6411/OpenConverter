@@ -69,7 +69,7 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
         }
         budget.entry()?;
         budget.add_output(body.len() as u64)?;
-        let mut e = Entry::file(name, body.to_vec());
+        let mut e = Entry::from_body(name, body, cx.list_only);
         e.mode = mode & 0o7777;
         e.mtime = mtime;
         archive.entries.push(e);

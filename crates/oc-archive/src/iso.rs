@@ -203,7 +203,7 @@ impl Walker<'_, '_> {
         let dir = self.extent(lba, len)?.to_vec();
         let mut pos = 0usize;
         // Multi-extent files: consecutive records with the same name.
-        let mut pending: Option<(String, Vec<u8>, Option<i64>, u32, bool)> = None;
+        let mut pending: Option<(String, Vec<u8>, u64, Option<i64>, u32)> = None;
         while pos < dir.len() {
             self.cx.progress.check_cancelled()?;
             let l = usize::from(dir[pos]);
@@ -252,24 +252,27 @@ impl Walker<'_, '_> {
             self.budget.add_output(u64::from(rec.len))?;
             let body = self.extent(rec.lba, rec.len)?;
             let multi = rec.flags & 0x80 != 0;
-            let mut acc = match pending.take() {
-                Some((n, d, _, _, _)) if n == path => d,
-                _ => Vec::new(),
+            let (mut acc, mut len) = match pending.take() {
+                Some((n, d, l, _, _)) if n == path => (d, l),
+                _ => (Vec::new(), 0),
             };
-            acc.extend_from_slice(body);
+            len += body.len() as u64;
+            if !self.cx.list_only {
+                acc.extend_from_slice(body);
+            }
             if multi {
-                pending = Some((path, acc, rec.mtime, rr.mode.unwrap_or(0o644), true));
+                pending = Some((path, acc, len, rec.mtime, rr.mode.unwrap_or(0o644)));
                 continue;
             }
-            let mut e = Entry::file(path, acc);
+            let mut e = if self.cx.list_only { Entry::listed(path, len) } else { Entry::file(path, acc) };
             e.mtime = rr.mtime.or(rec.mtime);
             if let Some(m) = rr.mode {
                 e.mode = m & 0o7777;
             }
             self.out.entries.push(e);
         }
-        if let Some((path, acc, mtime, mode, _)) = pending {
-            let mut e = Entry::file(path, acc);
+        if let Some((path, acc, len, mtime, mode)) = pending {
+            let mut e = if self.cx.list_only { Entry::listed(path, len) } else { Entry::file(path, acc) };
             e.mtime = mtime;
             e.mode = mode & 0o7777;
             self.out.entries.push(e);

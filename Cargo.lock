@@ -2161,6 +2161,7 @@ version = "2.0.0"
 name = "oc-cli"
 version = "2.0.0"
 dependencies = [
+ "oc-archive",
  "oc-core",
  "oc-engine",
  "oc-server",
@@ -2202,6 +2203,7 @@ version = "2.0.0"
 name = "oc-engine"
 version = "2.0.0"
 dependencies = [
+ "oc-archive",
  "oc-core",
  "oc-image",
  "oc-sheet",
