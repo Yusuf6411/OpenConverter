@@ -13,7 +13,8 @@ The 1.x Python notes are kept in [v1/](v1/).
 
 ## Phase 1: Foundations
 - [~] M1.1 oc-core: errors with stable codes and CLI exit codes, notes, limits, progress/cancel token, option schemas with validation, format descriptors with magic-byte sniffers, registry and Dijkstra route planner (17 unit tests). Not yet done: the IR types (Image, Audio, Video, Document, ...) are deferred to the milestone that first needs each one; `Registry::detect` has no test yet.
-- [ ] M1.2 to M1.7 not started.
+- [~] M1.2 oc-io: checked ByteReader, BitReader/BitWriter (MSB/LSB, round-trip tested); oc-checksum: CRC-32, CRC-32C, CRC-64/XZ, Adler-32, xxHash64 against published check values (scalar only; SIMD paths and bounded stream sinks are not written yet).
+- [ ] M1.3 to M1.7 not started.
 
 ## Known gaps
 - 1.x Python test cases are not ported yet; they are available at tag v1.0.0. Port them as each Rust codec lands (M1.x, M2.x).
