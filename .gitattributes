@@ -19,3 +19,4 @@
 tests/fixtures/** binary
 *.rs text eol=lf
 *.toml text eol=lf
+crates/oc-compress/tests/data/** binary
