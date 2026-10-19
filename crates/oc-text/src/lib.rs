@@ -194,16 +194,12 @@ pub fn decode(data: &[u8], enc: Encoding, policy: Policy) -> Result<(String, Not
         Encoding::Utf16Le | Encoding::Utf16Be => {
             let be = enc == Encoding::Utf16Be;
             let mut units = Vec::with_capacity(data.len() / 2);
-            let mut chunks = data.chunks_exact(2);
-            for c in &mut chunks {
-                let pair = [
-                    c.first().copied().unwrap_or(0),
-                    c.get(1).copied().unwrap_or(0),
-                ];
+            let (pairs, rest) = data.as_chunks::<2>();
+            for pair in pairs {
                 units.push(if be {
-                    u16::from_be_bytes(pair)
+                    u16::from_be_bytes(*pair)
                 } else {
-                    u16::from_le_bytes(pair)
+                    u16::from_le_bytes(*pair)
                 });
             }
             let mut offset = 0usize;
@@ -223,7 +219,7 @@ pub fn decode(data: &[u8], enc: Encoding, policy: Policy) -> Result<(String, Not
                     }
                 }
             }
-            if !chunks.remainder().is_empty() {
+            if !rest.is_empty() {
                 if policy == Policy::Strict {
                     return Err(Error::truncated("odd number of bytes in UTF-16 data"));
                 }
@@ -233,14 +229,12 @@ pub fn decode(data: &[u8], enc: Encoding, policy: Policy) -> Result<(String, Not
         }
         Encoding::Utf32Le | Encoding::Utf32Be => {
             let be = enc == Encoding::Utf32Be;
-            let mut chunks = data.chunks_exact(4);
-            for (i, c) in (&mut chunks).enumerate() {
-                let mut a = [0u8; 4];
-                a.copy_from_slice(c);
+            let (words, rest) = data.as_chunks::<4>();
+            for (i, a) in words.iter().enumerate() {
                 let v = if be {
-                    u32::from_be_bytes(a)
+                    u32::from_be_bytes(*a)
                 } else {
-                    u32::from_le_bytes(a)
+                    u32::from_le_bytes(*a)
                 };
                 match char::from_u32(v) {
                     Some(ch) => out.push(ch),
@@ -251,7 +245,7 @@ pub fn decode(data: &[u8], enc: Encoding, policy: Policy) -> Result<(String, Not
                     }
                 }
             }
-            if !chunks.remainder().is_empty() {
+            if !rest.is_empty() {
                 if policy == Policy::Strict {
                     return Err(Error::truncated("partial UTF-32 code unit"));
                 }
