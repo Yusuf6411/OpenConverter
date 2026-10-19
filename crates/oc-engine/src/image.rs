@@ -11,7 +11,8 @@ use oc_core::{
 };
 use oc_image::anim::{self, Animation};
 use oc_image::{
-    bmp, dds, gif, hdr, icc, icns, ico, jpeg, netpbm, ops, png, psd, qoi, tga, tiff, webp, Image,
+    bmp, dds, exr, gif, hdr, icc, icns, ico, jpeg, netpbm, ops, png, psd, qoi, tga, tiff, webp,
+    Image,
 };
 
 pub const PNG: FormatId = FormatId("png");
@@ -26,13 +27,14 @@ pub const ICNS: FormatId = FormatId("icns");
 pub const DDS: FormatId = FormatId("dds");
 pub const PSD: FormatId = FormatId("psd");
 pub const HDR: FormatId = FormatId("hdr");
+pub const EXR: FormatId = FormatId("exr");
 pub const TIFF: FormatId = FormatId("tiff");
 pub const WEBP: FormatId = FormatId("webp");
 /// Internal hub; never shown to users.
 pub const IMAGE_IR: FormatId = FormatId("image-ir");
 
-pub const FORMATS: [FormatId; 14] = [
-    PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, DDS, PSD, HDR, TIFF, WEBP,
+pub const FORMATS: [FormatId; 15] = [
+    PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, DDS, PSD, HDR, EXR, TIFF, WEBP,
 ];
 
 pub fn is_image(id: FormatId) -> bool {
@@ -378,6 +380,29 @@ pub fn register(registry: &mut Registry) {
             "Radiance picture file format",
         ),
         describe(
+            EXR,
+            "OpenEXR",
+            &["exr"],
+            &["image/x-exr"],
+            vec![Sniffer {
+                offset: 0,
+                magic: &[0x76, 0x2f, 0x31, 0x01],
+                confidence: 100,
+            }],
+            false,
+            schema(vec![OptionSpec {
+                key: "compression",
+                label: "Compression",
+                help: "Lossless coding of the half-float rows",
+                i18n_key: "opt.exr.compression",
+                kind: OptionKind::Enum {
+                    choices: vec!["zip", "rle", "none"],
+                    default: "zip",
+                },
+            }]),
+            "OpenEXR file layout",
+        ),
+        describe(
             TIFF,
             "TIFF",
             &["tif", "tiff"],
@@ -598,6 +623,7 @@ fn decode_description(name: &str) -> &'static str {
         "DDS" => "Decode DDS",
         "PSD" => "Decode PSD",
         "Radiance HDR" => "Decode HDR",
+        "OpenEXR" => "Decode EXR",
         _ => "Decode Netpbm",
     }
 }
@@ -617,6 +643,7 @@ fn encode_description(name: &str) -> &'static str {
         "DDS" => "Encode DDS",
         "PSD" => "Encode PSD",
         "Radiance HDR" => "Encode HDR",
+        "OpenEXR" => "Encode EXR",
         _ => "Encode Netpbm",
     }
 }
@@ -641,6 +668,7 @@ pub fn decode(
         DDS => dds::decode(data, limits),
         PSD => psd::decode(data, limits, progress),
         HDR => hdr::decode(data, limits),
+        EXR => exr::decode(data, limits, progress),
         PNM => netpbm::decode(data, limits),
         other => Err(Error::new(
             ErrorCode::UnsupportedFormat,
@@ -890,6 +918,16 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
         ),
         QOI => qoi::encode(img),
         HDR => hdr::encode(img)?,
+        EXR => exr::encode(
+            img,
+            &exr::EncodeOptions {
+                compression: match opts.text("compression") {
+                    Some("none") => exr::EncodeCompression::None,
+                    Some("rle") => exr::EncodeCompression::Rle,
+                    _ => exr::EncodeCompression::Zip,
+                },
+            },
+        )?,
         TIFF => tiff::encode(
             img,
             &tiff::EncodeOptions {

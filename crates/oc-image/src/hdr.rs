@@ -24,7 +24,7 @@ enum Primaries {
 }
 
 /// Linear to sRGB code values, indexed by the linear value in 1/4095 steps.
-fn srgb_table() -> Vec<u8> {
+pub(crate) fn srgb_table() -> Vec<u8> {
     (0..=4095u32)
         .map(|i| {
             let v = f64::from(i) / 4095.0;
@@ -38,7 +38,7 @@ fn srgb_table() -> Vec<u8> {
         .collect()
 }
 
-fn srgb_to_linear(s: f64) -> f64 {
+pub(crate) fn srgb_to_linear(s: f64) -> f64 {
     if s <= 0.040_45 {
         s / 12.92
     } else {
@@ -46,7 +46,7 @@ fn srgb_to_linear(s: f64) -> f64 {
     }
 }
 
-fn to_code(table: &[u8], v: f32) -> u8 {
+pub(crate) fn to_code(table: &[u8], v: f32) -> u8 {
     // NaN fails both comparisons and lands on 0.
     let v = if v >= 1.0 {
         1.0

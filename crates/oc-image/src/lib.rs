@@ -12,6 +12,7 @@ pub mod bmp;
 mod ccitt;
 mod ccitt_tables;
 pub mod dds;
+pub mod exr;
 pub mod gif;
 pub mod hdr;
 pub mod icc;

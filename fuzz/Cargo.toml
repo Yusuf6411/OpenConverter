@@ -193,3 +193,9 @@ name = "icc"
 path = "fuzz_targets/icc.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "exr"
+path = "fuzz_targets/exr.rs"
+test = false
+doc = false
