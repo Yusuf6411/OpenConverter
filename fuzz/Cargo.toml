@@ -108,3 +108,9 @@ name = "gif"
 path = "fuzz_targets/gif.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "jpeg"
+path = "fuzz_targets/jpeg.rs"
+test = false
+doc = false

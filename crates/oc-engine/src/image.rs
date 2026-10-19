@@ -9,7 +9,7 @@ use oc_core::{
     Capabilities, Category, Error, ErrorCode, FormatDescriptor, FormatId, Limits, Note, Notes,
     Ownership, Progress, Result, Severity, Sniffer,
 };
-use oc_image::{bmp, gif, netpbm, ops, png, qoi, tga, Image};
+use oc_image::{bmp, gif, jpeg, netpbm, ops, png, qoi, tga, Image};
 
 pub const PNG: FormatId = FormatId("png");
 pub const BMP: FormatId = FormatId("bmp");
@@ -17,10 +17,11 @@ pub const TGA: FormatId = FormatId("tga");
 pub const QOI: FormatId = FormatId("qoi");
 pub const PNM: FormatId = FormatId("pnm");
 pub const GIF: FormatId = FormatId("gif");
+pub const JPEG: FormatId = FormatId("jpeg");
 /// Internal hub; never shown to users.
 pub const IMAGE_IR: FormatId = FormatId("image-ir");
 
-pub const FORMATS: [FormatId; 6] = [PNG, BMP, TGA, QOI, PNM, GIF];
+pub const FORMATS: [FormatId; 7] = [PNG, JPEG, BMP, TGA, QOI, PNM, GIF];
 
 pub fn is_image(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -182,6 +183,43 @@ pub fn register(registry: &mut Registry) {
             "PNG 1.2 (ISO/IEC 15948)",
         ),
         describe(
+            JPEG,
+            "JPEG",
+            &["jpg", "jpeg", "jpe", "jfif"],
+            &["image/jpeg"],
+            vec![Sniffer {
+                offset: 0,
+                magic: b"\xff\xd8\xff",
+                confidence: 100,
+            }],
+            true,
+            schema(vec![
+                OptionSpec {
+                    key: "quality",
+                    label: "Quality",
+                    help: "1 is smallest, 100 is best",
+                    i18n_key: "opt.jpeg.quality",
+                    kind: OptionKind::Int {
+                        min: 1,
+                        max: 100,
+                        default: 85,
+                    },
+                },
+                OptionSpec {
+                    key: "subsampling",
+                    label: "Chroma subsampling",
+                    help:
+                        "4:4:4 keeps all colour detail, 4:2:0 halves it both ways for smaller files",
+                    i18n_key: "opt.jpeg.subsampling",
+                    kind: OptionKind::Enum {
+                        choices: vec!["4:4:4", "4:2:2", "4:2:0"],
+                        default: "4:2:0",
+                    },
+                },
+            ]),
+            "ITU T.81 (baseline and progressive decode, baseline encode)",
+        ),
+        describe(
             BMP,
             "BMP",
             &["bmp", "dib"],
@@ -304,6 +342,7 @@ fn decode_description(name: &str) -> &'static str {
         "TGA" => "Decode TGA",
         "QOI" => "Decode QOI",
         "GIF" => "Decode GIF",
+        "JPEG" => "Decode JPEG",
         _ => "Decode Netpbm",
     }
 }
@@ -315,6 +354,7 @@ fn encode_description(name: &str) -> &'static str {
         "TGA" => "Encode TGA",
         "QOI" => "Encode QOI",
         "GIF" => "Encode GIF",
+        "JPEG" => "Encode JPEG",
         _ => "Encode Netpbm",
     }
 }
@@ -331,6 +371,7 @@ pub fn decode(
         TGA => tga::decode(data, limits),
         QOI => qoi::decode(data, limits).map(|i| (i, Notes::new())),
         GIF => gif::decode(data, limits),
+        JPEG => jpeg::decode(data, limits, progress),
         PNM => netpbm::decode(data, limits),
         other => Err(Error::new(
             ErrorCode::UnsupportedFormat,
@@ -407,6 +448,27 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
             },
         ),
         QOI => qoi::encode(img),
+        JPEG => {
+            let quality = opts.int("quality").unwrap_or(85).clamp(1, 100) as u8;
+            let (bytes, mut n) = jpeg::encode(
+                img,
+                &jpeg::EncodeOptions {
+                    quality,
+                    subsampling: match opts.text("subsampling") {
+                        Some("4:4:4") => jpeg::Subsampling::S444,
+                        Some("4:2:2") => jpeg::Subsampling::S422,
+                        _ => jpeg::Subsampling::S420,
+                    },
+                    background: [br, bg, bb],
+                },
+            )?;
+            n.push(Note::new(
+                Severity::Info,
+                "image.lossy_compression",
+                format!("JPEG is lossy; saved at quality {quality}"),
+            ));
+            (bytes, n)
+        }
         GIF => gif::encode(
             img,
             &gif::EncodeOptions {
@@ -436,7 +498,7 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
         }
     };
     if fmt != PNG {
-        if img.metadata.icc_profile.is_some() {
+        if img.metadata.icc_profile.is_some() && fmt != JPEG {
             notes.push(Note::new(
                 Severity::Loss,
                 "image.icc_dropped",

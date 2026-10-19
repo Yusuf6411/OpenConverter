@@ -8,6 +8,7 @@
 pub mod bmp;
 pub mod gif;
 pub mod image;
+pub mod jpeg;
 pub mod netpbm;
 pub mod ops;
 pub mod png;

@@ -511,6 +511,44 @@ mod tests {
     }
 
     #[test]
+    fn jpeg_round_trip_is_close_and_says_it_is_lossy() {
+        let dir = tmpdir("jpg");
+        let jpg = dir.join("o.jpg");
+        let rep = run(
+            &png_fixture("rgb8.png"),
+            &jpg,
+            &[("quality", "95"), ("subsampling", "4:4:4")],
+        )
+        .unwrap();
+        assert!(rep
+            .notes
+            .iter()
+            .any(|n| n.code == "image.lossy_compression"));
+        assert!(!rep.notes.has_loss());
+        let (a, b) = (
+            decode_rgba(&jpg),
+            std::fs::read(png_fixture("rgb8.rgba")).unwrap(),
+        );
+        let worst = a.iter().zip(&b).map(|(x, y)| x.abs_diff(*y)).max().unwrap();
+        assert!(worst < 25, "worst channel error {worst}");
+        // And back to PNG, with the extension spelled differently.
+        let back = dir.join("back.png");
+        let rep = run(&jpg, &back, &[]).unwrap();
+        assert_eq!(rep.input_format, image::JPEG);
+        assert_eq!(
+            run(
+                &png_fixture("rgb8.png"),
+                &dir.join("x.jpg"),
+                &[("quality", "0")]
+            )
+            .err()
+            .map(|e| e.code),
+            Some(ErrorCode::InvalidOptions)
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn gif_output_reports_quantisation() {
         let dir = tmpdir("gifq");
         let out = dir.join("o.gif");
