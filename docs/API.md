@@ -23,6 +23,9 @@
 | `GET /api/files/{id}` | Metadata and probe results. |
 | `GET /api/files/{id}/preview` | Thumbnail (PNG) produced in a sandboxed worker. |
 | `POST /api/jobs` | Body `{"file_id","target_format","options":{...}}`, unknown fields are rejected. Options are validated against the target format's schema; the user's saved defaults fill in what is left out. Returns 201 `{"job_id"}`. |
+| `POST /api/files/{id}/entries` | Body `{"password"?}`. Lists an uploaded archive without unpacking it: `{format, count, total_size, encrypted, entries:[{path, kind: file\|dir\|link, size, mode, mtime, encrypted, link}]}`. 401 `encrypted_need_password` / `wrong_password`, 415 for a file that is not an archive. |
+| `POST /api/files/{id}/extract` | Body `{"paths"?: [...], "password"?}`. Unpacks the chosen entries (everything when `paths` is empty) in a sandboxed worker that refuses unsafe paths and links. Returns `{output_id, output_name, size, files, skipped}`; a single file comes back as itself, anything else as a ZIP, downloadable through `/api/outputs/{id}/download`. |
+| `POST /api/archives` | Body `{"file_ids":[...],"target_format":"zip","options":{...},"name"?}`. Packs uploads under their original names (clashes become `name (2).ext`) into one archive. A job like `POST /api/jobs`; returns 201 `{"job_id"}`. |
 | `GET /api/jobs`, `GET /api/jobs/{id}` | Job state: `queued`, `running`, `done`, `error`, `cancelled`, with progress, notes (warnings and substitutions) and output info. |
 | `GET /api/jobs/{id}/events` | Server-sent events with the same job object on every change. |
 | `POST /api/jobs/{id}/cancel` | Stops the worker process. |

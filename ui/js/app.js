@@ -3,6 +3,7 @@ import { api } from "./api.js";
 import { Card } from "./ui/card.js";
 import { announce, clear, h, icon } from "./ui/dom.js";
 import { friendlyError } from "./ui/format.js";
+import { PackDialog } from "./ui/archive.js";
 import { HistoryView } from "./ui/history.js";
 import { SettingsDialog } from "./ui/settings.js";
 
@@ -326,6 +327,7 @@ class App {
       for (const c of this.cards) if (c.entry && ["ready", "failed", "cancelled"].includes(c.status)) c.convert();
     });
     document.getElementById("download-all").addEventListener("click", () => this.downloadAll());
+    document.getElementById("pack-all").addEventListener("click", () => new PackDialog(this));
     document.getElementById("clear-finished").addEventListener("click", () => {
       for (const c of [...this.cards]) if (["done", "cancelled", "error"].includes(c.status)) c.remove();
     });
@@ -363,6 +365,7 @@ class App {
       for (const id of wanted) sel.append(h("option", { value: id, text: this.formats.get(id).name }));
     }
     document.getElementById("download-all").disabled = done === 0;
+    document.getElementById("pack-all").disabled = !this.cards.some((c) => c.entry && !c.busy);
     document.getElementById("convert-all").disabled = !this.cards.some((c) => c.entry && ["ready", "failed", "cancelled"].includes(c.status));
   }
 }

@@ -46,6 +46,9 @@ export const api = {
   lookup: (ids, outputs) => request("GET", "/api/files?ids=" + ids.map(encodeURIComponent).join(",") +
     "&outputs=" + outputs.map(encodeURIComponent).join(",")),
   createJob: (fileId, target, options) => request("POST", "/api/jobs", { file_id: fileId, target_format: target, options }),
+  archiveEntries: (fileId, password) => request("POST", "/api/files/" + fileId + "/entries", password ? { password } : {}),
+  archiveExtract: (fileId, paths, password) => request("POST", "/api/files/" + fileId + "/extract", { paths, ...(password ? { password } : {}) }),
+  createArchive: (body) => request("POST", "/api/archives", body),
   job: (id) => request("GET", "/api/jobs/" + id),
   jobs: () => request("GET", "/api/jobs"),
   cancel: (id) => request("POST", "/api/jobs/" + id + "/cancel"),

@@ -311,3 +311,15 @@ footer { text-align: center; color: var(--text-2); font-size: 12px; padding: 24p
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* ---------- archive dialogs ---------- */
+dialog.wide { width: min(720px, calc(100vw - 24px)); }
+.entry-list { max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.entry { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-size: 13px; cursor: pointer; }
+.entry:hover { background: var(--accent-soft); }
+.entry-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry-size, .entry-time { color: var(--text-2); font-size: 12px; white-space: nowrap; }
+.entry-time { min-width: 0; }
+.field-row { display: flex; gap: 8px; align-items: center; padding: 10px; }
+.field-row input { flex: 1; }
+@media (max-width: 560px) { .entry-time { display: none; } }

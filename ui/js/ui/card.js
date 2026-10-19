@@ -1,6 +1,7 @@
 // One file in the conversion queue.
 import { api, ApiError, uploadFile } from "../api.js";
 import { announce, append, clear, h, icon } from "./dom.js";
+import { ArchiveDialog, isOpenableArchive } from "./archive.js";
 import { bytes, duration, friendlyError, sizeChange, stageLabel } from "./format.js";
 import { flattensAlpha, renderOptions } from "./options.js";
 
@@ -79,6 +80,8 @@ export class Card {
     this.cancelBtn = h("button", { type: "button", class: "btn" }, icon("stop", 16), "Cancel");
     this.cancelBtn.addEventListener("click", () => this.cancel());
     this.downloadLink = h("a", { class: "btn", role: "button" }, icon("download", 16), "Download");
+    this.browseBtn = h("button", { type: "button", class: "btn" }, icon("text", 16), "Browse");
+    this.browseBtn.addEventListener("click", () => new ArchiveDialog(this.app, this));
     this.removeBtn = h("button", { type: "button", class: "btn", "aria-label": "Remove " + this.name }, icon("x", 16), "Remove");
     this.removeBtn.addEventListener("click", () => this.remove());
     this.render(true);
@@ -222,6 +225,7 @@ export class Card {
       this.downloadLink.setAttribute("download", this.result.output_name || "");
       this.actions.append(this.downloadLink);
     }
+    if (this.entry && isOpenableArchive(this.format) && !this.uploadGone) this.actions.append(this.browseBtn);
     this.actions.append(this.removeBtn);
   }
 
