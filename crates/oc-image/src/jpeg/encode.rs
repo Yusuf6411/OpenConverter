@@ -8,6 +8,7 @@ use super::tables::{
     HuffSpec, STD_AC_CHROMA, STD_AC_LUMA, STD_CHROMA_Q, STD_DC_CHROMA, STD_DC_LUMA, STD_LUMA_Q,
     ZIGZAG,
 };
+use super::trellis;
 use crate::image::{Depth, Image, Layout};
 use crate::ops;
 use oc_core::{Error, ErrorCode, Notes, Result};
@@ -33,6 +34,8 @@ pub struct EncodeOptions {
     pub optimize: bool,
     /// Write the picture in several refining scans; implies optimised tables.
     pub progressive: bool,
+    /// Choose quantised values by rate-distortion cost (smaller files, slower).
+    pub trellis: bool,
 }
 
 impl Default for EncodeOptions {
@@ -43,6 +46,7 @@ impl Default for EncodeOptions {
             background: [255, 255, 255],
             optimize: false,
             progressive: false,
+            trellis: false,
         }
     }
 }
@@ -58,7 +62,7 @@ fn scaled_table(base: &[u8; 64], quality: u8) -> [u16; 64] {
 }
 
 /// Canonical Huffman encoder table: code and length per symbol.
-struct HuffEnc {
+pub(super) struct HuffEnc {
     code: [u16; 256],
     size: [u8; 256],
 }
@@ -210,33 +214,35 @@ fn downsample(p: &Plane, hf: usize, vf: usize, out_w: usize, out_h: usize) -> Pl
     }
 }
 
-fn segment(out: &mut Vec<u8>, marker: u8, body: &[u8]) {
+pub(super) fn segment(out: &mut Vec<u8>, marker: u8, body: &[u8]) {
     out.extend_from_slice(&[0xFF, marker]);
     out.extend_from_slice(&((body.len() + 2) as u16).to_be_bytes());
     out.extend_from_slice(body);
 }
 
 /// A quantised component: its blocks in raster order over the padded grid.
-struct Comp {
-    blocks: Vec<[i16; 64]>,
+pub(super) struct Comp {
+    /// Component identifier written to the frame and scan headers.
+    pub(super) id: u8,
+    pub(super) blocks: Vec<[i16; 64]>,
     /// Blocks per row of the padded grid.
-    stride: usize,
+    pub(super) stride: usize,
     /// Blocks per MCU, across and down.
-    hb: usize,
-    vb: usize,
+    pub(super) hb: usize,
+    pub(super) vb: usize,
     /// Blocks that cover the picture, across and down (single-component scans stop here).
-    real_w: usize,
-    real_h: usize,
+    pub(super) real_w: usize,
+    pub(super) real_h: usize,
     /// Which Huffman table pair the component uses: 0 luma, 1 chroma.
-    table: usize,
+    pub(super) table: usize,
 }
 
-struct Scan {
-    comps: Vec<usize>,
-    ss: u8,
-    se: u8,
-    ah: u8,
-    al: u8,
+pub(super) struct Scan {
+    pub(super) comps: Vec<usize>,
+    pub(super) ss: u8,
+    pub(super) se: u8,
+    pub(super) ah: u8,
+    pub(super) al: u8,
 }
 
 /// Receives the symbols and raw bits of a scan. Tables 0 and 1 are DC, 2 and 3 are AC.
@@ -577,7 +583,7 @@ fn run_scan<O: Out>(
 
 /// Writes one scan: tables (optimised from a counting pass, or the standard ones already in
 /// the file), the SOS header and the entropy-coded data.
-fn write_scan(
+pub(super) fn write_scan(
     out: &mut Vec<u8>,
     comps: &[Comp],
     scan: &Scan,
@@ -618,7 +624,7 @@ fn write_scan(
     let mut sos = vec![scan.comps.len() as u8];
     for &ci in &scan.comps {
         let t = comps.get(ci).map_or(0, |c| c.table) as u8;
-        sos.extend_from_slice(&[ci as u8 + 1, (t << 4) | t]);
+        sos.extend_from_slice(&[comps.get(ci).map_or(ci as u8 + 1, |c| c.id), (t << 4) | t]);
     }
     sos.extend_from_slice(&[scan.ss, scan.se, (scan.ah << 4) | scan.al]);
     segment(out, 0xDA, &sos);
@@ -642,7 +648,7 @@ fn write_scan(
 }
 
 /// libjpeg's default progressive script (`jpeg_simple_progression`).
-fn progressive_script(colour: bool) -> Vec<Scan> {
+pub(super) fn progressive_script(colour: bool) -> Vec<Scan> {
     let s = |comps: &[usize], ss, se, ah, al| Scan {
         comps: comps.to_vec(),
         ss,
@@ -743,6 +749,11 @@ pub fn encode(img: &Image, opts: &EncodeOptions) -> Result<(Vec<u8>, Notes)> {
 
     // ---- transform and quantise every block
     let mut comps: Vec<Comp> = Vec::new();
+    let ac_len = [
+        HuffEnc::new(&STD_AC_LUMA.bits, STD_AC_LUMA.vals).size,
+        HuffEnc::new(&STD_AC_CHROMA.bits, STD_AC_CHROMA.vals).size,
+    ];
+    let t_lambda = trellis::lambda(&q_luma);
     let mut fcoef = [0i32; 64];
     for (ci, plane) in planes.iter().enumerate() {
         let (hb, vb) = if ci == 0 { (hs, vs) } else { (1, 1) };
@@ -752,7 +763,11 @@ pub fn encode(img: &Image, opts: &EncodeOptions) -> Result<(Vec<u8>, Notes)> {
         for by in 0..gh {
             for bx in 0..gw {
                 dct::fdct(&plane.block(bx, by), &mut fcoef);
-                let qc = quantise(&fcoef, q);
+                let qc = if opts.trellis {
+                    trellis::quantise(&fcoef, q, &ac_len[usize::from(ci > 0)], t_lambda)
+                } else {
+                    quantise(&fcoef, q)
+                };
                 let mut b = [0i16; 64];
                 for (o, &v) in b.iter_mut().zip(&qc) {
                     *o = v.clamp(-32768, 32767) as i16;
@@ -761,6 +776,7 @@ pub fn encode(img: &Image, opts: &EncodeOptions) -> Result<(Vec<u8>, Notes)> {
             }
         }
         comps.push(Comp {
+            id: ci as u8 + 1,
             blocks,
             stride: gw,
             hb,
@@ -895,6 +911,29 @@ mod tests {
         (40, 4251, 20.6, 3179, 19.4),
         (10, 1734, 18.6, 1461, 18.0),
     ];
+
+    #[test]
+    fn trellis_is_smaller_at_the_same_look() {
+        let img = source();
+        for (q, sub) in [(75, Subsampling::S420), (90, Subsampling::S444)] {
+            let plain = EncodeOptions {
+                quality: q,
+                subsampling: sub,
+                ..EncodeOptions::default()
+            };
+            let (a, a_img) = roundtrip(&img, &plain);
+            let (b, b_img) = roundtrip(
+                &img,
+                &EncodeOptions {
+                    trellis: true,
+                    ..plain
+                },
+            );
+            assert!(b.len() < a.len(), "q{q}: {} vs {}", b.len(), a.len());
+            let (pa, pb) = (psnr(&img.data, &a_img.data), psnr(&img.data, &b_img.data));
+            assert!(pb > pa - 3.0, "q{q}: {pb} dB vs {pa} dB");
+        }
+    }
 
     #[test]
     fn size_and_quality_track_libjpeg() {

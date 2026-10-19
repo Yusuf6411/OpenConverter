@@ -274,6 +274,20 @@ pub fn register(registry: &mut Registry) {
                     "opt.jpeg.progressive",
                     false,
                 ),
+                bool_spec(
+                    "lossless",
+                    "Lossless transform",
+                    "For JPEG input: applies rotate and flip to the compressed data without decoding, so no quality is lost (picture edges that are not whole blocks are trimmed when mirroring). Ignored when the size or profile options are set",
+                    "opt.jpeg.lossless",
+                    false,
+                ),
+                bool_spec(
+                    "trellis",
+                    "Trellis quantisation",
+                    "Picks quantised values by rate-distortion cost; smaller files at the same look, noticeably slower",
+                    "opt.jpeg.trellis",
+                    false,
+                ),
             ]),
             "ITU T.81 (baseline and progressive, encode and decode)",
         ),
@@ -804,6 +818,39 @@ fn png_options(opts: &Options) -> png::EncodeOptions {
     }
 }
 
+/// The lossless JPEG route: rotate and flip applied to the coefficients of a JPEG input.
+/// `None` when the options ask for anything else, in which case the pixel route runs.
+pub fn lossless_jpeg(
+    data: &[u8],
+    opts: &Options,
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<Option<(Vec<u8>, Notes)>> {
+    let pixel_changes = opts.int("width").unwrap_or(0) > 0
+        || opts.int("height").unwrap_or(0) > 0
+        || opts.text("profile").unwrap_or("keep") != "keep";
+    let degrees = opts
+        .text("rotate")
+        .and_then(|r| r.parse().ok())
+        .unwrap_or(0);
+    let flip = opts.text("flip").unwrap_or("none");
+    let Some(mut t) = (!pixel_changes)
+        .then(|| jpeg::Transform::rotate_flip(degrees, flip == "horizontal", flip == "vertical"))
+        .flatten()
+    else {
+        return Ok(None);
+    };
+    if opts.bool("progressive") == Some(true) {
+        t.progressive = Some(true);
+    }
+    match jpeg::transform(data, &t, limits, progress) {
+        Ok(done) => Ok(Some(done)),
+        // Arithmetic, 12-bit and lossless files fall back to decoding and encoding.
+        Err(e) if e.code == ErrorCode::UnsupportedVariant => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// Orientation and size changes requested through the common options.
 pub fn transform(img: Image, opts: &Options, limits: &Limits) -> Result<(Image, Notes)> {
     let mut notes = Notes::new();
@@ -999,6 +1046,7 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
                     background: [br, bg, bb],
                     optimize: opts.bool("optimize") == Some(true),
                     progressive: opts.bool("progressive") == Some(true),
+                    trellis: opts.bool("trellis") == Some(true),
                 },
             )?;
             n.push(Note::new(

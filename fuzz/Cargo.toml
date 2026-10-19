@@ -118,6 +118,12 @@ test = false
 doc = false
 
 [[bin]]
+name = "jpeg_transform"
+path = "fuzz_targets/jpeg_transform.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "ico"
 path = "fuzz_targets/ico.rs"
 test = false

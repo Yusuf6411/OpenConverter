@@ -654,13 +654,23 @@ pub fn decode_tiff(
     decode_with(data, Some(rgb_direct), limits, progress)
 }
 
-fn decode_with(
+/// Everything read from the marker stream before pixels are built.
+struct Parsed {
+    frame: Frame,
+    tables: Tables,
+    meta: Meta,
+    /// The scans ran out of data.
+    starved: bool,
+    /// APPn and COM segments in file order, as (marker, body).
+    kept: Vec<(u8, Vec<u8>)>,
+}
+
+fn parse_stream(
     data: &[u8],
     rgb_direct: Option<bool>,
     limits: &Limits,
     progress: &dyn Progress,
-) -> Result<(Image, Notes)> {
-    let mut notes = Notes::new();
+) -> Result<Parsed> {
     if !sniff(data) {
         return Err(Error::new(ErrorCode::UnsupportedFormat, "not a JPEG file"));
     }
@@ -678,6 +688,7 @@ fn decode_with(
         ..Meta::default()
     };
     let mut scans = 0usize;
+    let mut kept: Vec<(u8, Vec<u8>)> = Vec::new();
     let mut starved = false;
 
     while let Some(m) = next_marker(data, &mut pos) {
@@ -694,6 +705,9 @@ fn decode_with(
             .get(pos + 2..pos + len)
             .ok_or_else(|| Error::truncated("JPEG marker segment"))?;
         pos += len;
+        if matches!(m, 0xE0..=0xEF | 0xFE) {
+            kept.push((m, seg.to_vec()));
+        }
         match m {
             0xC0..=0xC3 | 0xC9 | 0xCA => {
                 if frame.is_some() {
@@ -773,13 +787,143 @@ fn decode_with(
                 scans += 1;
                 progress.check_cancelled()?;
             }
-            _ => {} // APPn, COM, DNL and anything else carry nothing we need
+            _ => {} // DNL and anything else carry nothing we need
         }
     }
     let frame = frame.ok_or_else(|| Error::corrupt("JPEG has no frame header"))?;
     if scans == 0 {
         return Err(Error::truncated("JPEG image data"));
     }
+    Ok(Parsed {
+        frame,
+        tables,
+        meta,
+        starved,
+        kept,
+    })
+}
+
+/// Quantised coefficients of a DCT file, for editing without decoding to pixels.
+pub(super) struct Coefs {
+    pub width: usize,
+    pub height: usize,
+    pub progressive: bool,
+    pub hmax: usize,
+    pub vmax: usize,
+    pub mcus_x: usize,
+    pub mcus_y: usize,
+    pub comps: Vec<CoefComp>,
+    /// Quantisation tables by id, in natural order.
+    pub q: [Option<[u16; 64]>; 4],
+    /// APPn and COM segments in file order, as (marker, body).
+    pub kept: Vec<(u8, Vec<u8>)>,
+    pub truncated: bool,
+}
+
+pub(super) struct CoefComp {
+    pub id: u8,
+    pub h: usize,
+    pub v: usize,
+    pub tq: usize,
+    /// Blocks per row and column of the MCU-padded grid.
+    pub bw: usize,
+    pub bh: usize,
+    /// Natural-order coefficients, rows of `bw` blocks.
+    pub blocks: Vec<[i16; 64]>,
+}
+
+/// Reads the coefficients of an 8-bit Huffman-coded DCT file (baseline or progressive).
+pub(super) fn read_coefficients(
+    data: &[u8],
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<Coefs> {
+    let Parsed {
+        frame,
+        tables,
+        starved,
+        kept,
+        meta: _,
+    } = parse_stream(data, None, limits, progress)?;
+    if frame.arithmetic || frame.lossless || frame.precision != 8 {
+        return Err(unsupported(
+            "arithmetic, lossless or 12-bit coding in a lossless transform",
+        ));
+    }
+    if frame
+        .comps
+        .iter()
+        .any(|c| tables.q.get(c.tq).is_none_or(Option::is_none))
+    {
+        return Err(Error::corrupt("JPEG uses an undefined quantisation table"));
+    }
+    let single = frame.comps.len() == 1;
+    let (hmax, vmax) = if single {
+        (1, 1)
+    } else {
+        (frame.hmax, frame.vmax)
+    };
+    let mcus_x = frame.width.div_ceil(8 * hmax);
+    let mcus_y = frame.height.div_ceil(8 * vmax);
+    let mut comps = Vec::new();
+    for c in &frame.comps {
+        let (h, v) = if single { (1, 1) } else { (c.h, c.v) };
+        if hmax % h != 0 || vmax % v != 0 {
+            return Err(unsupported(
+                "sampling factors that do not divide each other",
+            ));
+        }
+        let (bw, bh) = (mcus_x * h, mcus_y * v);
+        let mut blocks = vec![[0i16; 64]; bw * bh];
+        for by in 0..bh.min(c.bh) {
+            for bx in 0..bw.min(c.bw) {
+                let at = (by * c.bw + bx) * 64;
+                if let (Some(src), Some(dst)) =
+                    (c.coefs.get(at..at + 64), blocks.get_mut(by * bw + bx))
+                {
+                    dst.copy_from_slice(src);
+                }
+            }
+        }
+        comps.push(CoefComp {
+            id: c.id,
+            h,
+            v,
+            tq: c.tq,
+            bw,
+            bh,
+            blocks,
+        });
+    }
+    Ok(Coefs {
+        width: frame.width,
+        height: frame.height,
+        progressive: frame.progressive,
+        hmax,
+        vmax,
+        mcus_x,
+        mcus_y,
+        comps,
+        q: tables.q,
+        kept,
+        truncated: starved,
+    })
+}
+
+fn decode_with(
+    data: &[u8],
+    rgb_direct: Option<bool>,
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<(Image, Notes)> {
+    let mut notes = Notes::new();
+    let Parsed {
+        frame,
+        tables,
+        mut meta,
+        starved,
+        kept: _,
+    } = parse_stream(data, rgb_direct, limits, progress)?;
     if starved {
         notes.push(Note::new(
             Severity::Warning,

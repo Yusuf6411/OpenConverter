@@ -252,48 +252,72 @@ impl Engine {
                 .and_then(|e| e.to_str())
                 .unwrap_or_default()
                 .to_ascii_lowercase();
-            // An animation stays one when the output can hold it; otherwise the still path
-            // below reads the first frame and says so.
-            let animation =
-                if image::writes_animation(to, &out_ext) && opts.text("frames") != Some("first") {
+            let lossless = if from == image::JPEG
+                && to == image::JPEG
+                && opts.bool("lossless") == Some(true)
+            {
+                image::lossless_jpeg(&data, &opts, &self.limits, progress)?
+            } else {
+                None
+            };
+            if opts.bool("lossless") == Some(true) && lossless.is_none() && to == image::JPEG {
+                notes.push(Note::new(
+                    Severity::Info,
+                    "jpeg.lossless_skipped",
+                    "the lossless route needs a JPEG input and only rotate, flip or progressive set; the picture was decoded and encoded instead",
+                ));
+            }
+            if let Some((out, n)) = lossless {
+                notes.extend(n);
+                (
+                    out,
+                    "Lossless JPEG transform on DCT coefficients".to_string(),
+                )
+            } else {
+                // An animation stays one when the output can hold it; otherwise the still path
+                // below reads the first frame and says so.
+                let animation = if image::writes_animation(to, &out_ext)
+                    && opts.text("frames") != Some("first")
+                {
                     image::decode_animation(from, &data, &self.limits, progress)?
                 } else {
                     None
                 };
-            if let Some((anim, n)) = animation {
-                notes.extend(n);
-                progress.report(2, 4, "decode");
-                progress.check_cancelled()?;
-                let (anim, n) = image::transform_animation(anim, &opts, &self.limits)?;
-                notes.extend(n);
-                let (out, n) = image::encode_animation(to, &anim, &opts)?;
-                notes.extend(n);
-                let name = |id| self.registry.format(id).map_or("image", |f| f.name);
-                (
-                    out,
-                    format!(
-                        "Decode {} animation -> Encode {} animation",
-                        name(from),
-                        name(to)
-                    ),
-                )
-            } else {
-                let (img, n) = image::decode(from, &data, &self.limits, progress)?;
-                notes.extend(n);
-                progress.report(2, 4, "decode");
-                progress.check_cancelled()?;
-                let (img, n) = image::transform(img, &opts, &self.limits)?;
-                notes.extend(n);
-                let (out, n) = image::encode(to, &img, &opts, &out_ext)?;
-                notes.extend(n);
-                let route_text = if route.edges.is_empty() {
-                    // Same format in and out still decodes and re-encodes.
+                if let Some((anim, n)) = animation {
+                    notes.extend(n);
+                    progress.report(2, 4, "decode");
+                    progress.check_cancelled()?;
+                    let (anim, n) = image::transform_animation(anim, &opts, &self.limits)?;
+                    notes.extend(n);
+                    let (out, n) = image::encode_animation(to, &anim, &opts)?;
+                    notes.extend(n);
                     let name = |id| self.registry.format(id).map_or("image", |f| f.name);
-                    format!("Decode {} -> Encode {}", name(from), name(to))
+                    (
+                        out,
+                        format!(
+                            "Decode {} animation -> Encode {} animation",
+                            name(from),
+                            name(to)
+                        ),
+                    )
                 } else {
-                    route.explain()
-                };
-                (out, route_text)
+                    let (img, n) = image::decode(from, &data, &self.limits, progress)?;
+                    notes.extend(n);
+                    progress.report(2, 4, "decode");
+                    progress.check_cancelled()?;
+                    let (img, n) = image::transform(img, &opts, &self.limits)?;
+                    notes.extend(n);
+                    let (out, n) = image::encode(to, &img, &opts, &out_ext)?;
+                    notes.extend(n);
+                    let route_text = if route.edges.is_empty() {
+                        // Same format in and out still decodes and re-encodes.
+                        let name = |id| self.registry.format(id).map_or("image", |f| f.name);
+                        format!("Decode {} -> Encode {}", name(from), name(to))
+                    } else {
+                        route.explain()
+                    };
+                    (out, route_text)
+                }
             }
         };
         progress.report(3, 4, "convert");
