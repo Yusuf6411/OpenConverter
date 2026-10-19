@@ -48,6 +48,19 @@ pub enum OptionValue {
     Color([u8; 4]),
 }
 
+impl OptionValue {
+    /// Text form accepted by [`OptionSchema::parse_arg`].
+    pub fn to_arg(&self) -> String {
+        match self {
+            Self::Int(v) => v.to_string(),
+            Self::Float(v) => v.to_string(),
+            Self::Bool(v) => v.to_string(),
+            Self::Text(v) => v.clone(),
+            Self::Color([r, g, b, a]) => format!("#{r:02x}{g:02x}{b:02x}{a:02x}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct OptionSchema {
     pub specs: Vec<OptionSpec>,
@@ -82,6 +95,39 @@ impl Options {
 }
 
 impl OptionSchema {
+    /// Parse a command-line `key=value` string according to the option's declared type.
+    pub fn parse_arg(&self, key: &str, raw: &str) -> Result<OptionValue> {
+        let spec = self
+            .specs
+            .iter()
+            .find(|s| s.key == key)
+            .ok_or_else(|| Error::invalid_option(key, "unknown option"))?;
+        let bad = || Error::invalid_option(key, format!("cannot read '{raw}' as a value"));
+        Ok(match &spec.kind {
+            OptionKind::Int { .. } => OptionValue::Int(raw.parse().map_err(|_| bad())?),
+            OptionKind::Float { .. } => OptionValue::Float(raw.parse().map_err(|_| bad())?),
+            OptionKind::Bool { .. } => match raw {
+                "true" | "yes" | "1" => OptionValue::Bool(true),
+                "false" | "no" | "0" => OptionValue::Bool(false),
+                _ => return Err(bad()),
+            },
+            OptionKind::Enum { .. } | OptionKind::Text { .. } => OptionValue::Text(raw.to_string()),
+            OptionKind::Color { .. } => {
+                let h = raw.strip_prefix('#').ok_or_else(bad)?;
+                let byte = |i: usize| {
+                    h.get(i..i + 2)
+                        .and_then(|x| u8::from_str_radix(x, 16).ok())
+                        .ok_or_else(bad)
+                };
+                match h.len() {
+                    6 => OptionValue::Color([byte(0)?, byte(2)?, byte(4)?, 255]),
+                    8 => OptionValue::Color([byte(0)?, byte(2)?, byte(4)?, byte(6)?]),
+                    _ => return Err(bad()),
+                }
+            }
+        })
+    }
+
     /// Validate user-supplied raw values against the schema. Unknown keys are rejected.
     pub fn validate(&self, given: &[(String, OptionValue)]) -> Result<Options> {
         for (k, _) in given {
@@ -182,6 +228,31 @@ mod tests {
         let o = schema().validate(&[]).ok();
         assert_eq!(o.as_ref().and_then(|o| o.int("quality")), Some(85));
         assert_eq!(o.as_ref().and_then(|o| o.text("mode")), Some("fast"));
+    }
+
+    #[test]
+    fn cli_arguments_follow_declared_types() {
+        let s = schema();
+        assert_eq!(s.parse_arg("quality", "7").ok(), Some(OptionValue::Int(7)));
+        assert!(s.parse_arg("quality", "high").is_err());
+        assert_eq!(
+            s.parse_arg("mode", "best").ok(),
+            Some(OptionValue::Text("best".into()))
+        );
+        assert!(s.parse_arg("nope", "1").is_err());
+        let v = OptionValue::Color([1, 2, 255, 128]);
+        let c = OptionSchema {
+            specs: vec![OptionSpec {
+                key: "bg",
+                label: "",
+                help: "",
+                i18n_key: "",
+                kind: OptionKind::Color {
+                    default: [0, 0, 0, 255],
+                },
+            }],
+        };
+        assert_eq!(c.parse_arg("bg", &v.to_arg()).ok(), Some(v));
     }
 
     #[test]

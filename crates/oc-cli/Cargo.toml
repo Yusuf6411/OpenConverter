@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[[bin]]
+name = "openconverter"
+path = "src/main.rs"
+
 [dependencies]
 oc-core = { path = "../oc-core" }
 oc-engine = { path = "../oc-engine" }

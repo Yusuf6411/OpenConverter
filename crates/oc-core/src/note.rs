@@ -12,16 +12,16 @@ pub enum Severity {
 pub struct Note {
     pub severity: Severity,
     /// Stable code such as `alpha_flattened` or `metadata_dropped`.
-    pub code: &'static str,
+    pub code: String,
     pub message: String,
     pub detail: Option<String>,
 }
 
 impl Note {
-    pub fn new(severity: Severity, code: &'static str, message: impl Into<String>) -> Self {
+    pub fn new(severity: Severity, code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             severity,
-            code,
+            code: code.into(),
             message: message.into(),
             detail: None,
         }

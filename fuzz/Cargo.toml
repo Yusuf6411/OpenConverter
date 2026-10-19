@@ -1,0 +1,67 @@
+[package]
+name = "oc-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+oc-core = { path = "../crates/oc-core" }
+oc-compress = { path = "../crates/oc-compress" }
+oc-text = { path = "../crates/oc-text" }
+oc-xml = { path = "../crates/oc-xml" }
+
+# Not part of the main workspace: fuzzing needs a nightly toolchain.
+[workspace]
+
+[[bin]]
+name = "inflate"
+path = "fuzz_targets/inflate.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "zlib"
+path = "fuzz_targets/zlib.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "gzip"
+path = "fuzz_targets/gzip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "lzw"
+path = "fuzz_targets/lzw.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "packbits"
+path = "fuzz_targets/packbits.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "xml"
+path = "fuzz_targets/xml.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "text"
+path = "fuzz_targets/text.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "deflate_roundtrip"
+path = "fuzz_targets/deflate_roundtrip.rs"
+test = false
+doc = false

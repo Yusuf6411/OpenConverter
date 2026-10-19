@@ -1,30 +1,26 @@
 //! `openconverter` command line.
 //!
 //! Usage:
-//!   openconverter convert <input> <output> [--overwrite] [--set key=value]...
+//!   openconverter convert <input> <output> [--overwrite] [--no-isolation]
+//!                         [--timeout SECONDS] [--max-memory MB] [--set key=value]...
 //!   openconverter formats [--json]
 //!   openconverter --version
+//!
+//! `__worker` and `__selftest` are internal: the first runs one conversion for the
+//! isolating parent, the second misbehaves on purpose so the isolation tests can prove
+//! that crashes, hangs and runaway allocations are contained.
 
-use oc_core::options::OptionValue;
-use oc_core::{ErrorCode, NoProgress, Severity};
+use oc_core::{CancelToken, ErrorCode, NoProgress, Severity};
+use oc_engine::isolated::{convert_isolated, encode_report, Isolation};
 use oc_engine::{ConvertRequest, Engine};
 use std::process::ExitCode;
+use std::time::Duration;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  openconverter convert <input> <output> [--overwrite] [--set key=value]...\n  openconverter formats [--json]\n  openconverter --version"
+        "usage:\n  openconverter convert <input> <output> [--overwrite] [--no-isolation] [--timeout SECONDS] [--max-memory MB] [--set key=value]...\n  openconverter formats [--json]\n  openconverter --version"
     );
     ExitCode::from(2)
-}
-
-fn parse_value(v: &str) -> OptionValue {
-    if let Ok(i) = v.parse::<i64>() {
-        OptionValue::Int(i)
-    } else if v == "true" || v == "false" {
-        OptionValue::Bool(v == "true")
-    } else {
-        OptionValue::Text(v.to_string())
-    }
 }
 
 fn json_str(s: &str) -> String {
@@ -73,33 +69,91 @@ fn formats(engine: &Engine, json: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn convert(engine: &Engine, args: &[String]) -> ExitCode {
+struct ConvertArgs {
+    input: String,
+    output: String,
+    overwrite: bool,
+    isolate: bool,
+    timeout: Duration,
+    max_memory_mb: u64,
+    raw_options: Vec<(String, String)>,
+}
+
+fn parse_convert(args: &[String]) -> Option<ConvertArgs> {
     let mut positional = Vec::new();
-    let mut overwrite = false;
-    let mut options = Vec::new();
+    let mut a = ConvertArgs {
+        input: String::new(),
+        output: String::new(),
+        overwrite: false,
+        isolate: true,
+        timeout: Duration::from_secs(600),
+        max_memory_mb: 4096,
+        raw_options: Vec::new(),
+    };
     let mut it = args.iter();
-    while let Some(a) = it.next() {
-        match a.as_str() {
-            "--overwrite" => overwrite = true,
-            "--set" => match it.next().and_then(|kv| kv.split_once('=')) {
-                Some((k, v)) => options.push((k.to_string(), parse_value(v))),
-                None => return usage(),
-            },
-            s if s.starts_with("--") => return usage(),
-            _ => positional.push(a.clone()),
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--overwrite" => a.overwrite = true,
+            "--no-isolation" => a.isolate = false,
+            "--timeout" => a.timeout = Duration::from_secs(it.next()?.parse().ok()?),
+            "--max-memory" => a.max_memory_mb = it.next()?.parse().ok()?,
+            "--set" => {
+                let (k, v) = it.next()?.split_once('=')?;
+                a.raw_options.push((k.to_string(), v.to_string()));
+            }
+            s if s.starts_with("--") => return None,
+            _ => positional.push(arg.clone()),
         }
     }
     let [input, output] = positional.as_slice() else {
+        return None;
+    };
+    a.input = input.clone();
+    a.output = output.clone();
+    Some(a)
+}
+
+fn fail(e: &oc_core::Error) -> ExitCode {
+    eprintln!("error: {e}");
+    if let Some(d) = &e.detail {
+        eprintln!("  detail: {d}");
+    }
+    ExitCode::from(e.code.exit_code())
+}
+
+fn convert(engine: &Engine, args: &[String], worker: bool) -> ExitCode {
+    let Some(a) = parse_convert(args) else {
         return usage();
     };
+    let options = match engine.parse_options(a.output.as_ref(), &a.raw_options) {
+        Ok(o) => o,
+        Err(e) => return fail(&e),
+    };
     let req = ConvertRequest {
-        input: input.into(),
-        output: output.into(),
-        overwrite,
+        input: a.input.into(),
+        output: a.output.into(),
+        overwrite: a.overwrite,
         options,
     };
-    match engine.convert(&req, &NoProgress) {
+    let result = if a.isolate && !worker {
+        match std::env::current_exe() {
+            Ok(exe) => {
+                let mut iso = Isolation::new(exe);
+                iso.timeout = a.timeout;
+                iso.max_memory = Some(a.max_memory_mb << 20);
+                convert_isolated(engine, &iso, &req, &CancelToken::new())
+            }
+            Err(e) => Err(e.into()),
+        }
+    } else {
+        engine.convert(&req, &NoProgress)
+    };
+    match result {
         Ok(rep) => {
+            if worker {
+                print!("{}", encode_report(&rep));
+                return ExitCode::SUCCESS;
+            }
             println!(
                 "{} -> {}: {} bytes written",
                 rep.input_format.0, rep.output_format.0, rep.bytes_out
@@ -115,17 +169,31 @@ fn convert(engine: &Engine, args: &[String]) -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        Err(e) => {
-            eprintln!("error: {e}");
-            if let Some(d) = &e.detail {
-                eprintln!("  detail: {d}");
+        Err(e) => fail(&e),
+    }
+}
+
+/// Deliberately misbehave; used only by the isolation tests.
+fn selftest(what: &str) -> ExitCode {
+    match what {
+        "panic" => panic!("selftest panic"),
+        "loop" => loop {
+            std::thread::sleep(Duration::from_millis(10));
+        },
+        "alloc" => {
+            // Allocate and touch far more than any sane cap.
+            // Bounded so a platform without a memory cap cannot take the machine down.
+            let mut hog: Vec<Vec<u8>> = Vec::new();
+            for _ in 0..16 {
+                hog.push(vec![1u8; 256 << 20]);
             }
-            ExitCode::from(if e.code == ErrorCode::InternalError {
-                70
-            } else {
-                e.code.exit_code()
-            })
+            ExitCode::from(ErrorCode::InternalError.exit_code())
         }
+        "error" => {
+            eprintln!("error: corrupt_file: selftest corrupt");
+            ExitCode::from(ErrorCode::CorruptFile.exit_code())
+        }
+        _ => ExitCode::from(2),
     }
 }
 
@@ -138,7 +206,11 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("formats") => formats(&engine, args.iter().any(|a| a == "--json")),
-        Some("convert") => convert(&engine, args.get(1..).unwrap_or(&[])),
+        Some("convert") => convert(&engine, args.get(1..).unwrap_or(&[]), false),
+        Some("__worker") if args.get(1).map(String::as_str) == Some("convert") => {
+            convert(&engine, args.get(2..).unwrap_or(&[]), true)
+        }
+        Some("__selftest") => selftest(args.get(1).map_or("", String::as_str)),
         _ => usage(),
     }
 }

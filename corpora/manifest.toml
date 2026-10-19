@@ -1,0 +1,2 @@
+# Test corpora are fetched and cached in CI, never committed (docs/MASTER_PROMPT.md §22.4).
+# Each entry: name, url, sha256, license. Empty until the first conformance corpus is added.

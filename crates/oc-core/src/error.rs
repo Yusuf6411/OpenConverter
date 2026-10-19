@@ -68,6 +68,33 @@ impl ErrorCode {
     }
 }
 
+impl ErrorCode {
+    /// The code whose CLI exit status is `status`, if any.
+    pub fn from_exit_code(status: i32) -> Option<Self> {
+        use ErrorCode::*;
+        [
+            UnsupportedFormat,
+            UnsupportedVariant,
+            CodecNotInBuild,
+            CorruptFile,
+            TruncatedFile,
+            LimitExceeded,
+            EncryptedNeedPassword,
+            WrongPassword,
+            DrmProtected,
+            Cancelled,
+            Timeout,
+            WorkerCrashed,
+            IoError,
+            OutputExists,
+            InvalidOptions,
+            InternalError,
+        ]
+        .into_iter()
+        .find(|c| i32::from(c.exit_code()) == status)
+    }
+}
+
 /// An error with a stable code, a human message and optional detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error {
@@ -174,6 +201,13 @@ mod tests {
         codes.sort_unstable();
         codes.dedup();
         assert_eq!(codes.len(), all.len());
+    }
+
+    #[test]
+    fn exit_code_roundtrip() {
+        assert_eq!(ErrorCode::from_exit_code(13), Some(ErrorCode::CorruptFile));
+        assert_eq!(ErrorCode::from_exit_code(0), None);
+        assert_eq!(ErrorCode::from_exit_code(101), None);
     }
 
     #[test]

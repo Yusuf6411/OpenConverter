@@ -5,6 +5,8 @@
 //! (`oc-worker`) is not wired in yet.
 #![deny(unsafe_code)]
 
+pub mod isolated;
+
 use oc_core::options::{OptionKind, OptionSchema, OptionSpec, OptionValue, Options};
 use oc_core::planner::{Edge, EdgeKind, Registry};
 use oc_core::{
@@ -119,6 +121,33 @@ impl Engine {
             registry,
             limits: Limits::default(),
         }
+    }
+
+    /// Look up a registered format by its id string.
+    pub fn format_by_name(&self, name: &str) -> Option<FormatId> {
+        self.registry_formats()
+            .find(|f| f.id.0 == name)
+            .map(|f| f.id)
+    }
+
+    /// Turn raw `key=value` strings into typed values using the output format's schema.
+    pub fn parse_options(
+        &self,
+        output: &Path,
+        raw: &[(String, String)],
+    ) -> Result<Vec<(String, OptionValue)>> {
+        let fmt = self.format_for_path(output).ok_or_else(|| {
+            Error::new(ErrorCode::UnsupportedFormat, "unknown output file type")
+                .with_detail(output.display().to_string())
+        })?;
+        let schema = &self
+            .registry
+            .format(fmt)
+            .ok_or_else(|| Error::new(ErrorCode::InternalError, "format vanished"))?
+            .writer_options;
+        raw.iter()
+            .map(|(k, v)| Ok((k.clone(), schema.parse_arg(k, v)?)))
+            .collect()
     }
 
     pub fn registry(&self) -> &Registry {
