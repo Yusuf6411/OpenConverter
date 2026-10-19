@@ -16,11 +16,13 @@ The 1.x Python notes are kept in [v1/](v1/).
 - [~] M1.2 oc-io: checked ByteReader, BitReader/BitWriter (MSB/LSB, round-trip tested); oc-checksum: CRC-32, CRC-32C, CRC-64/XZ, Adler-32, xxHash64 against published check values (scalar only; SIMD paths and bounded stream sinks are not written yet).
 - [~] M1.3 oc-compress: DEFLATE inflate (bomb limit, cancellation, never panics on garbage fuzz loop) and deflate (levels 0-9, stored/fixed/dynamic blocks), zlib, gzip (multi-member), PackBits, LZW (GIF and TIFF flavours). Checked against CPython: a level-9 dynamic-Huffman stream decodes correctly, and our zlib/gzip output at levels 1, 6, 9 is accepted by Python. Measured with Python as reference: on a 200 kB 6-bit-noise input our level 6 output is 154,622 bytes vs zlib 151,443 (2% larger); on repetitive text we are smaller. Not done: speed tuning (the inflate Huffman decoder is bit-by-bit), the Windows-only budget measurements, and the LZW GIF/TIFF vectors from real files (only round trips so far).
 - [~] M1.4 oc-text: UTF-8/16/32, ASCII, ISO-8859-1, windows-1252, BOM and heuristic detection, strict/replace policies with loss notes, line-ending detect/convert (6 tests). Not done: other legacy code pages (Shift-JIS, GBK, ISO-8859-2.., windows-125x) and Unicode normalisation (NFC/NFD), which need mapping data. oc-xml: pull parser with namespaces, char references, CDATA, comments, PIs; entity declarations and DOCTYPE internal subsets rejected (no XXE or entity bombs); depth and attribute limits; writer with escaping (8 tests, including a garbage loop and an entity-bomb test). Not done: DTD attribute defaults, `encoding=` re-decoding, line-ending normalisation inside the parser.
-- [ ] M1.5 to M1.7 not started (engine job runner, worker process isolation, CLI, fuzz targets).
+- [~] M1.6 (done before M1.5) oc-engine + oc-cli: text conversion end to end (`openconverter convert in.txt out.txt --set to_encoding=utf-16le --set line_ending=lf --set bom=true`, `formats [--json]`, `--version`), typed exit codes, no-overwrite by default, atomic output write, notes printed to stderr (4 engine tests; CLI exercised by hand). Not done: `info`, `routes`, `doctor`, `--explain`, completions, JSON result output; progress is only reported at 3 coarse steps.
+- [ ] M1.5 not started: oc-worker process isolation with memory and time limits. It needs OS-specific code (Windows job objects, Linux rlimits/landlock) that should be verified on the real targets.
+- [ ] M1.7 not started: fuzz targets, corpora manifest, release workflow skeleton. Today only deterministic garbage-input loops exist in the oc-compress and oc-xml tests; there is no cargo-fuzz harness.
 
 ## Known gaps
 - 1.x Python test cases are not ported yet; they are available at tag v1.0.0. Port them as each Rust codec lands (M1.x, M2.x).
 - cargo-deny not run locally (not installed).
 
 ## Next step
-M1.5: oc-engine job runner and oc-worker process isolation (needs a design decision on the worker protocol).
+M1.5: oc-worker process isolation (design the worker protocol, then Linux and Windows implementations), then M1.7 fuzz targets.

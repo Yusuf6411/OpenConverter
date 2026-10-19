@@ -29,6 +29,10 @@ version = "2.0.0-dev"
 [[package]]
 name = "oc-cli"
 version = "2.0.0-dev"
+dependencies = [
+ "oc-core",
+ "oc-engine",
+]
 
 [[package]]
 name = "oc-compress"
@@ -58,6 +62,10 @@ version = "2.0.0-dev"
 [[package]]
 name = "oc-engine"
 version = "2.0.0-dev"
+dependencies = [
+ "oc-core",
+ "oc-text",
+]
 
 [[package]]
 name = "oc-font"
