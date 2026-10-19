@@ -9,17 +9,18 @@ use oc_core::{
     Capabilities, Category, Error, ErrorCode, FormatDescriptor, FormatId, Limits, Note, Notes,
     Ownership, Progress, Result, Severity, Sniffer,
 };
-use oc_image::{bmp, netpbm, ops, png, qoi, tga, Image};
+use oc_image::{bmp, gif, netpbm, ops, png, qoi, tga, Image};
 
 pub const PNG: FormatId = FormatId("png");
 pub const BMP: FormatId = FormatId("bmp");
 pub const TGA: FormatId = FormatId("tga");
 pub const QOI: FormatId = FormatId("qoi");
 pub const PNM: FormatId = FormatId("pnm");
+pub const GIF: FormatId = FormatId("gif");
 /// Internal hub; never shown to users.
 pub const IMAGE_IR: FormatId = FormatId("image-ir");
 
-pub const FORMATS: [FormatId; 5] = [PNG, BMP, TGA, QOI, PNM];
+pub const FORMATS: [FormatId; 6] = [PNG, BMP, TGA, QOI, PNM, GIF];
 
 pub fn is_image(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -225,6 +226,35 @@ pub fn register(registry: &mut Registry) {
             "QOI 1.0",
         ),
         describe(
+            GIF,
+            "GIF",
+            &["gif"],
+            &["image/gif"],
+            vec![Sniffer {
+                offset: 0,
+                magic: b"GIF8",
+                confidence: 100,
+            }],
+            false,
+            schema(vec![
+                bool_spec(
+                    "dither",
+                    "Dither",
+                    "Dither when the image has more than 256 colours",
+                    "opt.gif.dither",
+                    true,
+                ),
+                bool_spec(
+                    "interlace",
+                    "Interlace",
+                    "Store rows in four passes so a partial download shows a preview",
+                    "opt.gif.interlace",
+                    false,
+                ),
+            ]),
+            "GIF 89a",
+        ),
+        describe(
             PNM,
             "Netpbm",
             &["pnm", "pbm", "pgm", "ppm", "pam"],
@@ -273,6 +303,7 @@ fn decode_description(name: &str) -> &'static str {
         "BMP" => "Decode BMP",
         "TGA" => "Decode TGA",
         "QOI" => "Decode QOI",
+        "GIF" => "Decode GIF",
         _ => "Decode Netpbm",
     }
 }
@@ -283,6 +314,7 @@ fn encode_description(name: &str) -> &'static str {
         "BMP" => "Encode BMP",
         "TGA" => "Encode TGA",
         "QOI" => "Encode QOI",
+        "GIF" => "Encode GIF",
         _ => "Encode Netpbm",
     }
 }
@@ -298,6 +330,7 @@ pub fn decode(
         BMP => bmp::decode(data, limits),
         TGA => tga::decode(data, limits),
         QOI => qoi::decode(data, limits).map(|i| (i, Notes::new())),
+        GIF => gif::decode(data, limits),
         PNM => netpbm::decode(data, limits),
         other => Err(Error::new(
             ErrorCode::UnsupportedFormat,
@@ -374,6 +407,13 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
             },
         ),
         QOI => qoi::encode(img),
+        GIF => gif::encode(
+            img,
+            &gif::EncodeOptions {
+                dither: opts.bool("dither").unwrap_or(true),
+                interlace: opts.bool("interlace").unwrap_or(false),
+            },
+        )?,
         PNM => netpbm::encode(
             img,
             &netpbm::EncodeOptions {

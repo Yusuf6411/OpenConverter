@@ -102,3 +102,9 @@ name = "image_roundtrip"
 path = "fuzz_targets/image_roundtrip.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "gif"
+path = "fuzz_targets/gif.rs"
+test = false
+doc = false

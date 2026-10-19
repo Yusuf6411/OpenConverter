@@ -490,9 +490,12 @@ mod tests {
         for fixture in ["rgb8", "pal8_trns"] {
             let src = png_fixture(&format!("{fixture}.png"));
             let want = std::fs::read(png_fixture(&format!("{fixture}.rgba"))).unwrap();
-            for ext in ["png", "bmp", "tga", "qoi", "pam", "ppm"] {
+            for ext in ["png", "bmp", "tga", "qoi", "pam", "ppm", "gif"] {
                 if ext == "ppm" && fixture == "pal8_trns" {
                     continue; // PPM has no alpha
+                }
+                if ext == "gif" {
+                    continue; // palette format: covered by its own tests below
                 }
                 let mid = dir.join(format!("{fixture}.{ext}"));
                 let rep = run(&src, &mid, &[]).unwrap();
@@ -504,6 +507,18 @@ mod tests {
                 assert_eq!(decode_rgba(&mid), want, "{fixture} via {ext}");
             }
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn gif_output_reports_quantisation() {
+        let dir = tmpdir("gifq");
+        let out = dir.join("o.gif");
+        let rep = run(&png_fixture("rgb8.png"), &out, &[("dither", "false")]).unwrap();
+        assert!(rep.notes.iter().any(|n| n.code == "gif.quantized"));
+        assert!(rep.notes.has_loss());
+        let rep = run(&png_fixture("pal8_trns.png"), &out, &[]).unwrap();
+        assert!(rep.notes.iter().any(|n| n.code == "gif.alpha_binary"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
