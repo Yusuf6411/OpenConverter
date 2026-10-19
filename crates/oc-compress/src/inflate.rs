@@ -142,11 +142,12 @@ impl Huffman {
     }
 }
 
-fn fixed_tables() -> Result<(Huffman, Huffman)> {
+fn fixed_tables(d64: bool) -> Result<(Huffman, Huffman)> {
     let mut l = [8u8; 288];
     l[144..256].fill(9);
     l[256..280].fill(7);
-    Ok((Huffman::new(&l)?, Huffman::new(&[5u8; 30])?))
+    let nd = if d64 { 32 } else { 30 };
+    Ok((Huffman::new(&l)?, Huffman::new(&vec![5u8; nd])?))
 }
 
 /// Result of inflating one DEFLATE stream.
@@ -158,6 +159,21 @@ pub struct Inflated {
 
 /// Inflate a raw DEFLATE stream, ignoring any trailing input.
 pub fn inflate(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<Inflated> {
+    inflate_impl(input, limits, progress, false)
+}
+
+/// Inflate a Deflate64 ("enhanced deflate") stream: 64 KiB window, 16-bit extra length
+/// bits on symbol 285 and two more distance codes.
+pub fn inflate64(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<Inflated> {
+    inflate_impl(input, limits, progress, true)
+}
+
+fn inflate_impl(
+    input: &[u8],
+    limits: &Limits,
+    progress: &dyn Progress,
+    d64: bool,
+) -> Result<Inflated> {
     let mut b = Bits::new(input);
     let mut out: Vec<u8> = Vec::new();
     let mut checked = 0usize;
@@ -181,7 +197,7 @@ pub fn inflate(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Result
                 b.pos = end;
             }
             1 => {
-                let (l, d) = fixed_tables()?;
+                let (l, d) = fixed_tables(d64)?;
                 codes(
                     &mut b,
                     &mut out,
@@ -191,13 +207,14 @@ pub fn inflate(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Result
                     progress,
                     input.len(),
                     &mut checked,
+                    d64,
                 )?;
             }
             2 => {
                 let nlen = b.bits(5)? as usize + 257;
                 let ndist = b.bits(5)? as usize + 1;
                 let ncode = b.bits(4)? as usize + 4;
-                if nlen > 286 || ndist > 30 {
+                if nlen > 286 || ndist > if d64 { 32 } else { 30 } {
                     return Err(Error::corrupt("too many length or distance codes"));
                 }
                 let mut cl = [0u8; 19];
@@ -253,6 +270,7 @@ pub fn inflate(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Result
                     progress,
                     input.len(),
                     &mut checked,
+                    d64,
                 )?;
             }
             _ => return Err(Error::corrupt("reserved block type").at(b.pos as u64)),
@@ -279,6 +297,7 @@ fn codes(
     progress: &dyn Progress,
     input_len: usize,
     checked: &mut usize,
+    d64: bool,
 ) -> Result<()> {
     loop {
         let sym = usize::from(lit.decode(b)?);
@@ -290,14 +309,26 @@ fn codes(
                 let base = *LEN_BASE
                     .get(li)
                     .ok_or_else(|| Error::corrupt("bad length symbol"))?;
-                let extra = LEN_EXTRA.get(li).copied().unwrap_or(0);
+                let (base, extra) = if d64 && li == 28 {
+                    (3, 16)
+                } else {
+                    (base, LEN_EXTRA.get(li).copied().unwrap_or(0))
+                };
                 let len = usize::from(base) + b.bits(u32::from(extra))? as usize;
                 let ds = usize::from(dist.decode(b)?);
-                let dbase = *DIST_BASE
-                    .get(ds)
-                    .ok_or_else(|| Error::corrupt("bad distance symbol"))?;
-                let dextra = DIST_EXTRA.get(ds).copied().unwrap_or(0);
-                let d = usize::from(dbase) + b.bits(u32::from(dextra))? as usize;
+                let (dbase, dextra) = match ds {
+                    30 if d64 => (32769usize, 14u8),
+                    31 if d64 => (49153usize, 14u8),
+                    _ => (
+                        usize::from(
+                            *DIST_BASE
+                                .get(ds)
+                                .ok_or_else(|| Error::corrupt("bad distance symbol"))?,
+                        ),
+                        DIST_EXTRA.get(ds).copied().unwrap_or(0),
+                    ),
+                };
+                let d = dbase + b.bits(u32::from(dextra))? as usize;
                 if d > out.len() {
                     return Err(
                         Error::corrupt("distance reaches before start of output").at(b.pos as u64)
@@ -364,6 +395,36 @@ mod tests {
         let r = run(z).ok();
         assert_eq!(r.as_ref().map(|r| r.data.as_slice()), Some(&want[..]));
         assert_eq!(r.map(|r| r.consumed), Some(z.len()));
+    }
+
+    #[test]
+    fn deflate64_long_match_and_far_distance_codes() {
+        // Fixed block: literal 'a', length symbol 285 with 16 extra bits (997 -> 1000), distance 1.
+        let mut bits: Vec<bool> = Vec::new();
+        let mut push = |v: u32, n: u32, msb_first: bool| {
+            for i in 0..n {
+                let sh = if msb_first { n - 1 - i } else { i };
+                bits.push(v >> sh & 1 == 1);
+            }
+        };
+        push(1, 1, false); // BFINAL
+        push(1, 2, false); // fixed
+        push(0x30 + 0x61, 8, true); // literal 'a'
+        push(0xC0 + 5, 8, true); // symbol 285
+        push(997, 16, false);
+        push(0, 5, true); // distance code 0
+        push(0, 7, true); // end of block
+        let mut raw = vec![0u8; bits.len().div_ceil(8)];
+        for (i, b) in bits.iter().enumerate() {
+            if *b {
+                raw[i / 8] |= 1 << (i % 8);
+            }
+        }
+        let r = inflate64(&raw, &Limits::default(), &oc_core::NoProgress).ok();
+        assert_eq!(r.map(|r| r.data), Some(vec![b'a'; 1001]));
+        // The same bytes are not valid plain DEFLATE output of that length.
+        let plain = inflate(&raw, &Limits::default(), &oc_core::NoProgress).ok();
+        assert_ne!(plain.map(|r| r.data.len()), Some(1001));
     }
 
     #[test]
