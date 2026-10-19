@@ -168,6 +168,8 @@ if py7zr:
         "bcj+lzma2": [{"id": py7zr.FILTER_X86}, {"id": py7zr.FILTER_LZMA2, "preset": 3}],
         "delta+lzma2": [{"id": py7zr.FILTER_DELTA, "dist": 4}, {"id": py7zr.FILTER_LZMA2, "preset": 3}],
         "arm+lzma": [{"id": py7zr.FILTER_ARM}, {"id": py7zr.FILTER_LZMA, "preset": 3}],
+        "ppmd": [{"id": py7zr.FILTER_PPMD, "order": 6, "mem": 24}],
+        "ppmd-small": [{"id": py7zr.FILTER_PPMD, "order": 8, "mem": 16}],
     }
     for name, f in cases.items():
         p = mk7z(f"py_{name}.7z", f)

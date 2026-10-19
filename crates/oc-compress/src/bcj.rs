@@ -225,6 +225,85 @@ pub fn delta(buf: &mut [u8], dist: usize, encode: bool) {
     }
 }
 
+/// The 7z BCJ2 decoder: x86 CALL/JMP/Jcc targets are split into a main stream, big-endian
+/// absolute call and jump targets, and a range-coded flag per candidate instruction.
+pub fn bcj2_decode(main: &[u8], call: &[u8], jump: &[u8], rc: &[u8], out_len: usize) -> Result<Vec<u8>> {
+    fn is_j(b0: u8, b1: u8) -> bool {
+        (b1 & 0xFE) == 0xE8 || (b0 == 0x0F && (b1 & 0xF0) == 0x80)
+    }
+    let bad = || Error::corrupt("BCJ2: inconsistent streams");
+    let mut out: Vec<u8> = Vec::with_capacity(out_len);
+    let mut probs = [1u16 << 10; 258];
+    let (mut inp, mut call_pos, mut jump_pos) = (0usize, 0usize, 0usize);
+    let mut rcp = 0usize;
+    let mut code = 0u32;
+    let mut range = 0xFFFF_FFFFu32;
+    for _ in 0..5 {
+        code = (code << 8) | u32::from(*rc.get(rcp).ok_or_else(bad)?);
+        rcp += 1;
+    }
+    let mut prev = 0u8;
+    while out.len() < out_len {
+        // Copy plain bytes up to and including the next branch opcode.
+        let mut hit = false;
+        while inp < main.len() && out.len() < out_len {
+            let b = main[inp];
+            out.push(b);
+            if is_j(prev, b) {
+                hit = true;
+                break;
+            }
+            inp += 1;
+            prev = b;
+        }
+        if !hit || out.len() == out_len {
+            break;
+        }
+        let b = main[inp];
+        inp += 1;
+        let idx = match b {
+            0xE8 => usize::from(prev),
+            0xE9 => 256,
+            _ => 257,
+        };
+        let p = u32::from(probs[idx]);
+        let bound = (range >> 11) * p;
+        let bit = if code < bound {
+            range = bound;
+            probs[idx] = (p + ((2048 - p) >> 5)) as u16;
+            false
+        } else {
+            range -= bound;
+            code -= bound;
+            probs[idx] = (p - (p >> 5)) as u16;
+            true
+        };
+        if range < (1 << 24) {
+            range <<= 8;
+            code = (code << 8) | u32::from(*rc.get(rcp).ok_or_else(bad)?);
+            rcp += 1;
+        }
+        if !bit {
+            prev = b;
+            continue;
+        }
+        let src = if b == 0xE8 { (call, &mut call_pos) } else { (jump, &mut jump_pos) };
+        let v = src.0.get(*src.1..*src.1 + 4).ok_or_else(bad)?;
+        *src.1 += 4;
+        let dest = u32::from_be_bytes([v[0], v[1], v[2], v[3]]).wrapping_sub(out.len() as u32 + 4);
+        for (k, byte) in dest.to_le_bytes().into_iter().enumerate() {
+            if out.len() == out_len {
+                break;
+            }
+            out.push(byte);
+            if k == 3 {
+                prev = byte;
+            }
+        }
+    }
+    if out.len() == out_len { Ok(out) } else { Err(bad()) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,5 +327,92 @@ mod tests {
         delta(&mut b, 3, true);
         delta(&mut b, 3, false);
         assert_eq!(b, data);
+    }
+
+    /// BCJ2 encoder in the shape of the reference one, to exercise the decoder both ways.
+    fn bcj2_encode(data: &[u8], convert_all: bool) -> [Vec<u8>; 4] {
+        let (mut main, mut call, mut jump, mut rc) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let mut probs = [1u16 << 10; 258];
+        let (mut low, mut range, mut cache, mut cache_size) = (0u64, 0xFFFF_FFFFu32, 0u8, 1u64);
+        let mut shift_low = |low: &mut u64, cache: &mut u8, cache_size: &mut u64, rc: &mut Vec<u8>| {
+            if (*low as u32) < 0xFF00_0000 || (*low >> 32) != 0 {
+                let mut t = *cache;
+                loop {
+                    rc.push(t.wrapping_add((*low >> 32) as u8));
+                    t = 0xFF;
+                    *cache_size -= 1;
+                    if *cache_size == 0 {
+                        break;
+                    }
+                }
+                *cache = (*low >> 24) as u8;
+            }
+            *cache_size += 1;
+            *low = (*low & 0x00FF_FFFF) << 8;
+        };
+        let mut prev = 0u8;
+        let mut i = 0usize;
+        let mut x = 99u32;
+        while i < data.len() {
+            let b = data[i];
+            main.push(b);
+            i += 1;
+            let j = (b & 0xFE) == 0xE8 || (prev == 0x0F && (b & 0xF0) == 0x80);
+            if !j {
+                prev = b;
+                continue;
+            }
+            if i == data.len() {
+                break;
+            }
+            x = x.wrapping_mul(1_103_515_245).wrapping_add(12345);
+            let take = i + 4 <= data.len() && (convert_all || (x >> 16) & 3 != 0);
+            let idx = match b { 0xE8 => usize::from(prev), 0xE9 => 256, _ => 257 };
+            let p = u32::from(probs[idx]);
+            let bound = (range >> 11) * p;
+            if take {
+                low += u64::from(bound);
+                range -= bound;
+                probs[idx] = (p - (p >> 5)) as u16;
+            } else {
+                range = bound;
+                probs[idx] = (p + ((2048 - p) >> 5)) as u16;
+            }
+            while range < (1 << 24) {
+                range <<= 8;
+                shift_low(&mut low, &mut cache, &mut cache_size, &mut rc);
+            }
+            if !take {
+                prev = b;
+                continue;
+            }
+            let src = u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+            let abs = src.wrapping_add(i as u32 + 4);
+            if b == 0xE8 { call.extend_from_slice(&abs.to_be_bytes()) } else { jump.extend_from_slice(&abs.to_be_bytes()) }
+            prev = data[i + 3];
+            i += 4;
+        }
+        for _ in 0..5 {
+            shift_low(&mut low, &mut cache, &mut cache_size, &mut rc);
+        }
+        [main, call, jump, rc]
+    }
+
+    #[test]
+    fn bcj2_roundtrips() {
+        let mut x = 5u32;
+        for len in [0usize, 1, 5, 6, 64, 3000, 40000] {
+            for convert_all in [true, false] {
+                let data: Vec<u8> = (0..len)
+                    .map(|i| {
+                        x = x.wrapping_mul(1_103_515_245).wrapping_add(12345);
+                        match i % 9 { 0 => 0xE8, 3 => 0xE9, 5 => 0x0F, 6 => 0x85, _ => (x >> 16) as u8 }
+                    })
+                    .collect();
+                let [m, c, j, r] = bcj2_encode(&data, convert_all);
+                assert_eq!(bcj2_decode(&m, &c, &j, &r, data.len()).unwrap(), data, "len {len}");
+            }
+        }
+        assert!(bcj2_decode(&[0xE8, 1, 2], &[], &[], &[0; 5], 9).is_err());
     }
 }

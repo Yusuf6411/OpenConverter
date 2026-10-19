@@ -14,6 +14,7 @@ pub mod lzw;
 pub(crate) mod sais;
 pub(crate) mod msb;
 pub mod packbits;
+pub mod ppmd7;
 pub mod xz;
 pub mod zstd;
 pub mod zlib;

@@ -7,7 +7,7 @@ use crate::safety::clean_for_write;
 use crate::Context;
 use oc_checksum::crc32;
 use oc_compress::bcj::{self, Arch};
-use oc_compress::{bzip2, inflate, lz4, lzma, zstd};
+use oc_compress::{bzip2, inflate, lz4, lzma, ppmd7, zstd};
 use oc_core::{Error, ErrorCode, Result};
 use sha2::{Digest, Sha256};
 
@@ -39,6 +39,8 @@ mod id {
 const M_COPY: u64 = 0x00;
 const M_DELTA: u64 = 0x03;
 const M_LZMA2: u64 = 0x21;
+const M_BCJ2: u64 = 0x0303_011B;
+const M_PPMD: u64 = 0x03_04_01;
 const M_LZMA: u64 = 0x03_01_01;
 const M_BZIP2: u64 = 0x04_02_02;
 const M_DEFLATE: u64 = 0x04_01_08;
@@ -404,6 +406,14 @@ fn run_coder(c: &Coder, mut inputs: Vec<Vec<u8>>, out_size: u64, cx: &Context, b
     let mut lim = budget.member_limits(out_size);
     lim.max_ratio = cx.limits.max_ratio;
     let p = cx.progress;
+    if c.method == M_BCJ2 && inputs.len() == 4 {
+        let rc = inputs.pop().unwrap_or_default();
+        let jump = inputs.pop().unwrap_or_default();
+        let call = inputs.pop().unwrap_or_default();
+        let main = inputs.pop().unwrap_or_default();
+        let out = bcj::bcj2_decode(&main, &call, &jump, &rc, usize::try_from(out_size).unwrap_or(usize::MAX))?;
+        return Ok(out);
+    }
     if inputs.len() != 1 {
         return Err(Error::new(
             ErrorCode::UnsupportedVariant,
@@ -413,6 +423,7 @@ fn run_coder(c: &Coder, mut inputs: Vec<Vec<u8>>, out_size: u64, cx: &Context, b
     let input = inputs.pop().unwrap_or_default();
     let mut out = match c.method {
         M_COPY => input,
+        M_PPMD => ppmd7::decode(&c.props, &input, usize::try_from(out_size).unwrap_or(usize::MAX), &lim, p)?,
         M_LZMA2 => lzma::decode_lzma2(&input, 0, &lim, p)?,
         M_LZMA => {
             let props = *c.props.first().ok_or_else(|| Error::corrupt("7z: LZMA properties missing"))?;

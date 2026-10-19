@@ -147,3 +147,31 @@ fn compress_z_decodes_files_checked_with_uncompress() {
         assert!(got == raw, "{name}");
     }
 }
+
+/// PPMd7 streams made by pyppmd (the 7-Zip variant): several orders, memory sizes small
+/// enough to force model restarts and free-block gluing, and binary data.
+#[test]
+fn ppmd7_decodes_reference_streams() {
+    use sha2::{Digest, Sha256};
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/ppmd");
+    let manifest = std::fs::read_to_string(dir.join("manifest.txt")).unwrap();
+    for line in manifest.lines() {
+        let f: Vec<&str> = line.split(' ').collect();
+        let (name, order, mem, len, hash) = (f[0], f[1].parse::<u8>().unwrap(), f[2].parse::<u32>().unwrap(), f[3].parse::<usize>().unwrap(), f[4]);
+        let data = std::fs::read(dir.join(format!("{name}.ppmd"))).unwrap();
+        let mut props = vec![order];
+        props.extend_from_slice(&mem.to_le_bytes());
+        eprintln!("case {name}");
+        let out = oc_compress::ppmd7::decode(&props, &data, len, &Limits::default(), &NoProgress).unwrap();
+        let got: String = Sha256::digest(&out).iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(got, hash, "{name}");
+        // A damaged stream must give an error or different bytes, never a panic.
+        let mut bad = data.clone();
+        let mid = bad.len() / 2;
+        bad[mid] ^= 0x5a;
+        if let Ok(o) = oc_compress::ppmd7::decode(&props, &bad, len, &Limits::default(), &NoProgress) {
+            assert_ne!(o, out);
+        }
+        let _ = oc_compress::ppmd7::decode(&props, &data[..data.len() / 2], len, &Limits::default(), &NoProgress);
+    }
+}
