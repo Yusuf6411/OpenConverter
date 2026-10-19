@@ -109,6 +109,9 @@ version = "2.0.0-dev"
 [[package]]
 name = "oc-text"
 version = "2.0.0-dev"
+dependencies = [
+ "oc-core",
+]
 
 [[package]]
 name = "oc-video"
@@ -125,6 +128,9 @@ version = "2.0.0-dev"
 [[package]]
 name = "oc-xml"
 version = "2.0.0-dev"
+dependencies = [
+ "oc-core",
+]
 
 [[package]]
 name = "proc-macro2"
