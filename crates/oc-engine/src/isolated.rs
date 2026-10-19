@@ -236,6 +236,10 @@ pub fn convert_isolated(
     if req.overwrite {
         args.push("--overwrite".into());
     }
+    if let Some(n) = &req.display_name {
+        args.push("--name".into());
+        args.push(n.clone());
+    }
     let mut envs = Vec::new();
     for (k, v) in &req.options {
         if SECRET_KEYS.contains(&k.as_str()) {

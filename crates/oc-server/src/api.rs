@@ -780,12 +780,14 @@ async fn run_job(
     let app2 = app.clone();
     let c2 = cancel.clone();
     let (ip, op) = (in_path.clone(), out_path.clone());
+    let display_name = file["original_name"].as_str().map(str::to_string);
     let result = tokio::task::spawn_blocking(move || {
         let req = ConvertRequest {
             input: ip,
             output: op,
             overwrite: true,
             options,
+            display_name,
         };
         convert_isolated(&app2.engine, &app2.isolation(), &req, &c2)
     })

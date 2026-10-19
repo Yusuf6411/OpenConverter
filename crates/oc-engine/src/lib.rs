@@ -40,6 +40,9 @@ pub struct ConvertRequest {
     pub output: PathBuf,
     pub overwrite: bool,
     pub options: Vec<(String, OptionValue)>,
+    /// The name the input had before it was stored under another path (uploads), used for
+    /// names written into archives. Defaults to the input path's file name.
+    pub display_name: Option<String>,
 }
 
 #[derive(Debug)]
@@ -276,7 +279,7 @@ impl Engine {
         let route = self.registry.plan(from, to, false)?;
 
         let (out, route_text) = if archive::is_archive(to) {
-            archive::convert(from, to, &data, &req.input, &opts, &self.limits, progress, &mut notes)?
+            archive::convert(from, to, &data, &req.input, req.display_name.as_deref(), &opts, &self.limits, progress, &mut notes)?
         } else if table::is_table(from) {
             let (out, n) = table::convert(from, to, &data, &opts, &self.limits, progress)?;
             notes.extend(n);
@@ -600,6 +603,7 @@ mod tests {
                 input: i,
                 output: o.clone(),
                 overwrite: false,
+ display_name: None,
                 options: opts
                     .iter()
                     .map(|(k, v)| ((*k).to_string(), v.clone()))
@@ -705,6 +709,7 @@ mod tests {
                 input: from.to_path_buf(),
                 output: to.to_path_buf(),
                 overwrite: true,
+ display_name: None,
                 options,
             },
             &NoProgress,
@@ -1113,6 +1118,7 @@ mod tests {
             input: dir.join("a.xyz"),
             output: dir.join("b.txt"),
             overwrite: false,
+ display_name: None,
             options: vec![],
         };
         assert_eq!(

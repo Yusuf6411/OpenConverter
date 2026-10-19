@@ -233,6 +233,11 @@ fn write_opts(to: FormatId, opts: &Options) -> Result<WriteOpts> {
     Ok(w)
 }
 
+/// The last component of a name that may use either separator.
+pub fn base_name(name: &str) -> String {
+    name.rsplit(['/', '\\']).next().unwrap_or(name).to_string()
+}
+
 fn file_name(path: &Path) -> String {
     path.file_name().map_or_else(|| "file".to_string(), |n| n.to_string_lossy().into_owned())
 }
@@ -253,6 +258,7 @@ pub fn convert(
     to: FormatId,
     data: &[u8],
     input: &Path,
+    display_name: Option<&str>,
     opts: &Options,
     limits: &Limits,
     progress: &dyn Progress,
@@ -261,7 +267,7 @@ pub fn convert(
     let pw = password(opts, "source_password");
     let cx = Context { limits, progress, password: pw.as_deref(), list_only: false };
     let to_fmt = format_of(to).ok_or_else(|| Error::new(ErrorCode::UnsupportedFormat, "not an archive format"))?;
-    let name = file_name(input);
+    let name = display_name.map_or_else(|| file_name(input), crate::archive::base_name);
     let (archive, read_text) = if let Some(f) = format_of(from) {
         let a = oc_archive::format::read(f, data, &cx, Some(&name))?;
         (a, format!("Read {}", spec_of(from).map_or("archive", |s| s.name)))

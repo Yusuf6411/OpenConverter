@@ -34,6 +34,7 @@ fn conv(
             input: i,
             output: o.clone(),
             overwrite: true,
+ display_name: None,
             options,
         },
         &NoProgress,

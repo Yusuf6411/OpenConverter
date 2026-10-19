@@ -84,6 +84,7 @@ struct ConvertArgs {
     timeout: Duration,
     max_memory_mb: u64,
     raw_options: Vec<(String, String)>,
+    name: Option<String>,
 }
 
 fn parse_convert(args: &[String]) -> Option<ConvertArgs> {
@@ -96,12 +97,14 @@ fn parse_convert(args: &[String]) -> Option<ConvertArgs> {
         timeout: Duration::from_secs(600),
         max_memory_mb: 4096,
         raw_options: Vec::new(),
+        name: None,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--overwrite" => a.overwrite = true,
             "--no-isolation" => a.isolate = false,
+            "--name" => a.name = Some(it.next()?.clone()),
             "--timeout" => a.timeout = Duration::from_secs(it.next()?.parse().ok()?),
             "--max-memory" => a.max_memory_mb = it.next()?.parse().ok()?,
             "--set" => {
@@ -176,6 +179,7 @@ fn convert(engine: &Engine, args: &[String], worker: bool) -> ExitCode {
         output: a.output.into(),
         overwrite: a.overwrite,
         options,
+        display_name: a.name.clone(),
     };
     let result = if a.isolate && !worker {
         match std::env::current_exe() {
