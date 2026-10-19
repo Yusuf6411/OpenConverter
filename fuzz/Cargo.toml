@@ -175,3 +175,9 @@ name = "dds"
 path = "fuzz_targets/dds.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "psd"
+path = "fuzz_targets/psd.rs"
+test = false
+doc = false

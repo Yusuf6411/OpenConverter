@@ -16,6 +16,7 @@ pub mod jpeg;
 pub mod netpbm;
 pub mod ops;
 pub mod png;
+pub mod psd;
 pub mod qoi;
 pub mod quant;
 pub mod tga;

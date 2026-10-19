@@ -10,7 +10,9 @@ use oc_core::{
     Ownership, Progress, Result, Severity, Sniffer,
 };
 use oc_image::anim::{self, Animation};
-use oc_image::{bmp, dds, gif, icns, ico, jpeg, netpbm, ops, png, qoi, tga, tiff, webp, Image};
+use oc_image::{
+    bmp, dds, gif, icns, ico, jpeg, netpbm, ops, png, psd, qoi, tga, tiff, webp, Image,
+};
 
 pub const PNG: FormatId = FormatId("png");
 pub const BMP: FormatId = FormatId("bmp");
@@ -22,13 +24,14 @@ pub const JPEG: FormatId = FormatId("jpeg");
 pub const ICO: FormatId = FormatId("ico");
 pub const ICNS: FormatId = FormatId("icns");
 pub const DDS: FormatId = FormatId("dds");
+pub const PSD: FormatId = FormatId("psd");
 pub const TIFF: FormatId = FormatId("tiff");
 pub const WEBP: FormatId = FormatId("webp");
 /// Internal hub; never shown to users.
 pub const IMAGE_IR: FormatId = FormatId("image-ir");
 
-pub const FORMATS: [FormatId; 12] = [
-    PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, DDS, TIFF, WEBP,
+pub const FORMATS: [FormatId; 13] = [
+    PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, DDS, PSD, TIFF, WEBP,
 ];
 
 pub fn is_image(id: FormatId) -> bool {
@@ -313,6 +316,26 @@ pub fn register(registry: &mut Registry) {
             "Microsoft DDS",
         ),
         describe(
+            PSD,
+            "PSD",
+            &["psd", "psb"],
+            &["image/vnd.adobe.photoshop"],
+            vec![Sniffer {
+                offset: 0,
+                magic: b"8BPS\0",
+                confidence: 100,
+            }],
+            true,
+            schema(vec![bool_spec(
+                "rle",
+                "Run-length coding",
+                "Pack the rows; usually smaller. Off stores them raw",
+                "opt.psd.rle",
+                true,
+            )]),
+            "Adobe Photoshop File Format",
+        ),
+        describe(
             TIFF,
             "TIFF",
             &["tif", "tiff"],
@@ -531,6 +554,7 @@ fn decode_description(name: &str) -> &'static str {
         "ICO / CUR" => "Decode ICO",
         "ICNS" => "Decode ICNS",
         "DDS" => "Decode DDS",
+        "PSD" => "Decode PSD",
         _ => "Decode Netpbm",
     }
 }
@@ -548,6 +572,7 @@ fn encode_description(name: &str) -> &'static str {
         "ICO / CUR" => "Encode ICO",
         "ICNS" => "Encode ICNS",
         "DDS" => "Encode DDS",
+        "PSD" => "Encode PSD",
         _ => "Encode Netpbm",
     }
 }
@@ -570,6 +595,7 @@ pub fn decode(
         ICO => ico::decode(data, limits, progress),
         ICNS => icns::decode(data, limits, progress),
         DDS => dds::decode(data, limits),
+        PSD => psd::decode(data, limits, progress),
         PNM => netpbm::decode(data, limits),
         other => Err(Error::new(
             ErrorCode::UnsupportedFormat,
@@ -771,6 +797,13 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
             &ico::EncodeOptions {
                 sizes: parse_sizes(opts)?,
                 cursor: ext == "cur",
+            },
+        )?,
+        PSD => psd::encode(
+            img,
+            &psd::EncodeOptions {
+                rle: opts.bool("rle").unwrap_or(true),
+                large: ext == "psb",
             },
         )?,
         DDS => dds::encode(
