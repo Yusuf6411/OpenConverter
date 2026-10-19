@@ -134,6 +134,16 @@ pub fn decode(data: &[u8], limits: &Limits) -> Result<(Image, Notes)> {
         masks = [0x00FF_0000, 0x0000_FF00, 0x0000_00FF, 0];
     }
 
+    // A small file must not buy a large allocation: uncompressed data has to be present.
+    if matches!(compression, 0 | 3 | 6) {
+        let row_bytes = (width as usize * usize::from(bpp)).div_ceil(32) * 4;
+        let need = row_bytes
+            .checked_mul(height as usize)
+            .ok_or_else(|| Error::limit("max_pixels", "BMP too large"))?;
+        if data.len().saturating_sub(pixel_offset) < need {
+            return Err(Error::truncated("BMP pixel data").at(pixel_offset as u64));
+        }
+    }
     let mut rgba = vec![0u8; width as usize * height as usize * 4];
     let put = |rgba: &mut Vec<u8>, x: usize, y: usize, px: [u8; 4]| {
         let row = if top_down { y } else { height as usize - 1 - y };
@@ -151,10 +161,8 @@ pub fn decode(data: &[u8], limits: &Limits) -> Result<(Image, Notes)> {
         1 | 2 => {
             // RLE8 / RLE4. Pixels skipped by deltas stay palette entry 0.
             let background = palette.first().copied().unwrap_or([0, 0, 0, 255]);
-            for y in 0..height as usize {
-                for x in 0..width as usize {
-                    put(&mut rgba, x, y, background);
-                }
+            for px in rgba.as_chunks_mut::<4>().0 {
+                *px = background;
             }
             let mut br = ByteReader::new(body);
             let (mut x, mut y) = (0usize, 0usize);

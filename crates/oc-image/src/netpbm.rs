@@ -220,53 +220,124 @@ fn decode_pam_header(c: &mut Cursor<'_>) -> Result<(u32, u32, u32, Layout)> {
     Ok((w, h, maxval, layout))
 }
 
+/// Which member of the family to write.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Variant {
+    /// PGM for gray, PPM for colour, PAM only when there is real transparency.
+    #[default]
+    Auto,
+    /// Bilevel bitmap (P1/P4); anything else is thresholded.
+    Pbm,
+    Pgm,
+    Ppm,
+    /// Keeps alpha. Binary only.
+    Pam,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EncodeOptions {
-    /// Write the ASCII variants (P1/P2/P3).
+    /// Write the ASCII variants (P1/P2/P3). PAM has no ASCII form and ignores this.
     pub ascii: bool,
-    /// Background for flattening alpha when the image has some.
+    /// Background for flattening alpha when the chosen variant cannot hold it.
     pub background: [u8; 3],
+    pub variant: Variant,
 }
 
 pub fn encode(img: &Image, opts: &EncodeOptions) -> (Vec<u8>, Notes) {
     let mut notes = Notes::new();
-    // Netpbm has no alpha (except PAM, not written): flatten.
-    let flat = if img.layout.has_alpha() {
-        let target = if img.layout.is_gray() {
-            Layout::Gray
-        } else {
-            Layout::Rgb
-        };
-        let (i, n) = ops::convert_layout(img, target, opts.background);
+    let translucent = img.layout.has_alpha() && img.has_translucency();
+    let variant = match opts.variant {
+        Variant::Auto if translucent => Variant::Pam,
+        Variant::Auto if img.layout.is_gray() => Variant::Pgm,
+        Variant::Auto => Variant::Ppm,
+        v => v,
+    };
+    let target = match variant {
+        Variant::Pbm | Variant::Pgm => Layout::Gray,
+        Variant::Ppm => Layout::Rgb,
+        _ => img.layout,
+    };
+    let (mut flat, n) = ops::convert_layout(img, target, opts.background);
+    notes.extend(n);
+    if variant == Variant::Pbm {
+        let (g, n) = ops::convert_depth(&flat, Depth::Eight);
         notes.extend(n);
-        i
-    } else {
-        img.clone()
-    };
-    let (kind, maxval) = if flat.layout == Layout::Rgb {
-        (3, flat.depth.max())
-    } else {
-        (2, flat.depth.max())
-    };
-    let ch = flat.layout.channels();
-    let mut out = format!(
-        "P{}\n{} {}\n{}\n",
-        if opts.ascii { kind } else { kind + 3 },
-        flat.width,
-        flat.height,
-        maxval
-    )
-    .into_bytes();
-    if opts.ascii {
-        for y in 0..flat.height as usize {
-            let line: Vec<String> = (0..flat.width as usize * ch)
-                .map(|x| flat.sample(y * flat.width as usize * ch + x).to_string())
-                .collect();
-            out.extend_from_slice(line.join(" ").as_bytes());
-            out.push(b'\n');
+        flat = g;
+        if flat.data.iter().any(|&v| v != 0 && v != 255) {
+            notes.push(Note::new(
+                Severity::Loss,
+                "netpbm.bilevel",
+                "the image was reduced to black and white at the 50% threshold",
+            ));
         }
-    } else {
-        out.extend_from_slice(&flat.data);
+    }
+    let (w, h) = (flat.width as usize, flat.height as usize);
+    let ch = flat.layout.channels();
+    let maxval = flat.depth.max();
+    let ascii = opts.ascii && variant != Variant::Pam;
+    if opts.ascii && variant == Variant::Pam {
+        notes.push(Note::new(
+            Severity::Info,
+            "netpbm.pam_binary",
+            "PAM has no text form; wrote the binary variant",
+        ));
+    }
+    let mut out = match variant {
+        Variant::Pam => {
+            let tuple = match flat.layout {
+                Layout::Gray => "GRAYSCALE",
+                Layout::GrayAlpha => "GRAYSCALE_ALPHA",
+                Layout::Rgb => "RGB",
+                Layout::Rgba => "RGB_ALPHA",
+            };
+            format!(
+                "P7\nWIDTH {w}\nHEIGHT {h}\nDEPTH {ch}\nMAXVAL {maxval}\nTUPLTYPE {tuple}\nENDHDR\n"
+            )
+        }
+        Variant::Pbm => format!("P{}\n{w} {h}\n", if ascii { 1 } else { 4 }),
+        _ => {
+            let kind = if variant == Variant::Ppm { 3 } else { 2 };
+            format!(
+                "P{}\n{w} {h}\n{maxval}\n",
+                if ascii { kind } else { kind + 3 }
+            )
+        }
+    }
+    .into_bytes();
+    match variant {
+        Variant::Pbm => {
+            // 1 is black in PBM, the opposite of a gray sample.
+            for row in flat.data.chunks(w.max(1)) {
+                if ascii {
+                    let line: Vec<&str> = row
+                        .iter()
+                        .map(|&v| if v < 128 { "1" } else { "0" })
+                        .collect();
+                    out.extend_from_slice(line.join(" ").as_bytes());
+                    out.push(b'\n');
+                } else {
+                    for byte in row.chunks(8) {
+                        let mut b = 0u8;
+                        for (i, &v) in byte.iter().enumerate() {
+                            if v < 128 {
+                                b |= 0x80 >> i;
+                            }
+                        }
+                        out.push(b);
+                    }
+                }
+            }
+        }
+        _ if ascii => {
+            for y in 0..h {
+                let line: Vec<String> = (0..w * ch)
+                    .map(|x| flat.sample(y * w * ch + x).to_string())
+                    .collect();
+                out.extend_from_slice(line.join(" ").as_bytes());
+                out.push(b'\n');
+            }
+        }
+        _ => out.extend_from_slice(&flat.data),
     }
     (out, notes)
 }
@@ -330,8 +401,54 @@ mod tests {
         let pam = b"P7\nWIDTH 1\nHEIGHT 1\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n\x01\x02\x03\x04";
         let (i, _) = decode(pam, &Limits::default()).unwrap();
         assert_eq!((i.layout, i.data.clone()), (Layout::Rgba, vec![1, 2, 3, 4]));
-        // Writing flattens (no alpha in P6) and says so.
-        let (_, notes) = encode(&i, &EncodeOptions::default());
+        // Auto keeps real transparency by writing PAM.
+        let (bytes, notes) = encode(&i, &EncodeOptions::default());
+        assert!(bytes.starts_with(b"P7"));
+        assert!(!notes.has_loss());
+        assert_eq!(decode(&bytes, &Limits::default()).unwrap().0.data, i.data);
+        // PPM cannot, so it flattens and says so.
+        let (ppm, notes) = encode(
+            &i,
+            &EncodeOptions {
+                variant: Variant::Ppm,
+                ..Default::default()
+            },
+        );
+        assert!(ppm.starts_with(b"P6"));
+        assert!(notes.has_loss());
+    }
+
+    #[test]
+    fn pbm_writes_bilevel_in_both_forms() {
+        let img = Image::new(
+            10,
+            2,
+            Layout::Gray,
+            Depth::Eight,
+            (0..20).map(|i| if i % 3 == 0 { 0 } else { 255 }).collect(),
+        )
+        .unwrap();
+        for ascii in [false, true] {
+            let (bytes, notes) = encode(
+                &img,
+                &EncodeOptions {
+                    ascii,
+                    variant: Variant::Pbm,
+                    ..Default::default()
+                },
+            );
+            assert!(notes.is_empty());
+            let (back, _) = decode(&bytes, &Limits::default()).unwrap();
+            assert_eq!(back.data, img.data, "ascii={ascii}");
+        }
+        let grey = Image::new(2, 1, Layout::Gray, Depth::Eight, vec![100, 200]).unwrap();
+        let (_, notes) = encode(
+            &grey,
+            &EncodeOptions {
+                variant: Variant::Pbm,
+                ..Default::default()
+            },
+        );
         assert!(notes.has_loss());
     }
 

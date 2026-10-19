@@ -11,7 +11,7 @@ pub mod planner;
 pub mod progress;
 
 pub use error::{Error, ErrorCode, Result};
-pub use format::{Capabilities, Category, FormatDescriptor, FormatId, Ownership};
+pub use format::{Capabilities, Category, FormatDescriptor, FormatId, Ownership, Sniffer};
 pub use limits::Limits;
 pub use note::{Note, Notes, Severity};
 pub use progress::{CancelToken, NoProgress, Progress};

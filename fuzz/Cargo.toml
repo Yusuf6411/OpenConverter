@@ -14,6 +14,7 @@ oc-core = { path = "../crates/oc-core" }
 oc-compress = { path = "../crates/oc-compress" }
 oc-text = { path = "../crates/oc-text" }
 oc-xml = { path = "../crates/oc-xml" }
+oc-image = { path = "../crates/oc-image" }
 
 # Not part of the main workspace: fuzzing needs a nightly toolchain.
 [workspace]
@@ -63,5 +64,41 @@ doc = false
 [[bin]]
 name = "deflate_roundtrip"
 path = "fuzz_targets/deflate_roundtrip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "png"
+path = "fuzz_targets/png.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "bmp"
+path = "fuzz_targets/bmp.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tga"
+path = "fuzz_targets/tga.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "qoi"
+path = "fuzz_targets/qoi.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "netpbm"
+path = "fuzz_targets/netpbm.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "image_roundtrip"
+path = "fuzz_targets/image_roundtrip.rs"
 test = false
 doc = false

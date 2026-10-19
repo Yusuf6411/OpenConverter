@@ -86,6 +86,18 @@ impl Options {
             _ => None,
         }
     }
+    pub fn float(&self, key: &str) -> Option<f64> {
+        match self.0.get(key) {
+            Some(OptionValue::Float(v)) => Some(*v),
+            _ => None,
+        }
+    }
+    pub fn color(&self, key: &str) -> Option<[u8; 4]> {
+        match self.0.get(key) {
+            Some(OptionValue::Color(v)) => Some(*v),
+            _ => None,
+        }
+    }
     pub fn text(&self, key: &str) -> Option<&str> {
         match self.0.get(key) {
             Some(OptionValue::Text(v)) => Some(v),

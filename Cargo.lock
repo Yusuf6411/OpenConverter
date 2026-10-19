@@ -64,6 +64,7 @@ name = "oc-engine"
 version = "2.0.0-dev"
 dependencies = [
  "oc-core",
+ "oc-image",
  "oc-text",
 ]
 
