@@ -181,3 +181,9 @@ name = "psd"
 path = "fuzz_targets/psd.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "hdr"
+path = "fuzz_targets/hdr.rs"
+test = false
+doc = false

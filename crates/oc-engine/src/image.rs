@@ -11,7 +11,7 @@ use oc_core::{
 };
 use oc_image::anim::{self, Animation};
 use oc_image::{
-    bmp, dds, gif, icns, ico, jpeg, netpbm, ops, png, psd, qoi, tga, tiff, webp, Image,
+    bmp, dds, gif, hdr, icns, ico, jpeg, netpbm, ops, png, psd, qoi, tga, tiff, webp, Image,
 };
 
 pub const PNG: FormatId = FormatId("png");
@@ -25,13 +25,14 @@ pub const ICO: FormatId = FormatId("ico");
 pub const ICNS: FormatId = FormatId("icns");
 pub const DDS: FormatId = FormatId("dds");
 pub const PSD: FormatId = FormatId("psd");
+pub const HDR: FormatId = FormatId("hdr");
 pub const TIFF: FormatId = FormatId("tiff");
 pub const WEBP: FormatId = FormatId("webp");
 /// Internal hub; never shown to users.
 pub const IMAGE_IR: FormatId = FormatId("image-ir");
 
-pub const FORMATS: [FormatId; 13] = [
-    PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, DDS, PSD, TIFF, WEBP,
+pub const FORMATS: [FormatId; 14] = [
+    PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, DDS, PSD, HDR, TIFF, WEBP,
 ];
 
 pub fn is_image(id: FormatId) -> bool {
@@ -336,6 +337,27 @@ pub fn register(registry: &mut Registry) {
             "Adobe Photoshop File Format",
         ),
         describe(
+            HDR,
+            "Radiance HDR",
+            &["hdr", "pic"],
+            &["image/vnd.radiance"],
+            vec![
+                Sniffer {
+                    offset: 0,
+                    magic: b"#?RADIANCE",
+                    confidence: 100,
+                },
+                Sniffer {
+                    offset: 0,
+                    magic: b"#?RGBE",
+                    confidence: 100,
+                },
+            ],
+            false,
+            schema(Vec::new()),
+            "Radiance picture file format",
+        ),
+        describe(
             TIFF,
             "TIFF",
             &["tif", "tiff"],
@@ -555,6 +577,7 @@ fn decode_description(name: &str) -> &'static str {
         "ICNS" => "Decode ICNS",
         "DDS" => "Decode DDS",
         "PSD" => "Decode PSD",
+        "Radiance HDR" => "Decode HDR",
         _ => "Decode Netpbm",
     }
 }
@@ -573,6 +596,7 @@ fn encode_description(name: &str) -> &'static str {
         "ICNS" => "Encode ICNS",
         "DDS" => "Encode DDS",
         "PSD" => "Encode PSD",
+        "Radiance HDR" => "Encode HDR",
         _ => "Encode Netpbm",
     }
 }
@@ -596,6 +620,7 @@ pub fn decode(
         ICNS => icns::decode(data, limits, progress),
         DDS => dds::decode(data, limits),
         PSD => psd::decode(data, limits, progress),
+        HDR => hdr::decode(data, limits),
         PNM => netpbm::decode(data, limits),
         other => Err(Error::new(
             ErrorCode::UnsupportedFormat,
@@ -779,6 +804,7 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
             },
         ),
         QOI => qoi::encode(img),
+        HDR => hdr::encode(img)?,
         TIFF => tiff::encode(
             img,
             &tiff::EncodeOptions {
