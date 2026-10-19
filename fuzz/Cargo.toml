@@ -187,3 +187,9 @@ name = "hdr"
 path = "fuzz_targets/hdr.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "icc"
+path = "fuzz_targets/icc.rs"
+test = false
+doc = false

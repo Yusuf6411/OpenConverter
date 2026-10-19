@@ -10,6 +10,7 @@
 //! non-integral sampling ratios. EXIF orientation is reported, not applied.
 use super::dct;
 use super::tables::ZIGZAG;
+use crate::icc;
 use crate::image::{Depth, Image, Layout};
 use oc_core::{Error, ErrorCode, Limits, Note, Notes, Progress, Result, Severity};
 
@@ -722,7 +723,9 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
             .with_detail(o.to_string()),
         );
     }
-    let mut img = build_image(&frame, &tables, &meta, &mut notes, limits)?;
+    let icc = assemble_icc(&mut meta.icc);
+    let (mut img, managed) =
+        build_image(&frame, &tables, &meta, icc.as_deref(), &mut notes, limits)?;
     if let Some((unit, x, y)) = meta.jfif {
         let scale = match unit {
             1 => Some(1.0),
@@ -733,20 +736,22 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
             img.metadata.dpi = Some((x as f64 * s, y as f64 * s));
         }
     }
-    if !meta.icc.is_empty() {
-        let mut chunks = meta.icc;
-        chunks.sort_by_key(|c| c.0);
-        let count = chunks.first().map_or(0, |c| usize::from(c.1));
-        if count == chunks.len()
-            && chunks
-                .iter()
-                .enumerate()
-                .all(|(i, c)| usize::from(c.0) == i + 1 && usize::from(c.1) == count)
-        {
-            img.metadata.icc_profile = Some(chunks.into_iter().flat_map(|c| c.2).collect());
-        }
+    if !managed {
+        img.metadata.icc_profile = icc;
     }
     Ok((img, notes))
+}
+
+/// The profile from its numbered APP2 chunks, when they are all there.
+fn assemble_icc(chunks: &mut [(u8, u8, Vec<u8>)]) -> Option<Vec<u8>> {
+    chunks.sort_by_key(|c| c.0);
+    let count = usize::from(chunks.first()?.1);
+    (count == chunks.len()
+        && chunks
+            .iter()
+            .enumerate()
+            .all(|(i, c)| usize::from(c.0) == i + 1 && usize::from(c.1) == count))
+    .then(|| chunks.iter().flat_map(|c| c.2.iter().copied()).collect())
 }
 
 fn parse_sof(seg: &[u8], progressive: bool, limits: &Limits) -> Result<Frame> {
@@ -1032,9 +1037,10 @@ fn build_image(
     f: &Frame,
     t: &Tables,
     meta: &Meta,
+    profile: Option<&[u8]>,
     notes: &mut Notes,
     limits: &Limits,
-) -> Result<Image> {
+) -> Result<(Image, bool)> {
     let (w, h) = (f.width, f.height);
     let mut planes: Vec<Vec<u8>> = Vec::new();
     for c in &f.comps {
@@ -1087,7 +1093,8 @@ fn build_image(
             Layout::Gray,
             Depth::Eight,
             planes.into_iter().next().unwrap_or_default(),
-        ),
+        )
+        .map(|i| (i, false)),
         3 => {
             let rgb_direct = match meta.adobe_transform {
                 Some(0) => true,
@@ -1102,18 +1109,14 @@ fn build_image(
                     out.extend_from_slice(&ycc_to_rgb(get(0, i), get(1, i), get(2, i)));
                 }
             }
-            Image::new(w as u32, h as u32, Layout::Rgb, Depth::Eight, out)
+            Image::new(w as u32, h as u32, Layout::Rgb, Depth::Eight, out).map(|i| (i, false))
         }
         _ => {
             // Four components: CMYK, or YCCK when Adobe's transform flag is 2.
             let adobe = meta.adobe_transform.is_some();
             let ycck = meta.adobe_transform == Some(2);
-            notes.push(Note::new(
-                Severity::Warning,
-                "jpeg.cmyk_converted",
-                "the file is CMYK; it was converted to RGB without colour management",
-            ));
-            let mut out = Vec::with_capacity(n * 3);
+            // Ink amounts, 255 = full ink, which is what an ICC profile expects.
+            let mut ink = Vec::with_capacity(n * 4);
             for i in 0..n {
                 let (c, m, y) = if ycck {
                     let [r, g, b] = ycc_to_rgb(get(0, i), get(1, i), get(2, i));
@@ -1124,15 +1127,39 @@ fn build_image(
                 let k = get(3, i);
                 // Adobe stores inverted values (255 = no ink); plain CMYK does not.
                 let (c, m, y, k) = if adobe {
-                    (c, m, y, k)
-                } else {
                     (255 - c, 255 - m, 255 - y, 255 - k)
+                } else {
+                    (c, m, y, k)
                 };
-                for v in [c, m, y] {
-                    out.push(((v * k + 127) / 255).clamp(0, 255) as u8);
-                }
+                ink.extend([c, m, y, k].map(|v| v.clamp(0, 255) as u8));
             }
-            Image::new(w as u32, h as u32, Layout::Rgb, Depth::Eight, out)
+            let managed = profile.and_then(|p| {
+                let t = icc::Transform::new(p, icc::Intent::RelativeColorimetric, true).ok()?;
+                (t.channels() == 4).then(|| icc::convert_samples(&t, &ink, Depth::Eight))
+            });
+            let (out, is_managed) = if let Some(rgb) = managed {
+                notes.push(Note::new(
+                    Severity::Info,
+                    "jpeg.cmyk_profile",
+                    "the file is CMYK; it was converted to sRGB with its embedded colour profile",
+                ));
+                (rgb, true)
+            } else {
+                notes.push(Note::new(
+                    Severity::Warning,
+                    "jpeg.cmyk_converted",
+                    "the file is CMYK; it was converted to RGB without colour management",
+                ));
+                let mut out = Vec::with_capacity(n * 3);
+                for &[c, m, y, k] in ink.as_chunks::<4>().0 {
+                    let k = 255 - i32::from(k);
+                    for v in [c, m, y] {
+                        out.push((((255 - i32::from(v)) * k + 127) / 255).clamp(0, 255) as u8);
+                    }
+                }
+                (out, false)
+            };
+            Image::new(w as u32, h as u32, Layout::Rgb, Depth::Eight, out).map(|i| (i, is_managed))
         }
     }
 }

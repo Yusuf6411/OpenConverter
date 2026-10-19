@@ -11,7 +11,7 @@ use oc_core::{
 };
 use oc_image::anim::{self, Animation};
 use oc_image::{
-    bmp, dds, gif, hdr, icns, ico, jpeg, netpbm, ops, png, psd, qoi, tga, tiff, webp, Image,
+    bmp, dds, gif, hdr, icc, icns, ico, jpeg, netpbm, ops, png, psd, qoi, tga, tiff, webp, Image,
 };
 
 pub const PNG: FormatId = FormatId("png");
@@ -92,6 +92,26 @@ fn common_options() -> Vec<OptionSpec> {
             kind: OptionKind::Enum {
                 choices: vec!["all", "first"],
                 default: "all",
+            },
+        },
+        OptionSpec {
+            key: "profile",
+            label: "Colour profile",
+            help: "keep: embedded profile stays where the format can store it, otherwise the pixels are converted to sRGB; srgb: always convert to sRGB; strip: drop the profile without converting",
+            i18n_key: "opt.image.profile",
+            kind: OptionKind::Enum {
+                choices: vec!["keep", "srgb", "strip"],
+                default: "keep",
+            },
+        },
+        OptionSpec {
+            key: "intent",
+            label: "Rendering intent",
+            help: "How out-of-gamut colours are mapped when converting to sRGB",
+            i18n_key: "opt.image.intent",
+            kind: OptionKind::Enum {
+                choices: vec!["relative", "perceptual", "saturation"],
+                default: "relative",
             },
         },
         OptionSpec {
@@ -791,10 +811,75 @@ pub fn transform(img: Image, opts: &Options, limits: &Limits) -> Result<(Image, 
     Ok((img, notes))
 }
 
+/// Formats whose writers embed `Metadata::icc_profile`.
+fn stores_icc(fmt: FormatId) -> bool {
+    matches!(fmt, PNG | JPEG | WEBP | TIFF | PSD)
+}
+
+/// What to do with an embedded colour profile before encoding: keep it where the format
+/// can store it, otherwise (or on request) convert the pixels to sRGB. `None` means the
+/// image goes through unchanged.
+fn apply_profile_policy(fmt: FormatId, img: &Image, opts: &Options) -> Option<(Image, Notes)> {
+    img.metadata.icc_profile.as_ref()?;
+    let mode = opts.text("profile").unwrap_or("keep");
+    let mut notes = Notes::new();
+    if mode == "strip" {
+        let mut out = img.clone();
+        out.metadata.icc_profile = None;
+        notes.push(Note::new(
+            Severity::Info,
+            "image.icc_stripped",
+            "the colour profile was removed without converting the pixels",
+        ));
+        return Some((out, notes));
+    }
+    if mode == "keep" && stores_icc(fmt) {
+        return None;
+    }
+    let intent = match opts.text("intent") {
+        Some("perceptual") => icc::Intent::Perceptual,
+        Some("saturation") => icc::Intent::Saturation,
+        _ => icc::Intent::RelativeColorimetric,
+    };
+    match icc::to_srgb(img, intent, true) {
+        Ok(out) => {
+            notes.push(Note::new(
+                Severity::Info,
+                "image.icc_converted",
+                "the pixels were converted from the embedded colour profile to sRGB",
+            ));
+            Some((out, notes))
+        }
+        Err(e) => {
+            let mut out = img.clone();
+            out.metadata.icc_profile = None;
+            notes.push(
+                Note::new(
+                    Severity::Warning,
+                    "image.icc_unusable",
+                    "the colour profile could not be applied; it was dropped and colours may look different",
+                )
+                .with_detail(e.to_string()),
+            );
+            Some((out, notes))
+        }
+    }
+}
+
 /// `ext` is the output file's extension: for Netpbm it picks PBM, PGM, PPM or PAM.
 pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(Vec<u8>, Notes)> {
+    let mut notes = Notes::new();
+    let managed;
+    let img = match apply_profile_policy(fmt, img, opts) {
+        Some((converted, n)) => {
+            notes.extend(n);
+            managed = converted;
+            &managed
+        }
+        None => img,
+    };
     let [br, bg, bb, _] = opts.color("background").unwrap_or([255, 255, 255, 255]);
-    let (bytes, mut notes) = match fmt {
+    let (bytes, n) = match fmt {
         PNG => png::encode(img, &png_options(opts)),
         BMP => bmp::encode(img),
         TGA => tga::encode(
@@ -897,8 +982,9 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
             ))
         }
     };
+    notes.extend(n);
     if fmt != PNG {
-        if img.metadata.icc_profile.is_some() && fmt != JPEG && fmt != WEBP {
+        if img.metadata.icc_profile.is_some() && !stores_icc(fmt) {
             notes.push(Note::new(
                 Severity::Loss,
                 "image.icc_dropped",

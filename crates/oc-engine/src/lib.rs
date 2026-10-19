@@ -652,6 +652,45 @@ mod tests {
     }
 
     #[test]
+    fn colour_profiles_follow_the_target() {
+        let e = Engine::new();
+        let profile = std::fs::read(format!(
+            "{}/../oc-image/tests/data/icc/m_gamma22.icc",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap();
+        let mut img = oc_image::Image::new(
+            2,
+            1,
+            oc_image::Layout::Rgb,
+            oc_image::Depth::Eight,
+            vec![0, 255, 0, 255, 0, 0],
+        )
+        .unwrap();
+        img.metadata.icc_profile = Some(profile);
+        let enc =
+            |img: &oc_image::Image, fmt| image::encode(fmt, img, &Options::default(), "x").unwrap();
+        // PNG stores it, so the pixels stay as they are.
+        let (bytes, notes) = enc(&img, image::PNG);
+        assert!(!notes.iter().any(|n| n.code.starts_with("image.icc")));
+        let (back, _) = image::decode(image::PNG, &bytes, &e.limits, &NoProgress).unwrap();
+        assert!(back.metadata.icc_profile.is_some());
+        assert_eq!(back.data, img.data);
+        // BMP cannot: the pixels are converted and the profile is gone.
+        let (bytes, notes) = enc(&img, image::BMP);
+        assert!(notes.iter().any(|n| n.code == "image.icc_converted"));
+        let (back, _) = image::decode(image::BMP, &bytes, &e.limits, &NoProgress).unwrap();
+        assert!(back.metadata.icc_profile.is_none());
+        // Adobe RGB green is more saturated than sRGB can show, so it clips to pure green.
+        assert_eq!(&back.data[..3], &[0, 255, 0]);
+        assert!(back.data[3] > 200, "{:?}", back.data);
+        // A profile we cannot read is dropped with a warning instead of failing the conversion.
+        img.metadata.icc_profile = Some(vec![1, 2, 3]);
+        let (_, notes) = enc(&img, image::BMP);
+        assert!(notes.iter().any(|n| n.code == "image.icc_unusable"));
+    }
+
+    #[test]
     fn webp_lossy_quality_and_alpha() {
         let dir = tmpdir("webp_lossy");
         for name in ["rgb8.png", "pal8_trns.png"] {
