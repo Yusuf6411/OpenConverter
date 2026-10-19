@@ -60,9 +60,9 @@ fn idct_1d(d: [i64; 8]) -> [i64; 8] {
     ]
 }
 
-/// Inverse DCT of one block of dequantised coefficients (natural order) into samples,
-/// level-shifted by +128 and clamped to 0..=255.
-pub fn idct(coef: &[i32; 64], out: &mut [u8; 64]) {
+/// The inverse transform without level shift or clamping; `pass1_bits` is 2 for 8-bit
+/// samples and 1 for 12-bit ones, as in libjpeg.
+fn idct_raw(coef: &[i32; 64], pass1_bits: i32, out: &mut [i32; 64]) {
     let round = |x: i64, n: i32| (x + (1 << (n - 1))) >> n;
     let mut ws = [0i64; 64];
     for col in 0..8 {
@@ -71,15 +71,34 @@ pub fn idct(coef: &[i32; 64], out: &mut [u8; 64]) {
             *v = i64::from(coef[row * 8 + col].clamp(-(1 << 20), 1 << 20));
         }
         for (row, v) in idct_1d(d).into_iter().enumerate() {
-            ws[row * 8 + col] = round(v, CONST_BITS - PASS1_BITS);
+            ws[row * 8 + col] = round(v, CONST_BITS - pass1_bits);
         }
     }
     for row in 0..8 {
         let mut d = [0i64; 8];
         d.copy_from_slice(&ws[row * 8..row * 8 + 8]);
         for (x, v) in idct_1d(d).into_iter().enumerate() {
-            out[row * 8 + x] = (round(v, CONST_BITS + PASS1_BITS + 3) + 128).clamp(0, 255) as u8;
+            out[row * 8 + x] = round(v, CONST_BITS + pass1_bits + 3) as i32;
         }
+    }
+}
+
+/// Inverse DCT of one block of dequantised coefficients (natural order) into samples,
+/// level-shifted by +128 and clamped to 0..=255.
+pub fn idct(coef: &[i32; 64], out: &mut [u8; 64]) {
+    let mut raw = [0i32; 64];
+    idct_raw(coef, PASS1_BITS, &mut raw);
+    for (o, &v) in out.iter_mut().zip(&raw) {
+        *o = (v + 128).clamp(0, 255) as u8;
+    }
+}
+
+/// The same for 12-bit samples: level-shifted by +2048, clamped to 0..=4095.
+pub fn idct12(coef: &[i32; 64], out: &mut [u16; 64]) {
+    let mut raw = [0i32; 64];
+    idct_raw(coef, 1, &mut raw);
+    for (o, &v) in out.iter_mut().zip(&raw) {
+        *o = (v + 2048).clamp(0, 4095) as u16;
     }
 }
 

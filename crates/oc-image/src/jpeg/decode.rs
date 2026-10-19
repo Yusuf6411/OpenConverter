@@ -1,4 +1,4 @@
-//! JPEG decoder: baseline, extended-sequential and progressive Huffman, 8-bit samples,
+//! JPEG decoder: baseline, extended-sequential and progressive, Huffman or arithmetic, 8-bit samples,
 //! 1/3/4 components, any integral chroma subsampling, restart intervals.
 //!
 //! All scans are decoded into per-component coefficient buffers first, so sequential,
@@ -6,8 +6,13 @@
 //! (integer IDCT, "fancy" chroma upsampling, fixed-point YCbCr), so output normally matches
 //! what other software shows, bit for bit.
 //!
-//! Not supported (typed error): arithmetic coding, lossless, hierarchical, 12-bit samples,
+//! Arithmetic-coded files (sequential and progressive) are read as well.
+//!
+//! Not supported (typed error): lossless, hierarchical, 12-bit samples,
 //! non-integral sampling ratios. EXIF orientation is reported, not applied.
+mod arith;
+mod lossless;
+
 use super::dct;
 use super::tables::ZIGZAG;
 use crate::icc;
@@ -252,12 +257,18 @@ struct Comp {
     real_bw: usize,
     real_bh: usize,
     coefs: Vec<i16>,
+    /// Decoded samples of a lossless component (there is no transform to undo).
+    samples: Vec<u16>,
 }
 
 struct Frame {
     width: usize,
     height: usize,
     progressive: bool,
+    arithmetic: bool,
+    lossless: bool,
+    /// Bits per sample: 8 or 12 for DCT files, 2 to 16 for lossless ones.
+    precision: u32,
     comps: Vec<Comp>,
     hmax: usize,
     vmax: usize,
@@ -661,6 +672,7 @@ fn decode_with(
     };
     let mut frame: Option<Frame> = None;
     let mut restart_interval = 0usize;
+    let mut cond = arith::Cond::default();
     let mut meta = Meta {
         rgb_override: rgb_direct,
         ..Meta::default()
@@ -683,15 +695,21 @@ fn decode_with(
             .ok_or_else(|| Error::truncated("JPEG marker segment"))?;
         pos += len;
         match m {
-            0xC0..=0xC2 => {
+            0xC0..=0xC3 | 0xC9 | 0xCA => {
                 if frame.is_some() {
                     return Err(Error::corrupt("JPEG has more than one frame header"));
                 }
-                frame = Some(parse_sof(seg, m == 0xC2, limits)?);
+                let kind = Kind {
+                    progressive: m == 0xC2 || m == 0xCA,
+                    arithmetic: m >= 0xC9,
+                    lossless: m == 0xC3,
+                };
+                frame = Some(parse_sof(seg, kind, limits)?);
             }
-            0xC3 => return Err(unsupported("lossless coding")),
+            0xCC => arith::parse_dac(seg, &mut cond)?,
             0xC5..=0xC7 => return Err(unsupported("hierarchical coding")),
-            0xC9..=0xCB | 0xCD..=0xCF => return Err(unsupported("arithmetic coding")),
+            0xCB => return Err(unsupported("lossless coding")),
+            0xCD..=0xCF => return Err(unsupported("hierarchical coding")),
             0xC4 => parse_dht(seg, &mut tables)?,
             0xDB => parse_dqt(seg, &mut tables)?,
             0xDD => {
@@ -729,10 +747,29 @@ fn decode_with(
                     .as_mut()
                     .ok_or_else(|| Error::corrupt("JPEG scan before frame header"))?;
                 let scan = parse_sos(seg, f)?;
-                let mut bits = Bits::new(data, pos);
-                decode_scan(f, &scan, &mut bits, &tables, restart_interval, progress)?;
-                starved |= bits.starved;
-                pos = bits.pos;
+                if f.arithmetic {
+                    let (end, bad) =
+                        arith::decode_scan(f, &scan, data, pos, &cond, restart_interval, progress)?;
+                    starved |= bad;
+                    pos = end;
+                } else if f.lossless {
+                    let mut bits = Bits::new(data, pos);
+                    lossless::decode_scan(
+                        f,
+                        &scan,
+                        &mut bits,
+                        &tables,
+                        restart_interval,
+                        progress,
+                    )?;
+                    starved |= bits.starved;
+                    pos = bits.pos;
+                } else {
+                    let mut bits = Bits::new(data, pos);
+                    decode_scan(f, &scan, &mut bits, &tables, restart_interval, progress)?;
+                    starved |= bits.starved;
+                    pos = bits.pos;
+                }
                 scans += 1;
                 progress.check_cancelled()?;
             }
@@ -791,10 +828,27 @@ fn assemble_icc(chunks: &mut [(u8, u8, Vec<u8>)]) -> Option<Vec<u8>> {
     .then(|| chunks.iter().flat_map(|c| c.2.iter().copied()).collect())
 }
 
-fn parse_sof(seg: &[u8], progressive: bool, limits: &Limits) -> Result<Frame> {
+#[derive(Clone, Copy)]
+struct Kind {
+    progressive: bool,
+    arithmetic: bool,
+    lossless: bool,
+}
+
+fn parse_sof(seg: &[u8], kind: Kind, limits: &Limits) -> Result<Frame> {
+    let Kind {
+        progressive,
+        arithmetic,
+        lossless,
+    } = kind;
     let precision = *seg.first().ok_or_else(|| Error::corrupt("JPEG SOF"))?;
-    if precision != 8 {
-        return Err(unsupported("sample precision other than 8 bits"));
+    let ok = if lossless {
+        (2..=16).contains(&precision)
+    } else {
+        precision == 8 || precision == 12
+    };
+    if !ok {
+        return Err(unsupported("this sample precision"));
     }
     let height = u16_at(seg, 1).ok_or_else(|| Error::corrupt("JPEG SOF"))?;
     let width = u16_at(seg, 3).ok_or_else(|| Error::corrupt("JPEG SOF"))?;
@@ -833,11 +887,39 @@ fn parse_sof(seg: &[u8], progressive: bool, limits: &Limits) -> Result<Frame> {
             real_bw: 0,
             real_bh: 0,
             coefs: Vec::new(),
+            samples: Vec::new(),
         });
     }
     let hmax = comps.iter().map(|c| c.h).max().unwrap_or(1);
     let vmax = comps.iter().map(|c| c.v).max().unwrap_or(1);
     let (w, h) = (width, height);
+    if lossless {
+        if hmax != 1 || vmax != 1 {
+            return Err(unsupported("lossless coding with chroma subsampling"));
+        }
+        // One sample per component per "MCU"; no blocks.
+        limits.check_alloc((w * h * (n * 2 + 4)) as u64)?;
+        for c in &mut comps {
+            c.bw = w;
+            c.bh = h;
+            c.real_bw = w;
+            c.real_bh = h;
+            c.samples = vec![0u16; w * h];
+        }
+        return Ok(Frame {
+            width: w,
+            height: h,
+            progressive: false,
+            arithmetic,
+            lossless,
+            precision: u32::from(precision),
+            comps,
+            hmax,
+            vmax,
+            mcus_x: w,
+            mcus_y: h,
+        });
+    }
     let mcus_x = w.div_ceil(8 * hmax);
     let mcus_y = h.div_ceil(8 * vmax);
     let mut bytes = 0u64;
@@ -857,6 +939,9 @@ fn parse_sof(seg: &[u8], progressive: bool, limits: &Limits) -> Result<Frame> {
         width: w,
         height: h,
         progressive,
+        arithmetic,
+        lossless,
+        precision: u32::from(precision),
         comps,
         hmax,
         vmax,
@@ -959,7 +1044,12 @@ fn parse_sos(seg: &[u8], frame: &Frame) -> Result<Scan> {
         ah: u32::from(a >> 4),
         al: u32::from(a & 15),
     };
-    if frame.progressive {
+    if frame.lossless {
+        // Ss is the predictor selection, Al the point transform.
+        if !(1..=7).contains(&ss) || scan.al >= frame.precision {
+            return Err(Error::corrupt("JPEG lossless scan parameters are invalid"));
+        }
+    } else if frame.progressive {
         let ok = ss <= se && se <= 63 && scan.al <= 13 && if ss == 0 { se == 0 } else { ns == 1 };
         if !ok {
             return Err(Error::corrupt(
@@ -974,7 +1064,7 @@ fn parse_sos(seg: &[u8], frame: &Frame) -> Result<Scan> {
 
 /// Edge-clamped sample access into a component plane.
 struct Plane {
-    data: Vec<u8>,
+    data: Vec<u16>,
     stride: usize,
     w: usize,
     h: usize,
@@ -987,8 +1077,8 @@ impl Plane {
     }
 }
 
-fn upsample(p: &Plane, hf: usize, vf: usize, out_w: usize, out_h: usize) -> Vec<u8> {
-    let mut out = vec![0u8; out_w * out_h];
+fn upsample(p: &Plane, hf: usize, vf: usize, out_w: usize, out_h: usize) -> Vec<u16> {
+    let mut out = vec![0u16; out_w * out_h];
     let fancy_ok = p.w > 2;
     for y in 0..out_h {
         let Some(row) = out.get_mut(y * out_w..(y + 1) * out_w) else {
@@ -997,7 +1087,7 @@ fn upsample(p: &Plane, hf: usize, vf: usize, out_w: usize, out_h: usize) -> Vec<
         match (hf, vf) {
             (1, 1) => {
                 for (x, o) in row.iter_mut().enumerate() {
-                    *o = p.at(x, y) as u8;
+                    *o = p.at(x, y) as u16;
                 }
             }
             (2, 1) if fancy_ok => {
@@ -1010,7 +1100,7 @@ fn upsample(p: &Plane, hf: usize, vf: usize, out_w: usize, out_h: usize) -> Vec<
                         (3 * c + p.at(i - 1, y) + 1) >> 2
                     } else {
                         (3 * c + p.at(i + 1, y) + 2) >> 2
-                    } as u8;
+                    } as u16;
                 }
             }
             (2, 2) if fancy_ok => {
@@ -1032,7 +1122,7 @@ fn upsample(p: &Plane, hf: usize, vf: usize, out_w: usize, out_h: usize) -> Vec<
                         (this * 3 + col(i - 1) + 8) >> 4
                     } else {
                         (this * 3 + col(i + 1) + 7) >> 4
-                    } as u8;
+                    } as u16;
                 }
             }
             (1, 2) => {
@@ -1043,12 +1133,12 @@ fn upsample(p: &Plane, hf: usize, vf: usize, out_w: usize, out_h: usize) -> Vec<
                     (near + 1, 2)
                 };
                 for (x, o) in row.iter_mut().enumerate() {
-                    *o = ((3 * p.at(x, near) + p.at(x, far) + bias) >> 2) as u8;
+                    *o = ((3 * p.at(x, near) + p.at(x, far) + bias) >> 2) as u16;
                 }
             }
             _ => {
                 for (x, o) in row.iter_mut().enumerate() {
-                    *o = p.at(x / hf, y / vf) as u8;
+                    *o = p.at(x / hf, y / vf) as u16;
                 }
             }
         }
@@ -1056,18 +1146,51 @@ fn upsample(p: &Plane, hf: usize, vf: usize, out_w: usize, out_h: usize) -> Vec<
     out
 }
 
-fn ycc_to_rgb(y: i32, cb: i32, cr: i32) -> [u8; 3] {
-    // libjpeg's fixed-point tables: FIX(1.40200), FIX(1.77200), FIX(0.71414), FIX(0.34414).
+/// YCbCr to RGB with libjpeg's fixed-point tables; `bits` is the sample precision.
+fn ycc_to_rgb(y: i32, cb: i32, cr: i32, bits: u32) -> [i32; 3] {
+    // FIX(1.40200), FIX(1.77200), FIX(0.71414), FIX(0.34414) at 16 fractional bits.
     const HALF: i32 = 1 << 15;
-    let (cb, cr) = (cb - 128, cr - 128);
+    let centre = 1i32 << (bits - 1);
+    let max = (1i32 << bits) - 1;
+    let (cb, cr) = (cb - centre, cr - centre);
     let r = y + ((91881 * cr + HALF) >> 16);
     let g = y + ((-22554 * cb - 46802 * cr + HALF) >> 16);
     let b = y + ((116130 * cb + HALF) >> 16);
-    [
-        r.clamp(0, 255) as u8,
-        g.clamp(0, 255) as u8,
-        b.clamp(0, 255) as u8,
-    ]
+    [r.clamp(0, max), g.clamp(0, max), b.clamp(0, max)]
+}
+
+/// Widens (or narrows) a `from`-bit sample to `to` bits by repeating its bit pattern, so
+/// full scale stays full scale.
+fn rescale(v: u32, from: u32, to: u32) -> u32 {
+    if from >= to {
+        return v >> (from - to);
+    }
+    let mut out = v << (to - from);
+    let mut shift = to - from;
+    while shift > 0 {
+        let s = shift.min(from);
+        out |= v >> (from - s) << (shift - s);
+        shift -= s;
+    }
+    out
+}
+
+/// Packs samples of `bits` precision as 8-bit, or as big-endian 16-bit above that.
+fn pack_samples(values: impl Iterator<Item = u16>, bits: u32) -> (Depth, Vec<u8>) {
+    if bits <= 8 {
+        (
+            Depth::Eight,
+            values
+                .map(|v| rescale(u32::from(v), bits, 8) as u8)
+                .collect(),
+        )
+    } else {
+        let mut out = Vec::new();
+        for v in values {
+            out.extend_from_slice(&(rescale(u32::from(v), bits, 16) as u16).to_be_bytes());
+        }
+        (Depth::Sixteen, out)
+    }
 }
 
 fn build_image(
@@ -1079,8 +1202,12 @@ fn build_image(
     limits: &Limits,
 ) -> Result<(Image, bool)> {
     let (w, h) = (f.width, f.height);
-    let mut planes: Vec<Vec<u8>> = Vec::new();
-    for c in &f.comps {
+    let bits = f.precision;
+    let mut planes: Vec<Vec<u16>> = Vec::new();
+    if f.lossless {
+        planes.extend(f.comps.iter().map(|c| c.samples.clone()));
+    }
+    for c in f.comps.iter().filter(|_| !f.lossless) {
         let q =
             t.q.get(c.tq)
                 .and_then(Option::as_ref)
@@ -1091,13 +1218,13 @@ fn build_image(
         }
         let stride = c.bw * 8;
         let mut plane = Plane {
-            data: vec![0u8; stride * c.bh * 8],
+            data: vec![0u16; stride * c.bh * 8],
             stride,
             w: cw.max(1),
             h: ch.max(1),
         };
         let mut deq = [0i32; 64];
-        let mut px = [0u8; 64];
+        let mut px = [0u16; 64];
         for by in 0..c.bh {
             for bx in 0..c.bw {
                 let off = (by * c.bw + bx) * 64;
@@ -1107,7 +1234,15 @@ fn build_image(
                 for ((d, &co), &qq) in deq.iter_mut().zip(block).zip(q) {
                     *d = i32::from(co) * i32::from(qq);
                 }
-                dct::idct(&deq, &mut px);
+                if bits == 12 {
+                    dct::idct12(&deq, &mut px);
+                } else {
+                    let mut narrow = [0u8; 64];
+                    dct::idct(&deq, &mut narrow);
+                    for (o, &v) in px.iter_mut().zip(&narrow) {
+                        *o = u16::from(v);
+                    }
+                }
                 for (row, src) in px.as_chunks::<8>().0.iter().enumerate() {
                     let o = (by * 8 + row) * stride + bx * 8;
                     if let Some(dst) = plane.data.get_mut(o..o + 8) {
@@ -1118,47 +1253,53 @@ fn build_image(
         }
         planes.push(upsample(&plane, f.hmax / c.h, f.vmax / c.v, w, h));
     }
-    limits.check_alloc((w * h * f.comps.len()) as u64)?;
+    limits.check_alloc((w * h * f.comps.len() * 3) as u64)?;
     let n = w * h;
     let get =
         |p: usize, i: usize| i32::from(planes.get(p).and_then(|v| v.get(i)).copied().unwrap_or(0));
     let ids: Vec<u8> = f.comps.iter().map(|c| c.id).collect();
     match f.comps.len() {
-        1 => Image::new(
-            w as u32,
-            h as u32,
-            Layout::Gray,
-            Depth::Eight,
-            planes.into_iter().next().unwrap_or_default(),
-        )
-        .map(|i| (i, false)),
+        1 => {
+            let (depth, data) = pack_samples(
+                planes.into_iter().next().unwrap_or_default().into_iter(),
+                bits,
+            );
+            Image::new(w as u32, h as u32, Layout::Gray, depth, data).map(|i| (i, false))
+        }
         3 => {
             let rgb_direct = match (meta.rgb_override, meta.adobe_transform) {
                 (Some(v), _) => v,
                 (None, Some(0)) => true,
                 (None, Some(_)) => false,
+                // Lossless files are overwhelmingly RGB; only a JFIF header says otherwise.
+                (None, None) if f.lossless => meta.jfif.is_none(),
                 (None, None) => meta.jfif.is_none() && ids.as_slice() == b"RGB",
             };
-            let mut out = Vec::with_capacity(n * 3);
+            let mut rgb = Vec::with_capacity(n * 3);
             for i in 0..n {
-                if rgb_direct {
-                    out.extend_from_slice(&[get(0, i) as u8, get(1, i) as u8, get(2, i) as u8]);
+                let px = if rgb_direct {
+                    [get(0, i), get(1, i), get(2, i)]
                 } else {
-                    out.extend_from_slice(&ycc_to_rgb(get(0, i), get(1, i), get(2, i)));
-                }
+                    ycc_to_rgb(get(0, i), get(1, i), get(2, i), bits)
+                };
+                rgb.extend(px.map(|v| v as u16));
             }
-            Image::new(w as u32, h as u32, Layout::Rgb, Depth::Eight, out).map(|i| (i, false))
+            let (depth, out) = pack_samples(rgb.into_iter(), bits);
+            Image::new(w as u32, h as u32, Layout::Rgb, depth, out).map(|i| (i, false))
         }
         _ => {
             // Four components: CMYK, or YCCK when Adobe's transform flag is 2.
+            if bits != 8 {
+                return Err(unsupported("CMYK with this sample precision"));
+            }
             let adobe = meta.adobe_transform.is_some();
             let ycck = meta.adobe_transform == Some(2);
             // Ink amounts, 255 = full ink, which is what an ICC profile expects.
             let mut ink = Vec::with_capacity(n * 4);
             for i in 0..n {
                 let (c, m, y) = if ycck {
-                    let [r, g, b] = ycc_to_rgb(get(0, i), get(1, i), get(2, i));
-                    (255 - i32::from(r), 255 - i32::from(g), 255 - i32::from(b))
+                    let [r, g, b] = ycc_to_rgb(get(0, i), get(1, i), get(2, i), 8);
+                    (255 - r, 255 - g, 255 - b)
                 } else {
                     (get(0, i), get(1, i), get(2, i))
                 };
@@ -1224,8 +1365,9 @@ mod tests {
     /// Largest per-sample difference between our output and libjpeg's.
     fn max_diff(name: &str) -> u8 {
         let (img, _) = run(name);
-        let want = std::fs::read(format!("{}/{name}.rgb", dir()))
-            .or_else(|_| std::fs::read(format!("{}/{name}.gray", dir())))
+        let want = ["rgb", "gray", "rgb16", "gray16"]
+            .iter()
+            .find_map(|ext| std::fs::read(format!("{}/{name}.{ext}", dir())).ok())
             .unwrap();
         assert_eq!(img.data.len(), want.len(), "{name}: size");
         img.data
@@ -1246,7 +1388,7 @@ mod tests {
             })
             .collect();
         names.sort();
-        assert!(names.len() >= 20, "expected the generated fixtures");
+        assert!(names.len() >= 60, "expected the generated fixtures");
         let mut bad = Vec::new();
         for n in &names {
             let d = max_diff(n);
@@ -1265,26 +1407,30 @@ mod tests {
 
     #[test]
     fn corruption_is_an_error_or_a_warning_never_a_panic() {
-        let good = std::fs::read(format!("{}/big_420_prog.jpg", dir())).unwrap();
-        for cut in [0, 1, 2, 3, 10, 100, 300, good.len() / 2, good.len() - 5] {
-            let r = decode(&good[..cut], &Limits::default(), &NoProgress);
-            if let Ok((_, notes)) = r {
-                assert!(
-                    notes.iter().any(|n| n.code == "jpeg.truncated"),
-                    "cut {cut}"
-                );
+        for name in ["big_420_prog", "arith_prog_420", "arith_restart"] {
+            let good = std::fs::read(format!("{}/{name}.jpg", dir())).unwrap();
+            for cut in [0, 1, 2, 3, 10, 100, 300, good.len() / 2, good.len() - 5] {
+                let r = decode(&good[..cut], &Limits::default(), &NoProgress);
+                if let Ok((_, notes)) = r {
+                    // Arithmetic data may end silently: zeros are supplied after the end.
+                    assert!(
+                        name.starts_with("arith")
+                            || notes.iter().any(|n| n.code == "jpeg.truncated"),
+                        "{name} cut {cut}"
+                    );
+                }
             }
-        }
-        // Flip bytes throughout; the decoder may fail but must not panic.
-        let mut s = 12345u32;
-        for _ in 0..300 {
-            let mut bad = good.clone();
-            for _ in 0..4 {
-                s = s.wrapping_mul(1664525).wrapping_add(1013904223);
-                let i = (s >> 8) as usize % bad.len();
-                bad[i] ^= (s >> 3) as u8 | 1;
+            // Flip bytes throughout; the decoder may fail but must not panic.
+            let mut s = 12345u32;
+            for _ in 0..300 {
+                let mut bad = good.clone();
+                for _ in 0..4 {
+                    s = s.wrapping_mul(1664525).wrapping_add(1013904223);
+                    let i = (s >> 8) as usize % bad.len();
+                    bad[i] ^= (s >> 3) as u8 | 1;
+                }
+                let _ = decode(&bad, &Limits::default(), &NoProgress);
             }
-            let _ = decode(&bad, &Limits::default(), &NoProgress);
         }
     }
 
@@ -1292,7 +1438,7 @@ mod tests {
     fn unsupported_variants_are_typed_errors() {
         let mut d = std::fs::read(format!("{}/big_444.jpg", dir())).unwrap();
         let sof = d.windows(2).position(|w| w == [0xFF, 0xC0]).unwrap();
-        d[sof + 1] = 0xC9; // arithmetic coding
+        d[sof + 1] = 0xC5; // hierarchical coding
         assert_eq!(
             decode(&d, &Limits::default(), &NoProgress)
                 .err()
@@ -1300,7 +1446,7 @@ mod tests {
             Some(ErrorCode::UnsupportedVariant)
         );
         d[sof + 1] = 0xC0;
-        d[sof + 4] = 12; // 12-bit samples
+        d[sof + 4] = 5; // 5-bit samples in a DCT file
         assert_eq!(
             decode(&d, &Limits::default(), &NoProgress)
                 .err()
