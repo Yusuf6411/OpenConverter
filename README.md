@@ -14,7 +14,7 @@ openconverter serve          # local web UI, opens in your browser
 openconverter-desktop        # the same UI in its own window
 ```
 
-What it can convert is listed in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). Today that is images (PNG, JPEG, WebP, GIF, BMP, TGA, QOI, Netpbm, ICO, ICNS, DDS, PSD, HDR, EXR, TIFF, animations), text encodings and tables (CSV, TSV, JSON). Each conversion runs in a separate worker process with a time and memory limit.
+What it can convert is listed in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). Today that is images (PNG, JPEG, WebP, GIF, BMP, TGA, QOI, Netpbm, ICO, ICNS, DDS, PSD, HDR, EXR, TIFF, animations), text encodings, tables (CSV, TSV, JSON, XLSX, ODS) and archives (ZIP, TAR, 7z, CPIO, AR, CAB and ISO to read, and the gz, bz2, xz, zst, lz4 compressors). Each conversion runs in a separate worker process with a time and memory limit.
 
 ## Build
 

@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [inflate, zlib, gzip, lzw, packbits, xml, text, deflate_roundtrip, png, bmp, tga, qoi, netpbm, gif, jpeg, jpeg_transform, ico, icns, dds, psd, hdr, table, icc, exr, tiff, webp, webp_roundtrip, webp_lossy_roundtrip, vp8, animation, animation_roundtrip, image_roundtrip, codecs, ppmd7, bcj2, archive]
+        target: [inflate, zlib, gzip, lzw, packbits, xml, text, deflate_roundtrip, png, bmp, tga, qoi, netpbm, gif, jpeg, jpeg_transform, ico, icns, dds, psd, hdr, table, icc, exr, tiff, webp, webp_roundtrip, webp_lossy_roundtrip, vp8, animation, animation_roundtrip, image_roundtrip, codecs, ppmd7, bcj2, archive, workbook]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly

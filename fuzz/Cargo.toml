@@ -237,3 +237,9 @@ name = "archive"
 path = "fuzz_targets/archive.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "workbook"
+path = "fuzz_targets/workbook.rs"
+test = false
+doc = false
