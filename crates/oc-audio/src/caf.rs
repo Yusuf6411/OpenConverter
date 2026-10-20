@@ -64,10 +64,14 @@ pub fn read(data: &[u8], limits: &Limits) -> Result<(Audio, Notes)> {
     }
     let mut desc = None;
     let mut payload: Option<&[u8]> = None;
+    let mut kuki: Option<&[u8]> = None;
+    let mut pakt: Option<&[u8]> = None;
     let mut tags = Tags::default();
     for (t, body) in chunks(data) {
         match &t {
             b"desc" => desc = parse_desc(body),
+            b"kuki" => kuki = Some(body),
+            b"pakt" => pakt = Some(body),
             b"data" if body.len() >= 4 => payload = Some(&body[4..]),
             b"info" if body.len() >= 4 => {
                 let mut parts = body[4..].split(|&b| b == 0);
@@ -92,6 +96,14 @@ pub fn read(data: &[u8], limits: &Limits) -> Result<(Audio, Notes)> {
     }
     let d = desc.ok_or_else(|| Error::corrupt("no desc chunk"))?;
     let payload = payload.ok_or_else(|| Error::corrupt("no data chunk"))?;
+    if &d.format == b"alac" {
+        let cookie = crate::alac::Cookie::parse(
+            kuki.ok_or_else(|| Error::corrupt("ALAC in CAF needs a kuki chunk"))?,
+        )?;
+        let mut a = read_alac(&cookie, pakt, payload, limits)?;
+        a.tags = tags;
+        return Ok((a, Notes::new()));
+    }
     if &d.format != b"lpcm" {
         return Err(Error::new(
             ErrorCode::UnsupportedVariant,
@@ -198,42 +210,12 @@ pub fn read(data: &[u8], limits: &Limits) -> Result<(Audio, Notes)> {
     Ok((a, notes))
 }
 
-pub fn write(audio: &Audio, notes: &mut Notes) -> Result<Vec<u8>> {
-    let ch = u32::from(audio.channels);
-    let (float, bits, width, payload): (bool, u32, usize, Vec<u8>) = match &audio.samples {
-        Samples::Int { bits, data } => {
-            let width = usize::from(*bits).div_ceil(8);
-            let shift = (width * 8) as u32 - u32::from(*bits);
-            let mut p = Vec::with_capacity(data.len() * width);
-            for &s in data {
-                p.extend_from_slice(&(s << shift).to_be_bytes()[4 - width..]);
-            }
-            (false, u32::from(*bits), width, p)
-        }
-        Samples::Float(d) => {
-            let mut p = Vec::with_capacity(d.len() * 4);
-            for v in d {
-                p.extend_from_slice(&v.to_be_bytes());
-            }
-            (true, 32, 4, p)
-        }
-    };
-    let mut out = b"caff\x00\x01\x00\x00".to_vec();
+fn write_info(out: &mut Vec<u8>, audio: &Audio, notes: &mut Notes) {
     let push = |out: &mut Vec<u8>, t: &[u8; 4], body: &[u8]| {
         out.extend_from_slice(t);
         out.extend_from_slice(&(body.len() as i64).to_be_bytes());
         out.extend_from_slice(body);
     };
-    let mut desc = Vec::new();
-    desc.extend_from_slice(&f64::from(audio.sample_rate).to_be_bytes());
-    desc.extend_from_slice(b"lpcm");
-    desc.extend_from_slice(&(if float { 1u32 } else { 0 }).to_be_bytes());
-    desc.extend_from_slice(&(width as u32 * ch).to_be_bytes());
-    desc.extend_from_slice(&1u32.to_be_bytes());
-    desc.extend_from_slice(&ch.to_be_bytes());
-    desc.extend_from_slice(&(if float { 32 } else { (width * 8) as u32 }).to_be_bytes());
-    let _ = bits;
-    push(&mut out, b"desc", &desc);
     let mut info = 0u32.to_be_bytes().to_vec();
     let mut n = 0u32;
     let mut dropped = 0;
@@ -275,8 +257,164 @@ pub fn write(audio: &Audio, notes: &mut Notes) -> Result<Vec<u8>> {
     }
     if n > 0 {
         info[..4].copy_from_slice(&n.to_be_bytes());
-        push(&mut out, b"info", &info);
+        push(out, b"info", &info);
     }
+}
+
+/// Variable-length integer of the `pakt` chunk: 7 bits per byte, high bit means "more".
+fn varint(b: &[u8], at: &mut usize) -> Option<u64> {
+    let mut v = 0u64;
+    for _ in 0..9 {
+        let byte = *b.get(*at)?;
+        *at += 1;
+        v = (v << 7) | u64::from(byte & 0x7F);
+        if byte & 0x80 == 0 {
+            return Some(v);
+        }
+    }
+    None
+}
+
+fn read_alac(
+    cookie: &crate::alac::Cookie,
+    pakt: Option<&[u8]>,
+    payload: &[u8],
+    limits: &Limits,
+) -> Result<Audio> {
+    use crate::alac::dec::Decoder;
+    let pakt = pakt.ok_or_else(|| Error::corrupt("ALAC in CAF needs a pakt chunk"))?;
+    if pakt.len() < 24 {
+        return Err(Error::corrupt("pakt chunk is too short"));
+    }
+    let mut n = [0u8; 8];
+    n.copy_from_slice(&pakt[..8]);
+    let packets = i64::from_be_bytes(n).max(0) as u64;
+    n.copy_from_slice(&pakt[8..16]);
+    let valid = i64::from_be_bytes(n).max(0) as u64;
+    let priming = i32::from_be_bytes([pakt[16], pakt[17], pakt[18], pakt[19]]).max(0) as usize;
+    limits.check_entries(packets)?;
+    let dec = Decoder::new(cookie.clone())?;
+    let ch = usize::from(cookie.channels);
+    let mut out: Vec<i32> = Vec::new();
+    let (mut at, mut pos) = (24usize, 0usize);
+    for _ in 0..packets {
+        let size =
+            varint(pakt, &mut at).ok_or_else(|| Error::corrupt("pakt chunk ends early"))? as usize;
+        let end = pos.checked_add(size).filter(|&e| e <= payload.len());
+        let end =
+            end.ok_or_else(|| Error::truncated("packet lies past the end of the data chunk"))?;
+        dec.frame(&payload[pos..end], &mut out)?;
+        check_samples(out.len() as u64, limits)?;
+        pos = end;
+    }
+    let skip = (priming * ch).min(out.len());
+    out.drain(..skip);
+    if valid > 0 {
+        out.truncate(valid as usize * ch);
+    }
+    let c = cookie.channels.into();
+    let mut a = Audio::new(
+        cookie.sample_rate,
+        c,
+        Samples::Int {
+            bits: cookie.bit_depth,
+            data: out,
+        },
+    );
+    a.channel_mask = default_mask(c);
+    Ok(a)
+}
+
+/// Write Apple Lossless in a CAF container.
+pub fn write_alac(audio: &Audio, notes: &mut Notes) -> Result<Vec<u8>> {
+    let (cookie, packets) = crate::alac::enc::encode(audio)?;
+    let mut out = b"caff\x00\x01\x00\x00".to_vec();
+    let push = |out: &mut Vec<u8>, t: &[u8; 4], body: &[u8]| {
+        out.extend_from_slice(t);
+        out.extend_from_slice(&(body.len() as i64).to_be_bytes());
+        out.extend_from_slice(body);
+    };
+    let mut desc = Vec::new();
+    desc.extend_from_slice(&f64::from(audio.sample_rate).to_be_bytes());
+    desc.extend_from_slice(b"alac");
+    let code = match cookie.bit_depth {
+        16 => 1u32,
+        20 => 2,
+        24 => 3,
+        _ => 4,
+    };
+    desc.extend_from_slice(&code.to_be_bytes());
+    desc.extend_from_slice(&0u32.to_be_bytes());
+    desc.extend_from_slice(&cookie.frame_len.to_be_bytes());
+    desc.extend_from_slice(&u32::from(audio.channels).to_be_bytes());
+    desc.extend_from_slice(&0u32.to_be_bytes());
+    push(&mut out, b"desc", &desc);
+    push(&mut out, b"kuki", &cookie.to_bytes());
+    let frames = audio.frames() as i64;
+    let remainder = packets.len() as i64 * i64::from(cookie.frame_len) - frames;
+    let mut pakt = Vec::new();
+    pakt.extend_from_slice(&(packets.len() as i64).to_be_bytes());
+    pakt.extend_from_slice(&frames.to_be_bytes());
+    pakt.extend_from_slice(&0i32.to_be_bytes());
+    pakt.extend_from_slice(&(remainder.max(0) as i32).to_be_bytes());
+    for p in &packets {
+        let mut v = p.bytes.len() as u64;
+        let mut groups = vec![(v & 0x7F) as u8];
+        v >>= 7;
+        while v > 0 {
+            groups.push((v & 0x7F) as u8 | 0x80);
+            v >>= 7;
+        }
+        groups.reverse();
+        pakt.extend_from_slice(&groups);
+    }
+    push(&mut out, b"pakt", &pakt);
+    write_info(&mut out, audio, notes);
+    let mut data = 0u32.to_be_bytes().to_vec();
+    for p in &packets {
+        data.extend_from_slice(&p.bytes);
+    }
+    push(&mut out, b"data", &data);
+    Ok(out)
+}
+
+pub fn write(audio: &Audio, notes: &mut Notes) -> Result<Vec<u8>> {
+    let ch = u32::from(audio.channels);
+    let (float, bits, width, payload): (bool, u32, usize, Vec<u8>) = match &audio.samples {
+        Samples::Int { bits, data } => {
+            let width = usize::from(*bits).div_ceil(8);
+            let shift = (width * 8) as u32 - u32::from(*bits);
+            let mut p = Vec::with_capacity(data.len() * width);
+            for &s in data {
+                p.extend_from_slice(&(s << shift).to_be_bytes()[4 - width..]);
+            }
+            (false, u32::from(*bits), width, p)
+        }
+        Samples::Float(d) => {
+            let mut p = Vec::with_capacity(d.len() * 4);
+            for v in d {
+                p.extend_from_slice(&v.to_be_bytes());
+            }
+            (true, 32, 4, p)
+        }
+    };
+    let mut out = b"caff\x00\x01\x00\x00".to_vec();
+    let push = |out: &mut Vec<u8>, t: &[u8; 4], body: &[u8]| {
+        out.extend_from_slice(t);
+        out.extend_from_slice(&(body.len() as i64).to_be_bytes());
+        out.extend_from_slice(body);
+    };
+    let mut desc = Vec::new();
+    desc.extend_from_slice(&f64::from(audio.sample_rate).to_be_bytes());
+    desc.extend_from_slice(b"lpcm");
+    desc.extend_from_slice(&(if float { 1u32 } else { 0 }).to_be_bytes());
+    desc.extend_from_slice(&(width as u32 * ch).to_be_bytes());
+    desc.extend_from_slice(&1u32.to_be_bytes());
+    desc.extend_from_slice(&ch.to_be_bytes());
+    desc.extend_from_slice(&(if float { 32 } else { (width * 8) as u32 }).to_be_bytes());
+    let _ = bits;
+    push(&mut out, b"desc", &desc);
+    write_info(&mut out, audio, notes);
     let mut data = 0u32.to_be_bytes().to_vec();
     data.extend_from_slice(&payload);
     push(&mut out, b"data", &data);

@@ -51,3 +51,19 @@ mp3_make("mp3_mono_8k.mp3", 8000, "mono", 0.5, ["-c:a", "libmp3lame", "-b:a", "1
 mp3_make("mp3_tagged_48k.mp3", 48000, "stereo", 0.3, ["-c:a", "libmp3lame", "-q:a", "2"],
          ["-id3v2_version", "3", "-write_id3v1", "1", "-metadata", "title=Test Title", "-metadata", "artist=Some Artist",
           "-metadata", "album=An Album", "-metadata", "track=3/12", "-metadata", "date=2020", "-metadata", "genre=Rock"])
+
+
+# ---- ALAC: ffmpeg's encoder (M4A), with the PCM its decoder gives back (s32le keeps 24 bit)
+def alac_make(name, rate, layout, secs, fmt, extra=()):
+    path = os.path.join(out, name)
+    ff(*mp3_src(rate, layout, secs), "-c:a", "alac", "-sample_fmt", fmt, *extra, path)
+    ff("-i", path, "-f", "s32le", "-acodec", "pcm_s32le", path + ".pcm")
+
+
+alac_make("alac_stereo_16.m4a", 44100, "stereo", 0.5, "s16p")
+alac_make("alac_mono_16.m4a", 22050, "mono", 0.4, "s16p")
+alac_make("alac_stereo_24.m4a", 48000, "stereo", 0.4, "s32p", ["-bits_per_raw_sample", "24"])
+alac_make("alac_51_16.m4a", 48000, "5.1", 0.3, "s16p")
+
+ff(*mp3_src(44100, "stereo", 0.4), "-c:a", "alac", "-sample_fmt", "s16p", os.path.join(out, "alac_stereo_16.caf"))
+ff("-i", os.path.join(out, "alac_stereo_16.caf"), "-f", "s32le", "-acodec", "pcm_s32le", os.path.join(out, "alac_stereo_16.caf.pcm"))

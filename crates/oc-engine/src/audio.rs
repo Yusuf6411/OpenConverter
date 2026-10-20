@@ -3,7 +3,7 @@
 //! Like images, every audio format connects to a hub (`audio-ir`), so a conversion is always
 //! "decode X, process, encode Y".
 use oc_audio::dsp::{self, Dither, Quality};
-use oc_audio::{aiff, caf, flac, mp3, vorbis, wav, Audio, Samples};
+use oc_audio::{aiff, caf, flac, m4a, mp3, vorbis, wav, Audio, Samples};
 use oc_core::options::{OptionKind, OptionSchema, OptionSpec, Options};
 use oc_core::planner::{Edge, EdgeKind, Registry};
 use oc_core::{
@@ -17,9 +17,10 @@ pub const CAF: FormatId = FormatId("caf");
 pub const FLAC: FormatId = FormatId("flac");
 pub const OGG: FormatId = FormatId("ogg");
 pub const MP3: FormatId = FormatId("mp3");
+pub const M4A: FormatId = FormatId("m4a");
 pub const AUDIO_IR: FormatId = FormatId("audio-ir");
 
-pub const FORMATS: [FormatId; 6] = [WAV, AIFF, CAF, FLAC, OGG, MP3];
+pub const FORMATS: [FormatId; 7] = [WAV, AIFF, CAF, FLAC, OGG, MP3, M4A];
 
 pub fn is_audio(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -129,6 +130,10 @@ fn caps(id: FormatId) -> Caps {
             ints: &[16, 24, 32],
             float: true,
         },
+        i if i == M4A => Caps {
+            ints: &[16, 20, 24, 32],
+            float: false,
+        },
         _ => Caps {
             ints: &[8, 12, 16, 20, 24, 32],
             float: false,
@@ -212,9 +217,16 @@ pub fn register(registry: &mut Registry) {
                 magic: b"caff",
                 confidence: 100,
             }],
-            schema(vec![depth_option(vec![
-                "keep", "8", "16", "24", "32", "float",
-            ])]),
+            schema(vec![
+                depth_option(vec!["keep", "8", "16", "24", "32", "float"]),
+                OptionSpec {
+                    key: "codec",
+                    label: "Codec",
+                    help: "pcm stores samples as they are; alac compresses them without loss (the bit depth becomes 16, 20, 24 or 32)",
+                    i18n_key: "opt.caf.codec",
+                    kind: OptionKind::Enum { choices: vec!["pcm", "alac"], default: "pcm" },
+                },
+            ]),
             "Apple Core Audio Format",
         ),
         (
@@ -344,6 +356,19 @@ pub fn register(registry: &mut Registry) {
             ]),
             "ISO/IEC 11172-3 and 13818-3 layer III",
         ),
+        (
+            M4A,
+            "M4A (Apple Lossless)",
+            &["m4a", "m4b"],
+            &["audio/mp4", "audio/x-m4a"],
+            vec![Sniffer {
+                offset: 4,
+                magic: b"ftyp",
+                confidence: 50,
+            }],
+            schema(vec![depth_option(vec!["keep", "16", "20", "24", "32"])]),
+            "ISO/IEC 14496-12 with Apple Lossless",
+        ),
     ];
     for (id, name, extensions, mime, sniffers, writer_options, spec) in rows {
         registry.add_format(FormatDescriptor {
@@ -393,6 +418,7 @@ pub fn decode(fmt: FormatId, data: &[u8], limits: &Limits) -> Result<(Audio, Not
         f if f == FLAC => flac::read(data, limits),
         f if f == OGG => vorbis::read(data, limits),
         f if f == MP3 => mp3::read(data, limits),
+        f if f == M4A => m4a::read(data, limits),
         _ => Err(Error::new(
             ErrorCode::UnsupportedFormat,
             "no audio decoder for this format",
@@ -504,7 +530,14 @@ fn fit_depth(
     source: (Option<u8>, bool),
     notes: &mut Notes,
 ) -> Result<()> {
-    let cap = caps(fmt);
+    let cap = if fmt == CAF && opts.text("codec") == Some("alac") {
+        Caps {
+            ints: &[16, 20, 24, 32],
+            float: false,
+        }
+    } else {
+        caps(fmt)
+    };
     let want = opts.text("bit_depth").unwrap_or("keep");
     let (src_bits, src_float) = source;
     let dither = match opts.text("dither").unwrap_or("tpdf") {
@@ -601,7 +634,14 @@ pub fn encode(
             wav::write(&a, enc, &mut notes)?
         }
         f if f == AIFF => aiff::write(&a, opts.bool("little_endian") == Some(true), &mut notes)?,
-        f if f == CAF => caf::write(&a, &mut notes)?,
+        f if f == CAF => {
+            if opts.text("codec") == Some("alac") {
+                caf::write_alac(&a, &mut notes)?
+            } else {
+                caf::write(&a, &mut notes)?
+            }
+        }
+        f if f == M4A => m4a::write(&a, &mut notes)?,
         f if f == MP3 => {
             let q = opts.float("vbr_quality").unwrap_or(-1.0);
             let o = mp3::Options {

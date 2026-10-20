@@ -593,6 +593,7 @@ impl Engine {
             .filter_map(|f| f.sniff(data).map(|c| (c, f.id)))
             // MP3 has no real magic number: its candidates must also parse as frames.
             .filter(|(_, id)| *id != audio::MP3 || oc_audio::mp3::sniff(data))
+            .filter(|(_, id)| *id != audio::M4A || oc_audio::m4a::sniff(data))
             .max_by_key(|(c, _)| *c)
             .map(|(_, id)| id)
             .or_else(|| oc_audio::mp3::sniff(data).then_some(audio::MP3))

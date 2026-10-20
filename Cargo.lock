@@ -2154,6 +2154,7 @@ name = "oc-audio"
 version = "2.1.0"
 dependencies = [
  "oc-checksum",
+ "oc-container",
  "oc-core",
  "oc-io",
  "oc-text",
@@ -2186,6 +2187,9 @@ dependencies = [
 [[package]]
 name = "oc-container"
 version = "2.1.0"
+dependencies = [
+ "oc-core",
+]
 
 [[package]]
 name = "oc-core"

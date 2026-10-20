@@ -12,10 +12,12 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod aiff;
+pub mod alac;
 pub mod caf;
 pub mod dsp;
 pub mod flac;
 pub mod id3;
+pub mod m4a;
 pub mod mp3;
 pub mod ogg;
 pub mod tags;
