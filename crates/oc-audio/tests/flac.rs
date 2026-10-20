@@ -148,7 +148,7 @@ fn damaged_streams_never_panic() {
             let pos = ((s >> (8 * k)) as usize ^ k * 7919) % b.len();
             b[pos] ^= 1 << ((s >> 3) % 8);
         }
-        if s % 5 == 0 {
+        if s.is_multiple_of(5) {
             b.truncate(b.len() * (s as usize % 100) / 100);
         }
         let _ = flac::read(&b, &Limits::default());
