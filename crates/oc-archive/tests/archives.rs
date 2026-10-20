@@ -486,10 +486,15 @@ fn damaged_archives_never_panic() {
         max_entries: 1000,
         ..Limits::default()
     };
-    let mut seeds: Vec<Vec<u8>> = ["stored.cab", "mszip.cab", "lzx_verbatim.cab", "lzx_aligned.cab"]
-        .iter()
-        .map(|n| data(n))
-        .collect();
+    let mut seeds: Vec<Vec<u8>> = [
+        "stored.cab",
+        "mszip.cab",
+        "lzx_verbatim.cab",
+        "lzx_aligned.cab",
+    ]
+    .iter()
+    .map(|n| data(n))
+    .collect();
     let a = sample();
     for f in [
         Format::Tar,

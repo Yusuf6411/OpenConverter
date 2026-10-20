@@ -87,6 +87,7 @@ pub fn router(app: Arc<App>) -> Router {
         )
         .route("/api/files/{id}", get(api::file))
         .route("/api/files/{id}/preview", get(api::file_preview))
+        .route("/api/files/{id}/table", get(api::table_preview))
         .route("/api/files/{id}/entries", post(api::archive_entries))
         .route("/api/files/{id}/extract", post(api::archive_extract))
         .route("/api/archives", post(api::create_archive))

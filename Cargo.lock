@@ -2265,7 +2265,10 @@ dependencies = [
 name = "oc-sheet"
 version = "2.0.0"
 dependencies = [
+ "oc-archive",
  "oc-core",
+ "oc-text",
+ "oc-xml",
 ]
 
 [[package]]

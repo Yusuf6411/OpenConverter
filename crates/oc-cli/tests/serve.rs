@@ -397,3 +397,23 @@ fn archives_through_the_api() {
     );
     assert_eq!(st, 200);
 }
+
+#[test]
+fn table_preview_through_the_api() {
+    let s = Server::start("tablepreview");
+    let (_, up) = s.upload("t.csv", b"a,b\n1,2\n3,4\n5,6\n");
+    let id = up.str("file_id");
+    let (st, p) = s.json("GET", &format!("/api/files/{id}/table?rows=2"), "");
+    assert_eq!(st, 200, "{}", p.0);
+    assert!(p.has("\"total_rows\":3"), "{}", p.0);
+    assert!(p.has("\"truncated\":true"), "{}", p.0);
+    let (_, png) = s.upload("n.txt", b"hello");
+    let (st, _) = s.json(
+        "GET",
+        &format!("/api/files/{}/table", png.str("file_id")),
+        "",
+    );
+    assert_eq!(st, 415);
+    let (st, _) = s.json("GET", "/api/files/nope/table", "");
+    assert_eq!(st, 404);
+}

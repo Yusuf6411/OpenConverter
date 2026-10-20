@@ -5,15 +5,21 @@ use oc_core::{
     Capabilities, Category, Error, FormatDescriptor, FormatId, Limits, Note, Notes, Ownership,
     Progress, Result, Severity,
 };
-use oc_sheet::{delimited, json, Table, TableLimits};
+use oc_sheet::{delimited, json, ods, xlsx, Table, TableLimits, Workbook};
 use oc_text::{Encoding, Policy};
 
 pub const CSV: FormatId = FormatId("csv");
 pub const TSV: FormatId = FormatId("tsv");
 pub const JSON: FormatId = FormatId("json");
+pub const XLSX: FormatId = FormatId("xlsx");
+pub const ODS: FormatId = FormatId("ods");
 pub const TABLE_IR: FormatId = FormatId("table-ir");
 
-pub const FORMATS: [FormatId; 3] = [CSV, TSV, JSON];
+pub const FORMATS: [FormatId; 5] = [CSV, TSV, JSON, XLSX, ODS];
+
+fn is_workbook(id: FormatId) -> bool {
+    id == XLSX || id == ODS
+}
 
 pub fn is_table(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -64,6 +70,13 @@ fn read_options() -> Vec<OptionSpec> {
                 default: "windows-1252".into(),
             },
         ),
+        spec(
+            "sheet",
+            "opt.table.sheet",
+            "Sheet to convert",
+            "Name or number (from 1) of the sheet when a workbook goes to CSV, TSV or JSON; empty means the first visible one",
+            OptionKind::Text { default: String::new() },
+        ),
     ]
 }
 
@@ -103,7 +116,38 @@ fn options_for(id: FormatId) -> OptionSchema {
             },
         ));
     }
-    if id == JSON {
+    if is_workbook(id) {
+        specs.push(spec(
+            "sheet_name",
+            "opt.table.sheet_name",
+            "Sheet name",
+            "Name of the sheet when the input has no sheets of its own",
+            OptionKind::Text {
+                default: "Sheet1".into(),
+            },
+        ));
+        specs.push(spec(
+            "detect_types",
+            "opt.table.detect_types",
+            "Store numbers and booleans as such",
+            "Off keeps every cell as text",
+            OptionKind::Bool { default: true },
+        ));
+        specs.push(spec(
+            "detect_dates",
+            "opt.table.detect_dates",
+            "Store YYYY-MM-DD dates as dates",
+            "Needs the option above",
+            OptionKind::Bool { default: true },
+        ));
+        specs.push(spec(
+            "style_header",
+            "opt.table.style_header",
+            "Bold header row",
+            "Also freezes the header row in XLSX",
+            OptionKind::Bool { default: true },
+        ));
+    } else if id == JSON {
         specs.push(spec(
             "indent",
             "opt.table.indent",
@@ -145,6 +189,20 @@ pub fn register(registry: &mut Registry) {
             "IANA text/tab-separated-values, RFC 4180 quoting",
         ),
         (
+            XLSX,
+            "XLSX",
+            &["xlsx", "xlsm"][..],
+            &["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"][..],
+            "ECMA-376 SpreadsheetML (cells, shared strings, dates)",
+        ),
+        (
+            ODS,
+            "ODS",
+            &["ods"][..],
+            &["application/vnd.oasis.opendocument.spreadsheet"][..],
+            "OASIS ODF 1.3 spreadsheet (cells, repeats, dates)",
+        ),
+        (
             JSON,
             "JSON table",
             &["json"][..],
@@ -176,7 +234,9 @@ pub fn register(registry: &mut Registry) {
             loss: 0,
             ownership: Ownership::Own,
             time: 1,
-            description: if id == JSON {
+            description: if is_workbook(id) {
+                "Read spreadsheet"
+            } else if id == JSON {
                 "Parse JSON table"
             } else {
                 "Parse delimited text"
@@ -189,7 +249,9 @@ pub fn register(registry: &mut Registry) {
             loss: 0,
             ownership: Ownership::Own,
             time: 1,
-            description: if id == JSON {
+            description: if is_workbook(id) {
+                "Write spreadsheet"
+            } else if id == JSON {
                 "Write JSON table"
             } else {
                 "Write delimited text"
@@ -313,6 +375,182 @@ fn write(
     Ok(out)
 }
 
+/// Any table format as a workbook (text formats become a single sheet).
+fn read_book(
+    from: FormatId,
+    data: &[u8],
+    opts: &Options,
+    limits: &Limits,
+    tl: &TableLimits,
+    progress: &dyn Progress,
+    notes: &mut Notes,
+) -> Result<Workbook> {
+    let has_header = opts.bool("has_header") != Some(false);
+    if from == XLSX {
+        return xlsx::read(data, limits, progress, has_header, notes);
+    }
+    if from == ODS {
+        return ods::read(data, limits, progress, has_header, notes);
+    }
+    let table = read(from, data, opts, tl, progress, notes)?;
+    let mut b = Workbook::single(table, opts.text("sheet_name").unwrap_or("Sheet1"));
+    if let Some(s) = b.sheets.first_mut() {
+        if s.name.is_empty() {
+            s.name = "Sheet1".into();
+        }
+    }
+    Ok(b)
+}
+
+fn json_str(s: &str) -> String {
+    let mut o = String::with_capacity(s.len() + 2);
+    o.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            '\n' => o.push_str("\\n"),
+            '\r' => o.push_str("\\r"),
+            '\t' => o.push_str("\\t"),
+            c if (c as u32) < 0x20 => o.push_str(&format!("\\u{:04x}", c as u32)),
+            c => o.push(c),
+        }
+    }
+    o.push('"');
+    o
+}
+
+fn json_row(row: &[String], max_cols: usize) -> String {
+    let cells: Vec<String> = row
+        .iter()
+        .take(max_cols)
+        .map(|c| {
+            if c.chars().count() > 200 {
+                json_str(&format!("{}…", c.chars().take(200).collect::<String>()))
+            } else {
+                json_str(c)
+            }
+        })
+        .collect();
+    format!("[{}]", cells.join(","))
+}
+
+/// The start of a table (one sheet of a workbook) as JSON for the web preview:
+/// `{"format","sheets":[{"name","rows","cols","hidden"}],"sheet","header","rows","total_rows","total_cols","truncated"}`.
+pub fn preview_json(
+    from: FormatId,
+    data: &[u8],
+    sheet: &str,
+    max_rows: usize,
+    max_cols: usize,
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<String> {
+    let mut notes = Notes::new();
+    let tl = TableLimits::from(limits);
+    let book = read_book(
+        from,
+        data,
+        &Options::default(),
+        limits,
+        &tl,
+        progress,
+        &mut notes,
+    )?;
+    let chosen = if let Some(n) = sheet.parse::<usize>().ok().filter(|n| *n >= 1) {
+        book.sheets.get(n - 1)
+    } else if sheet.is_empty() {
+        book.sheets
+            .iter()
+            .find(|s| !s.hidden)
+            .or_else(|| book.sheets.first())
+    } else {
+        book.sheets.iter().find(|s| s.name == sheet)
+    }
+    .ok_or_else(|| Error::invalid_option("sheet", "no such sheet"))?;
+    let t = &chosen.table;
+    let sheets: Vec<String> = book
+        .sheets
+        .iter()
+        .map(|s| {
+            format!(
+                "{{\"name\":{},\"rows\":{},\"cols\":{},\"hidden\":{}}}",
+                json_str(&s.name),
+                s.table.rows.len() + usize::from(s.table.header.is_some()),
+                s.table.width(),
+                s.hidden
+            )
+        })
+        .collect();
+    let rows: Vec<String> = t
+        .rows
+        .iter()
+        .take(max_rows)
+        .map(|r| json_row(r, max_cols))
+        .collect();
+    Ok(format!(
+        "{{\"format\":{},\"sheets\":[{}],\"sheet\":{},\"header\":{},\"rows\":[{}],\"total_rows\":{},\"total_cols\":{},\"truncated\":{}}}",
+        json_str(from.0),
+        sheets.join(","),
+        json_str(&chosen.name),
+        t.header.as_ref().map_or("null".to_string(), |h| json_row(h, max_cols)),
+        rows.join(","),
+        t.rows.len(),
+        t.width(),
+        t.rows.len() > max_rows || t.width() > max_cols
+    ))
+}
+
+/// The sheet a single-table format receives from a workbook.
+fn pick_sheet<'a>(
+    book: &'a Workbook,
+    opts: &Options,
+    notes: &mut Notes,
+) -> Result<&'a oc_sheet::Sheet> {
+    let want = opts.text("sheet").unwrap_or("").trim();
+    let chosen = if want.is_empty() {
+        book.sheets
+            .iter()
+            .find(|s| !s.hidden)
+            .or_else(|| book.sheets.first())
+    } else if let Some(n) = want.parse::<usize>().ok().filter(|n| *n >= 1) {
+        book.sheets.get(n - 1)
+    } else {
+        book.sheets
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case(want))
+    };
+    let sheet = chosen.ok_or_else(|| {
+        let names: Vec<&str> = book.sheets.iter().map(|s| s.name.as_str()).collect();
+        Error::invalid_option(
+            "sheet",
+            format!("no such sheet; the workbook has: {}", names.join(", ")),
+        )
+    })?;
+    if book.sheets.len() > 1 {
+        notes.push(
+            Note::new(
+                Severity::Warning,
+                "other_sheets_dropped",
+                format!(
+                    "only the sheet '{}' was converted; the workbook has {} sheets",
+                    sheet.name,
+                    book.sheets.len()
+                ),
+            )
+            .with_detail(sheet.name.clone()),
+        );
+    }
+    if !sheet.formulas.is_empty() {
+        notes.push(Note::new(
+            Severity::Info,
+            "formulas_values_only",
+            "formulas were written as their calculated values",
+        ));
+    }
+    Ok(sheet)
+}
+
 /// Converts between the table formats.
 pub fn convert(
     from: FormatId,
@@ -324,9 +562,53 @@ pub fn convert(
 ) -> Result<(Vec<u8>, Notes)> {
     let mut notes = Notes::new();
     let tl = TableLimits::from(limits);
-    let table = read(from, data, opts, &tl, progress, &mut notes)?;
+    let book = read_book(from, data, opts, limits, &tl, progress, &mut notes)?;
     progress.check_cancelled()?;
-    let out = write(to, &table, opts, &tl, progress, &mut notes)?;
+    let table_ref;
+    let out = if is_workbook(to) {
+        let mut book = book;
+        if !is_workbook(from) {
+            // A single sheet made from text: it takes the name the user chose.
+            if let (Some(s), Some(n)) = (book.sheets.first_mut(), opts.text("sheet_name")) {
+                if !n.trim().is_empty() {
+                    s.name = n.to_string();
+                }
+            }
+        }
+        for s in &book.sheets {
+            s.table.check_padded_size(&tl)?;
+        }
+        let wo = xlsx::WriteOptions {
+            detect_types: opts.bool("detect_types") != Some(false),
+            detect_dates: opts.bool("detect_dates") != Some(false),
+            style_header: opts.bool("style_header") != Some(false),
+        };
+        table_ref = book
+            .sheets
+            .first()
+            .map(|s| s.table.clone())
+            .unwrap_or_default();
+        if to == XLSX {
+            xlsx::write(&book, &wo, limits, progress, &mut notes)?
+        } else {
+            ods::write(
+                &book,
+                &ods::WriteOptions {
+                    detect_types: wo.detect_types,
+                    detect_dates: wo.detect_dates,
+                    style_header: wo.style_header,
+                },
+                limits,
+                progress,
+                &mut notes,
+            )?
+        }
+    } else {
+        let sheet = pick_sheet(&book, opts, &mut notes)?;
+        table_ref = sheet.table.clone();
+        write(to, &sheet.table, opts, &tl, progress, &mut notes)?
+    };
+    let table = table_ref;
     if table.coerced_scalars {
         notes.push(Note::new(
             Severity::Warning,

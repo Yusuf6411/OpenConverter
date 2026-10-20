@@ -558,6 +558,18 @@ fn worker_inspect(engine: &Engine, args: &[String]) -> ExitCode {
             }
             Err(e) => fail(&e),
         },
+        "table" => {
+            // __worker table <path> <format> [sheet] [rows]
+            let sheet = args.get(3).map_or("", String::as_str);
+            let rows = args.get(4).and_then(|r| r.parse().ok()).unwrap_or(100);
+            match engine.table_preview(from, &data, sheet, rows, &NoProgress) {
+                Ok(json) => {
+                    println!("{json}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(&e),
+            }
+        }
         "thumb" => {
             let Some(out) = args.get(3) else {
                 return usage();
@@ -624,7 +636,12 @@ pub fn run(args: Vec<String>) -> ExitCode {
         Some("__worker") if args.get(1).map(String::as_str) == Some("create") => {
             create(&engine, args.get(2..).unwrap_or(&[]), true)
         }
-        Some("__worker") if matches!(args.get(1).map(String::as_str), Some("probe" | "thumb")) => {
+        Some("__worker")
+            if matches!(
+                args.get(1).map(String::as_str),
+                Some("probe" | "thumb" | "table")
+            ) =>
+        {
             worker_inspect(&engine, args.get(1..).unwrap_or(&[]))
         }
         Some("__selftest") => selftest(args.get(1).map_or("", String::as_str)),

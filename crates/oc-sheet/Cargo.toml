@@ -9,6 +9,9 @@ publish = false
 
 [dependencies]
 oc-core = { path = "../oc-core" }
+oc-xml = { path = "../oc-xml" }
+oc-text = { path = "../oc-text" }
+oc-archive = { path = "../oc-archive" }
 
 [lints]
 workspace = true

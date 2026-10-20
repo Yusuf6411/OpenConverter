@@ -1536,3 +1536,52 @@ pub async fn create_archive(
     });
     Ok((StatusCode::CREATED, Json(json!({"job_id": job_id}))))
 }
+
+#[derive(serde::Deserialize)]
+pub struct TableQuery {
+    sheet: Option<String>,
+    rows: Option<usize>,
+}
+
+/// `GET /api/files/{id}/table?sheet=&rows=`: the first rows of a table or workbook, as JSON.
+pub async fn table_preview(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    Query(q): Query<TableQuery>,
+) -> R<Response> {
+    if !valid_id(&id) {
+        return Err(ApiErr::not_found());
+    }
+    let (path, format) = {
+        let files = lock(&app.files);
+        let f = files.get(&id).ok_or_else(ApiErr::not_found)?;
+        (f.path.clone(), f.format)
+    };
+    let args = vec![
+        "__worker".to_string(),
+        "table".to_string(),
+        path.display().to_string(),
+        format.to_string(),
+        q.sheet.unwrap_or_default(),
+        q.rows.unwrap_or(100).clamp(1, 1000).to_string(),
+    ];
+    let app2 = app.clone();
+    let permit = app.sem.acquire().await;
+    let res = tokio::task::spawn_blocking(move || {
+        let mut iso = app2.isolation();
+        iso.timeout = Duration::from_secs(60);
+        run_worker(&iso, &args, &CancelToken::new())
+    })
+    .await;
+    drop(permit);
+    let out = res
+        .map_err(|_| {
+            ApiErr::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "The preview stopped unexpectedly.",
+            )
+        })?
+        .map_err(engine_err)?;
+    Ok(([(header::CONTENT_TYPE, "application/json")], out).into_response())
+}

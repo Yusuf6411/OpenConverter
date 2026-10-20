@@ -504,6 +504,25 @@ impl Engine {
         })
     }
 
+    /// The first rows of a table or of one sheet of a workbook, as JSON (see
+    /// [`table::preview_json`]). Parses the whole file, so run it in a worker for untrusted input.
+    pub fn table_preview(
+        &self,
+        from: FormatId,
+        data: &[u8],
+        sheet: &str,
+        max_rows: usize,
+        progress: &dyn Progress,
+    ) -> Result<String> {
+        if !table::is_table(from) {
+            return Err(Error::new(
+                ErrorCode::UnsupportedFormat,
+                "not a table format",
+            ));
+        }
+        table::preview_json(from, data, sheet, max_rows, 60, &self.limits, progress)
+    }
+
     /// A PNG preview of at most `max` pixels on a side.
     pub fn thumbnail(
         &self,

@@ -48,6 +48,7 @@ export const api = {
   createJob: (fileId, target, options) => request("POST", "/api/jobs", { file_id: fileId, target_format: target, options }),
   archiveEntries: (fileId, password) => request("POST", "/api/files/" + fileId + "/entries", password ? { password } : {}),
   archiveExtract: (fileId, paths, password) => request("POST", "/api/files/" + fileId + "/extract", { paths, ...(password ? { password } : {}) }),
+  tablePreview: (fileId, sheet, rows) => request("GET", "/api/files/" + fileId + "/table?rows=" + rows + (sheet ? "&sheet=" + encodeURIComponent(sheet) : "")),
   createArchive: (body) => request("POST", "/api/archives", body),
   job: (id) => request("GET", "/api/jobs/" + id),
   jobs: () => request("GET", "/api/jobs"),
