@@ -123,6 +123,11 @@ fn caps(id: FormatId) -> Caps {
             ints: &[8, 16, 24, 32],
             float: true,
         },
+        // A lossy codec takes whatever the processing chain produced.
+        i if i == OGG => Caps {
+            ints: &[16, 24, 32],
+            float: true,
+        },
         _ => Caps {
             ints: &[8, 12, 16, 20, 24, 32],
             float: false,
@@ -253,8 +258,20 @@ pub fn register(registry: &mut Registry) {
             "Ogg Vorbis",
             &["ogg", "oga"],
             &["audio/ogg", "audio/vorbis"],
-            vec![Sniffer { offset: 0, magic: b"OggS", confidence: 60 }],
-            schema(vec![depth_option(vec!["keep"])]),
+            vec![Sniffer {
+                offset: 0,
+                magic: b"OggS",
+                confidence: 60,
+            }],
+            schema(vec![float(
+                "quality",
+                "Quality",
+                "-1 is smallest, 10 is best; 4 is about 128 kbit/s for stereo music",
+                "opt.vorbis.quality",
+                -1.0,
+                10.0,
+                4.0,
+            )]),
             "Vorbis I, RFC 3533 Ogg",
         ),
     ];
@@ -286,9 +303,6 @@ pub fn register(registry: &mut Registry) {
             time: 2,
             description: "Decode audio",
         });
-        if id == OGG {
-            continue; // read-only until the encoder lands
-        }
         registry.add_edge(Edge {
             from: AUDIO_IR,
             to: id,
@@ -429,7 +443,7 @@ fn fit_depth(
     };
     let target: Option<u8> = match want {
         "keep" => {
-            if src_float && cap.float {
+            if (src_float || fmt == OGG) && cap.float {
                 None
             } else if src_float {
                 Some(
@@ -517,6 +531,13 @@ pub fn encode(
         }
         f if f == AIFF => aiff::write(&a, opts.bool("little_endian") == Some(true), &mut notes)?,
         f if f == CAF => caf::write(&a, &mut notes)?,
+        f if f == OGG => {
+            let o = vorbis::Options {
+                quality: opts.float("quality").unwrap_or(4.0) as f32,
+                ..vorbis::Options::default()
+            };
+            vorbis::write(&a, &o, &mut notes)?
+        }
         f if f == FLAC => {
             let o = flac::Options {
                 level: opts.int("level").unwrap_or(5) as u8,

@@ -20,7 +20,11 @@ pub(crate) struct Br<'a> {
 
 impl<'a> Br<'a> {
     pub fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0, over: false }
+        Self {
+            data,
+            pos: 0,
+            over: false,
+        }
     }
     pub fn read(&mut self, n: u32) -> u32 {
         if n == 0 {
@@ -73,6 +77,7 @@ fn float32_unpack(x: u32) -> f32 {
     (m * 2f64.powi(exp - 788)) as f32
 }
 
+#[allow(dead_code)] // `entries` documents the book; the tree makes it redundant
 pub(crate) struct Codebook {
     pub dims: usize,
     pub entries: usize,
@@ -81,7 +86,7 @@ pub(crate) struct Codebook {
     pub vq: Vec<f32>,    // entries * dims, empty without lookup
 }
 
-fn assign_codewords(lens: &[u8]) -> Result<Vec<u32>> {
+pub(crate) fn assign_codewords(lens: &[u8]) -> Result<Vec<u32>> {
     let mut marker = [0u32; 33];
     let mut words = vec![0u32; lens.len()];
     let mut count = 0usize;
@@ -256,14 +261,21 @@ impl Codebook {
                 return Err(Error::truncated("Vorbis setup header ends early"));
             }
             if entries.saturating_mul(dims) > 1 << 24 {
-                return Err(Error::new(ErrorCode::LimitExceeded, "Vorbis codebook is too large"));
+                return Err(Error::new(
+                    ErrorCode::LimitExceeded,
+                    "Vorbis codebook is too large",
+                ));
             }
             vq = vec![0.0f32; entries * dims];
             for e in 0..entries {
                 let mut last = 0.0f32;
                 let mut div = 1usize;
                 for d in 0..dims {
-                    let idx = if lookup == 1 { (e / div) % values } else { e * dims + d };
+                    let idx = if lookup == 1 {
+                        (e / div) % values
+                    } else {
+                        e * dims + d
+                    };
                     let v = mult.get(idx).copied().unwrap_or(0.0) * delta + min + last;
                     vq[e * dims + d] = v;
                     if sequence {
@@ -277,7 +289,13 @@ impl Codebook {
         } else if lookup != 0 {
             return Err(corrupt("reserved codebook lookup type"));
         }
-        Ok(Self { dims, entries, tree, lut, vq })
+        Ok(Self {
+            dims,
+            entries,
+            tree,
+            lut,
+            vq,
+        })
     }
 
     /// Next entry number, or `None` at the end of the packet or on an unassigned code.
@@ -318,17 +336,124 @@ impl Codebook {
     }
 }
 
-struct Floor1 {
-    partition_class: Vec<usize>,
-    class_dims: Vec<usize>,
-    class_subs: Vec<u32>,
-    class_master: Vec<usize>,
-    class_books: Vec<Vec<i32>>,
-    multiplier: u32,
-    xlist: Vec<u32>,
-    sorted: Vec<usize>,     // indices of xlist in ascending x
-    low: Vec<usize>,        // per point i>=2: index of the greatest smaller x among earlier points
-    high: Vec<usize>,
+pub(crate) struct Floor1 {
+    pub(crate) partition_class: Vec<usize>,
+    pub(crate) class_dims: Vec<usize>,
+    pub(crate) class_subs: Vec<u32>,
+    pub(crate) class_master: Vec<usize>,
+    pub(crate) class_books: Vec<Vec<i32>>,
+    pub(crate) multiplier: u32,
+    pub(crate) xlist: Vec<u32>,
+    pub(crate) sorted: Vec<usize>, // indices of xlist in ascending x
+    pub(crate) low: Vec<usize>, // per point i>=2: index of the greatest smaller x among earlier points
+    pub(crate) high: Vec<usize>,
+}
+
+impl Floor1 {
+    pub(crate) fn new(
+        partition_class: Vec<usize>,
+        class_dims: Vec<usize>,
+        class_subs: Vec<u32>,
+        class_master: Vec<usize>,
+        class_books: Vec<Vec<i32>>,
+        multiplier: u32,
+        xlist: Vec<u32>,
+    ) -> Result<Self> {
+        let mut sorted: Vec<usize> = (0..xlist.len()).collect();
+        sorted.sort_by_key(|&i| xlist[i]);
+        if sorted.windows(2).any(|w| xlist[w[0]] == xlist[w[1]]) {
+            return Err(corrupt("duplicate floor 1 point"));
+        }
+        let mut low = vec![0; xlist.len()];
+        let mut high = vec![1; xlist.len()];
+        for i in 2..xlist.len() {
+            let mut lo = 0usize;
+            let mut hi = 1usize;
+            for j in 0..i {
+                if xlist[j] < xlist[i] && xlist[j] >= xlist[lo] {
+                    lo = j;
+                }
+                if xlist[j] > xlist[i] && xlist[j] <= xlist[hi] {
+                    hi = j;
+                }
+            }
+            low[i] = lo;
+            high[i] = hi;
+        }
+        Ok(Self {
+            partition_class,
+            class_dims,
+            class_subs,
+            class_master,
+            class_books,
+            multiplier,
+            xlist,
+            sorted,
+            low,
+            high,
+        })
+    }
+
+    pub(crate) fn range(&self) -> i32 {
+        [256, 128, 64, 64][self.multiplier as usize - 1]
+    }
+
+    /// Turn the coded values into the curve's (x, table index) pairs, ascending in x.
+    pub(crate) fn points(&self, y: &[i32]) -> Vec<i32> {
+        let range = self.range();
+        let n = self.xlist.len();
+        let mut fy = vec![0i32; n];
+        let mut used = vec![false; n];
+        fy[0] = y[0];
+        fy[1] = y[1];
+        used[0] = true;
+        used[1] = true;
+        for i in 2..n {
+            let (lo, hi) = (self.low[i], self.high[i]);
+            let predicted = render_point(
+                self.xlist[lo] as i32,
+                fy[lo],
+                self.xlist[hi] as i32,
+                fy[hi],
+                self.xlist[i] as i32,
+            );
+            let val = y[i];
+            let highroom = range - predicted;
+            let lowroom = predicted;
+            let room = if highroom < lowroom {
+                highroom * 2
+            } else {
+                lowroom * 2
+            };
+            if val != 0 {
+                used[lo] = true;
+                used[hi] = true;
+                used[i] = true;
+                fy[i] = if val >= room {
+                    if highroom > lowroom {
+                        val - lowroom + predicted
+                    } else {
+                        predicted - val + highroom - 1
+                    }
+                } else if val & 1 == 1 {
+                    predicted - ((val + 1) >> 1)
+                } else {
+                    predicted + (val >> 1)
+                };
+            } else {
+                fy[i] = predicted;
+            }
+        }
+        let mult = self.multiplier as i32;
+        let mut pts = Vec::new();
+        for &i in &self.sorted {
+            if used[i] {
+                pts.push(self.xlist[i] as i32);
+                pts.push((fy[i] * mult).clamp(0, 255));
+            }
+        }
+        pts
+    }
 }
 
 struct Residue {
@@ -354,6 +479,7 @@ struct Mode {
     mapping: usize,
 }
 
+#[allow(dead_code)] // kept for callers that report stream facts
 pub struct Decoder {
     pub channels: usize,
     pub sample_rate: u32,
@@ -384,7 +510,10 @@ pub fn parse_identification(p: &[u8]) -> Result<Identification> {
     }
     let mut br = Br::new(&p[7..]);
     if br.read(32) != 0 {
-        return Err(Error::new(ErrorCode::UnsupportedVariant, "unknown Vorbis version"));
+        return Err(Error::new(
+            ErrorCode::UnsupportedVariant,
+            "unknown Vorbis version",
+        ));
     }
     let channels = br.read(8) as usize;
     let sample_rate = br.read(32);
@@ -393,10 +522,21 @@ pub fn parse_identification(p: &[u8]) -> Result<Identification> {
     let _min = br.read(32);
     let b0 = br.read(4);
     let b1 = br.read(4);
-    if !br.bit() || channels == 0 || sample_rate == 0 || !(6..=13).contains(&b0) || !(6..=13).contains(&b1) || b0 > b1 {
+    if !br.bit()
+        || channels == 0
+        || sample_rate == 0
+        || !(6..=13).contains(&b0)
+        || !(6..=13).contains(&b1)
+        || b0 > b1
+    {
         return Err(corrupt("impossible identification header"));
     }
-    Ok(Identification { channels, sample_rate, bitrate_nominal: nominal, bs: [1 << b0, 1 << b1] })
+    Ok(Identification {
+        channels,
+        sample_rate,
+        bitrate_nominal: nominal,
+        bs: [1 << b0, 1 << b1],
+    })
 }
 
 fn slope(len: usize) -> Vec<f32> {
@@ -430,7 +570,10 @@ impl Decoder {
         for _ in 0..nfloors {
             let kind = br.read(16);
             if kind != 1 {
-                return Err(Error::new(ErrorCode::UnsupportedVariant, "Vorbis floor type 0 is not supported"));
+                return Err(Error::new(
+                    ErrorCode::UnsupportedVariant,
+                    "Vorbis floor type 0 is not supported",
+                ));
             }
             let nparts = br.read(5) as usize;
             let partition_class: Vec<usize> = (0..nparts).map(|_| br.read(4) as usize).collect();
@@ -467,28 +610,16 @@ impl Decoder {
             if xlist.len() > 65 || br.over {
                 return Err(corrupt("bad floor 1 point list"));
             }
-            let mut sorted: Vec<usize> = (0..xlist.len()).collect();
-            sorted.sort_by_key(|&i| xlist[i]);
-            if sorted.windows(2).any(|w| xlist[w[0]] == xlist[w[1]]) {
-                return Err(corrupt("duplicate floor 1 point"));
-            }
-            let mut low = vec![0; xlist.len()];
-            let mut high = vec![1; xlist.len()];
-            for i in 2..xlist.len() {
-                let mut lo = 0usize;
-                let mut hi = 1usize;
-                for j in 0..i {
-                    if xlist[j] < xlist[i] && xlist[j] >= xlist[lo] {
-                        lo = j;
-                    }
-                    if xlist[j] > xlist[i] && xlist[j] <= xlist[hi] {
-                        hi = j;
-                    }
-                }
-                low[i] = lo;
-                high[i] = hi;
-            }
-            floors.push(Floor1 { partition_class, class_dims, class_subs, class_master, class_books, multiplier, xlist, sorted, low, high });
+            let floor = Floor1::new(
+                partition_class,
+                class_dims,
+                class_subs,
+                class_master,
+                class_books,
+                multiplier,
+                xlist,
+            )?;
+            floors.push(floor);
         }
         let nres = br.read(6) as usize + 1;
         let mut residues = Vec::with_capacity(nres);
@@ -525,7 +656,15 @@ impl Decoder {
                 }
                 rb.push(a);
             }
-            residues.push(Residue { kind, begin, end, part_size, classes, classbook, books: rb });
+            residues.push(Residue {
+                kind,
+                begin,
+                end,
+                part_size,
+                classes,
+                classbook,
+                books: rb,
+            });
         }
         let nmaps = br.read(6) as usize + 1;
         let mut mappings = Vec::with_capacity(nmaps);
@@ -571,7 +710,13 @@ impl Decoder {
                 fl.push(f);
                 rs.push(r);
             }
-            mappings.push(Mapping { submaps, mux, floors: fl, residues: rs, coupling });
+            mappings.push(Mapping {
+                submaps,
+                mux,
+                floors: fl,
+                residues: rs,
+                coupling,
+            });
         }
         let nmodes = br.read(6) as usize + 1;
         let mut modes = Vec::with_capacity(nmodes);
@@ -612,7 +757,7 @@ impl Decoder {
         if !br.bit() {
             return None;
         }
-        let range: i32 = [256, 128, 64, 64][f.multiplier as usize - 1];
+        let range = f.range();
         let bits = ilog(range as u32 - 1);
         let n = f.xlist.len();
         let mut y = vec![0i32; n];
@@ -630,64 +775,42 @@ impl Decoder {
             for j in 0..cdim {
                 let book = f.class_books[c][(cval & csub) as usize];
                 cval >>= cbits;
-                y[offset + j] = if book >= 0 { self.books[book as usize].decode(br)? as i32 } else { 0 };
+                y[offset + j] = if book >= 0 {
+                    self.books[book as usize].decode(br)? as i32
+                } else {
+                    0
+                };
             }
             offset += cdim;
         }
         if br.over {
             return None;
         }
-        // Reconstruct the curve points.
-        let mut fy = vec![0i32; n];
-        let mut used = vec![false; n];
-        fy[0] = y[0];
-        fy[1] = y[1];
-        used[0] = true;
-        used[1] = true;
-        for i in 2..n {
-            let (lo, hi) = (f.low[i], f.high[i]);
-            let predicted = render_point(f.xlist[lo] as i32, fy[lo], f.xlist[hi] as i32, fy[hi], f.xlist[i] as i32);
-            let val = y[i];
-            let highroom = range - predicted;
-            let lowroom = predicted;
-            let room = if highroom < lowroom { highroom * 2 } else { lowroom * 2 };
-            if val != 0 {
-                used[lo] = true;
-                used[hi] = true;
-                used[i] = true;
-                fy[i] = if val >= room {
-                    if highroom > lowroom {
-                        val - lowroom + predicted
-                    } else {
-                        predicted - val + highroom - 1
-                    }
-                } else if val & 1 == 1 {
-                    predicted - ((val + 1) >> 1)
-                } else {
-                    predicted + (val >> 1)
-                };
-            } else {
-                fy[i] = predicted;
-            }
-        }
-        // Step 2: draw lines between the points that carry data.
-        let mult = f.multiplier as i32;
-        let mut pts = Vec::new();
-        for &i in &f.sorted {
-            if used[i] {
-                pts.push((f.xlist[i] as i32, (fy[i] * mult).clamp(0, 255)));
-            }
-        }
-        Some(pts.into_iter().flat_map(|(x, y)| [x, y]).collect())
+        Some(f.points(&y))
     }
 
-    fn residue_decode(&self, r: &Residue, br: &mut Br, nbuf: usize, skip: &[bool], bufs: &mut [Vec<f32>]) {
+    fn residue_decode(
+        &self,
+        r: &Residue,
+        br: &mut Br,
+        nbuf: usize,
+        skip: &[bool],
+        bufs: &mut [Vec<f32>],
+    ) {
         let ch = bufs.len();
-        let (vectors, size) = if r.kind == 2 { (1, nbuf * ch) } else { (ch, nbuf) };
+        let (vectors, size) = if r.kind == 2 {
+            (1, nbuf * ch)
+        } else {
+            (ch, nbuf)
+        };
         if r.kind == 2 && skip.iter().all(|&s| s) {
             return;
         }
-        let mut inter: Vec<f32> = if r.kind == 2 { vec![0.0; size] } else { Vec::new() };
+        let mut inter: Vec<f32> = if r.kind == 2 {
+            vec![0.0; size]
+        } else {
+            Vec::new()
+        };
         let begin = r.begin.min(size);
         let end = r.end.min(size);
         if end <= begin {
@@ -708,7 +831,9 @@ impl Decoder {
                         if r.kind != 2 && skip[v] {
                             continue;
                         }
-                        let Some(mut temp) = book.decode(br) else { return };
+                        let Some(mut temp) = book.decode(br) else {
+                            return;
+                        };
                         for i in (0..cw).rev() {
                             classes[v][p + i] = temp % r.classes;
                             temp /= r.classes;
@@ -729,7 +854,11 @@ impl Decoder {
                                 continue;
                             }
                             let offset = begin + p * r.part_size;
-                            let target: &mut [f32] = if r.kind == 2 { &mut inter } else { &mut bufs[v] };
+                            let target: &mut [f32] = if r.kind == 2 {
+                                &mut inter
+                            } else {
+                                &mut bufs[v]
+                            };
                             if r.kind == 0 {
                                 let step = r.part_size / cb.dims;
                                 for s in 0..step {
@@ -782,7 +911,11 @@ impl Decoder {
             return Err(corrupt("bad mode number"));
         };
         let long = mode.blockflag;
-        let (prev_long, next_long) = if long { (br.bit(), br.bit()) } else { (false, false) };
+        let (prev_long, next_long) = if long {
+            (br.bit(), br.bit())
+        } else {
+            (false, false)
+        };
         if br.over {
             return Ok(()); // an empty packet decodes to nothing but still counts as a block
         }
@@ -794,9 +927,19 @@ impl Decoder {
         let mut curves: Vec<Option<Vec<f32>>> = Vec::with_capacity(ch);
         for c in 0..ch {
             let f = &self.floors[map.floors[map.mux[c]]];
-            curves.push(self.floor1_decode(f, &mut br).map(|pts| render_floor(&pts, half)));
+            curves.push(
+                self.floor1_decode(f, &mut br)
+                    .map(|pts| render_floor(&pts, half)),
+            );
         }
-        let skip: Vec<bool> = curves.iter().map(Option::is_none).collect();
+        let mut skip: Vec<bool> = curves.iter().map(Option::is_none).collect();
+        // A coupled pair is decoded whenever either of its channels carries data.
+        for &(m, a) in &map.coupling {
+            if !skip[m] || !skip[a] {
+                skip[m] = false;
+                skip[a] = false;
+            }
+        }
         // Residues, per submap.
         let mut res = vec![vec![0.0f32; half]; ch];
         for s in 0..map.submaps {
@@ -817,7 +960,11 @@ impl Decoder {
             for i in 0..half {
                 let (mag, ang) = (res[m][i], res[a][i]);
                 let (nm, na) = if mag > 0.0 {
-                    if ang > 0.0 { (mag, mag - ang) } else { (mag + ang, mag) }
+                    if ang > 0.0 {
+                        (mag, mag - ang)
+                    } else {
+                        (mag + ang, mag)
+                    }
                 } else if ang > 0.0 {
                     (mag, mag + ang)
                 } else {
@@ -828,18 +975,44 @@ impl Decoder {
             }
         }
         // Window shape.
-        let ln = if long && !prev_long { self.bs[0] / 2 } else { half };
-        let rn = if long && !next_long { self.bs[0] / 2 } else { half };
-        let slope_for = |len: usize| if len == self.bs[0] / 2 { &self.slopes[0] } else { &self.slopes[1] };
+        let ln = if long && !prev_long {
+            self.bs[0] / 2
+        } else {
+            half
+        };
+        let rn = if long && !next_long {
+            self.bs[0] / 2
+        } else {
+            half
+        };
+        let slope_for = |len: usize| {
+            if len == self.bs[0] / 2 {
+                &self.slopes[0]
+            } else {
+                &self.slopes[1]
+            }
+        };
         let (left_slope, right_slope) = (slope_for(ln), slope_for(rn));
         let mut window = vec![0.0f32; n];
         let ls = n / 4 - ln / 2;
         for (i, w) in window.iter_mut().enumerate().take(half) {
-            *w = if i < ls { 0.0 } else if i < ls + ln { left_slope[i - ls] } else { 1.0 };
+            *w = if i < ls {
+                0.0
+            } else if i < ls + ln {
+                left_slope[i - ls]
+            } else {
+                1.0
+            };
         }
         let rs = 3 * n / 4 - rn / 2;
         for i in half..n {
-            window[i] = if i < rs { 1.0 } else if i < rs + rn { right_slope[rn - 1 - (i - rs)] } else { 0.0 };
+            window[i] = if i < rs {
+                1.0
+            } else if i < rs + rn {
+                right_slope[rn - 1 - (i - rs)]
+            } else {
+                0.0
+            };
         }
         // Inverse transform each channel with floor times residue.
         let imdct = &self.imdct[usize::from(long)];
@@ -866,7 +1039,11 @@ impl Decoder {
                     let p = self.prev[c].get(k).copied().unwrap_or(0.0);
                     // index into the current window's left half
                     let ci = (k + n / 4) as isize - (self.prev_n / 4) as isize;
-                    let q = if ci >= 0 && (ci as usize) < n { cur[c][ci as usize] } else { 0.0 };
+                    let q = if ci >= 0 && (ci as usize) < n {
+                        cur[c][ci as usize]
+                    } else {
+                        0.0
+                    };
                     out.push(p + q);
                 }
             }
@@ -880,17 +1057,21 @@ impl Decoder {
     }
 }
 
-fn render_point(x0: i32, y0: i32, x1: i32, y1: i32, x: i32) -> i32 {
+pub(crate) fn render_point(x0: i32, y0: i32, x1: i32, y1: i32, x: i32) -> i32 {
     let dy = y1 - y0;
     let adx = x1 - x0;
     let ady = dy.abs();
     let err = ady * (x - x0);
     let off = err / adx;
-    if dy < 0 { y0 - off } else { y0 + off }
+    if dy < 0 {
+        y0 - off
+    } else {
+        y0 + off
+    }
 }
 
 /// Points are flattened (x, y) pairs in ascending x. Fills `half` values.
-fn render_floor(pts: &[i32], half: usize) -> Vec<f32> {
+pub(crate) fn render_floor(pts: &[i32], half: usize) -> Vec<f32> {
     let mut floor = vec![0i32; half];
     let n = pts.len() / 2;
     let (mut lx, mut ly) = (pts[0], pts[1]);
@@ -947,7 +1128,9 @@ pub(crate) fn inverse_db(i: usize) -> f32 {
     static TABLE: std::sync::OnceLock<Vec<f32>> = std::sync::OnceLock::new();
     let t = TABLE.get_or_init(|| {
         let first = 1.064_986_3e-7_f64;
-        (0..256).map(|i| first.powf((255 - i) as f64 / 255.0) as f32).collect()
+        (0..256)
+            .map(|i| first.powf((255 - i) as f64 / 255.0) as f32)
+            .collect()
     });
     t[i.min(255)]
 }

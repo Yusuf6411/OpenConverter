@@ -18,7 +18,15 @@ struct Fft {
 impl Fft {
     fn new(n: usize) -> Self {
         let bits = n.trailing_zeros();
-        let rev = (0..n as u32).map(|i| if bits == 0 { 0 } else { i.reverse_bits() >> (32 - bits) }).collect();
+        let rev = (0..n as u32)
+            .map(|i| {
+                if bits == 0 {
+                    0
+                } else {
+                    i.reverse_bits() >> (32 - bits)
+                }
+            })
+            .collect();
         let tw = (0..n / 2)
             .map(|k| {
                 let a = -2.0 * PI * k as f64 / n as f64;
@@ -73,7 +81,12 @@ impl Imdct {
                 (a.cos() as f32, a.sin() as f32)
             })
             .collect();
-        Self { n, twiddle, post, fft: Fft::new(m / 2) }
+        Self {
+            n,
+            twiddle,
+            post,
+            fft: Fft::new(m / 2),
+        }
     }
 
     /// DCT-IV: t[n] = sum_k x[k] cos(pi/M (n + 1/2)(k + 1/2)).
@@ -99,15 +112,35 @@ impl Imdct {
         }
     }
 
+    /// Forward MDCT of N windowed samples to N/2 coefficients, scaled so that this inverse
+    /// followed by a power-complementary window and overlap-add restores the input.
+    pub fn forward(&self, x: &[f32], out: &mut [f32]) {
+        let m = self.n / 2;
+        let h = m / 2;
+        let mut u = vec![0.0f32; m];
+        for i in 0..h {
+            u[h + i] += x[i];
+        }
+        for i in h..3 * h {
+            u[3 * h - 1 - i] -= x[i];
+        }
+        for i in 3 * h..4 * h {
+            u[i - 3 * h] -= x[i];
+        }
+        self.dct4(&u, out);
+        let scale = 2.0 / m as f32;
+        for v in out.iter_mut() {
+            *v *= scale;
+        }
+    }
+
     /// N/2 coefficients to N samples, with the Vorbis phase, without any scaling.
     pub fn inverse(&self, x: &[f32], out: &mut [f32]) {
         let m = self.n / 2;
         let mut t = vec![0.0f32; m];
         self.dct4(x, &mut t);
         let h = m / 2;
-        for i in 0..h {
-            out[i] = t[h + i];
-        }
+        out[..h].copy_from_slice(&t[h..2 * h]);
         for i in h..3 * h {
             out[i] = -t[3 * h - 1 - i];
         }
@@ -125,16 +158,24 @@ mod tests {
     fn matches_the_direct_formula() {
         for n in [16usize, 64, 256, 2048] {
             let m = n / 2;
-            let x: Vec<f32> = (0..m).map(|i| ((i * 37 + 11) % 101) as f32 / 50.0 - 1.0).collect();
+            let x: Vec<f32> = (0..m)
+                .map(|i| ((i * 37 + 11) % 101) as f32 / 50.0 - 1.0)
+                .collect();
             let mut y = vec![0.0f32; n];
             Imdct::new(n).inverse(&x, &mut y);
             for (i, &got) in y.iter().enumerate() {
                 let mut acc = 0.0f64;
                 for (k, &xk) in x.iter().enumerate() {
                     acc += f64::from(xk)
-                        * (2.0 * PI / n as f64 * (i as f64 + 0.5 + n as f64 / 4.0) * (k as f64 + 0.5)).cos();
+                        * (2.0 * PI / n as f64
+                            * (i as f64 + 0.5 + n as f64 / 4.0)
+                            * (k as f64 + 0.5))
+                            .cos();
                 }
-                assert!((acc - f64::from(got)).abs() < 1e-3 * (1.0 + acc.abs()), "n {n} i {i}: {acc} vs {got}");
+                assert!(
+                    (acc - f64::from(got)).abs() < 1e-3 * (1.0 + acc.abs()),
+                    "n {n} i {i}: {acc} vs {got}"
+                );
             }
         }
     }

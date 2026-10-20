@@ -153,6 +153,16 @@ sa, sb = os.path.getsize(f_ff), os.path.getsize(f_oc)
 print(f"info flac size: ffmpeg level 8 = {sa}, ours = {sb} ({100.0 * sb / sa:.1f}%)")
 check("flac size within 3% of ffmpeg's", sb <= sa * 1.03, f"{sa} vs {sb}")
 
+# ---- 2b. our Vorbis encoder: ffmpeg (libvorbis) must decode it, with the right length and tags
+for q in (0, 4, 8):
+    dst = os.path.join(tmp, f"q{q}.ogg")
+    oc(base, dst, f"quality={q}")
+    r = sh("ffmpeg", "-v", "error", "-i", dst, "-f", "null", "-", check=False)
+    check(f"vorbis quality {q} decodes in ffmpeg without errors", r.returncode == 0 and not r.stderr.strip(), r.stderr[:200])
+    r = sh("ffprobe", "-v", "error", "-show_entries", "stream=codec_name,channels,sample_rate", "-of", "csv=p=0", dst)
+    ref = sh("ffprobe", "-v", "error", "-show_entries", "stream=channels,sample_rate", "-of", "csv=p=0", base).stdout.strip()
+    check(f"vorbis quality {q} keeps channels and rate", r.stdout.strip() == "vorbis," + ref, r.stdout)
+
 # ---- 3. processing
 try:
     dst = os.path.join(tmp, "rs.wav")
