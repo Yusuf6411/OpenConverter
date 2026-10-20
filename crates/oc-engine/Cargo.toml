@@ -11,6 +11,7 @@ publish = false
 oc-core = { path = "../oc-core" }
 oc-text = { path = "../oc-text" }
 oc-image = { path = "../oc-image" }
+oc-audio = { path = "../oc-audio" }
 oc-sheet = { path = "../oc-sheet" }
 oc-archive = { path = "../oc-archive" }
 

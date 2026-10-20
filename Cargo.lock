@@ -2152,6 +2152,12 @@ dependencies = [
 [[package]]
 name = "oc-audio"
 version = "2.1.0"
+dependencies = [
+ "oc-checksum",
+ "oc-core",
+ "oc-io",
+ "oc-text",
+]
 
 [[package]]
 name = "oc-checksum"
@@ -2204,6 +2210,7 @@ name = "oc-engine"
 version = "2.1.0"
 dependencies = [
  "oc-archive",
+ "oc-audio",
  "oc-core",
  "oc-image",
  "oc-sheet",

@@ -2,6 +2,9 @@
 //! Scalar reference implementations; SIMD paths will live in `oc-simd`.
 #![forbid(unsafe_code)]
 
+pub mod md5;
+pub use md5::{md5, Md5};
+
 #[allow(clippy::indexing_slicing)] // i < 256 by loop bound, compile-time only
 const fn crc32_table(poly: u32) -> [u32; 256] {
     let mut t = [0u32; 256];

@@ -6,6 +6,7 @@
 #![deny(unsafe_code)]
 
 pub mod archive;
+pub mod audio;
 pub mod image;
 pub mod isolated;
 pub mod table;
@@ -132,9 +133,11 @@ impl Engine {
             description: "Decode text -> convert line endings -> encode text",
         });
         image::register(&mut registry);
+        audio::register(&mut registry);
         table::register(&mut registry);
         let packable: Vec<FormatId> = std::iter::once(TXT)
             .chain(image::FORMATS)
+            .chain(audio::FORMATS)
             .chain(table::FORMATS)
             .collect();
         archive::register(&mut registry, &packable);
@@ -194,6 +197,7 @@ impl Engine {
     fn registry_formats(&self) -> impl Iterator<Item = &FormatDescriptor> {
         std::iter::once(TXT)
             .chain(image::FORMATS)
+            .chain(audio::FORMATS)
             .chain(table::FORMATS)
             .chain(archive::FORMATS)
             .filter_map(|id| self.registry.format(id))
@@ -260,6 +264,24 @@ impl Engine {
                 }
             }
         }
+        if audio::is_audio(ext_from) {
+            if let Some(found) = self.detect_audio(&data) {
+                if found != ext_from {
+                    notes.push(
+                        Note::new(
+                            Severity::Warning,
+                            "format_mismatch",
+                            format!(
+                                "the file extension says {} but the content is {}",
+                                ext_from.0, found.0
+                            ),
+                        )
+                        .with_detail(found.0),
+                    );
+                    from = found;
+                }
+            }
+        }
         if archive::is_archive(from) {
             if let Some(found) = archive::sniff_conflict(ext_from, &data) {
                 notes.push(
@@ -290,6 +312,22 @@ impl Engine {
                 progress,
                 &mut notes,
             )?
+        } else if audio::is_audio(from) {
+            let (clip, n) = audio::decode(from, &data, &self.limits)?;
+            notes.extend(n);
+            progress.report(2, 4, "decode");
+            progress.check_cancelled()?;
+            let source = audio::source_depth(&clip);
+            let (clip, n) = audio::process(clip, &opts, &self.limits)?;
+            notes.extend(n);
+            progress.check_cancelled()?;
+            let (out, n) = audio::encode(to, clip, &opts, source)?;
+            notes.extend(n);
+            let name = |id| self.registry.format(id).map_or("audio", |f| f.name);
+            (
+                out,
+                format!("Decode {} -> Process -> Encode {}", name(from), name(to)),
+            )
         } else if table::is_table(from) {
             let (out, n) = table::convert(from, to, &data, &opts, &self.limits, progress)?;
             notes.extend(n);
@@ -402,6 +440,7 @@ impl Engine {
     /// `name`.
     pub fn detect(&self, data: &[u8], name: &Path) -> Option<FormatId> {
         self.detect_image(data)
+            .or_else(|| self.detect_audio(data))
             .or_else(|| self.format_for_path(name).filter(|f| !image::is_image(*f)))
             .or_else(|| oc_archive::Format::sniff(data).and_then(archive::id_of))
             // A file of a type we do not know can still be stored in an archive, but a file
@@ -544,6 +583,16 @@ impl Engine {
         };
         let (img, _) = ops::convert_depth(&img, oc_image::Depth::Eight);
         Ok(oc_image::png::encode(&img, &oc_image::png::EncodeOptions::default()).0)
+    }
+
+    /// Identify an audio file by its leading bytes among the registered audio formats.
+    fn detect_audio(&self, data: &[u8]) -> Option<FormatId> {
+        audio::FORMATS
+            .into_iter()
+            .filter_map(|id| self.registry.format(id))
+            .filter_map(|f| f.sniff(data).map(|c| (c, f.id)))
+            .max_by_key(|(c, _)| *c)
+            .map(|(_, id)| id)
     }
 
     /// Identify an image by its leading bytes among the registered image formats.
