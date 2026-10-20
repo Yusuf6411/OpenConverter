@@ -19,7 +19,15 @@ pub enum Codec {
 }
 
 impl Codec {
-    pub const ALL: [Codec; 7] = [Self::Gzip, Self::Bzip2, Self::Xz, Self::Zstd, Self::Lz4, Self::Z, Self::Lzma];
+    pub const ALL: [Codec; 7] = [
+        Self::Gzip,
+        Self::Bzip2,
+        Self::Xz,
+        Self::Zstd,
+        Self::Lz4,
+        Self::Z,
+        Self::Lzma,
+    ];
     pub fn extension(self) -> &'static str {
         match self {
             Self::Gzip => "gz",
@@ -142,7 +150,14 @@ impl Format {
     pub fn all() -> Vec<Format> {
         let mut v = vec![Self::Tar];
         v.extend(Codec::ALL.iter().map(|&c| Self::TarCompressed(c)));
-        v.extend([Self::Zip, Self::SevenZ, Self::Cpio, Self::Ar, Self::Iso, Self::Cab]);
+        v.extend([
+            Self::Zip,
+            Self::SevenZ,
+            Self::Cpio,
+            Self::Ar,
+            Self::Iso,
+            Self::Cab,
+        ]);
         v.extend(Codec::ALL.iter().map(|&c| Self::Single(c)));
         v
     }
@@ -211,7 +226,7 @@ impl Format {
         for f in Self::all() {
             for e in f.extensions() {
                 if lower.ends_with(&format!(".{}", e.to_ascii_lowercase()))
-                    && best.map_or(true, |(l, _)| e.len() > l)
+                    && best.is_none_or(|(l, _)| e.len() > l)
                 {
                     best = Some((e.len(), f));
                 }
@@ -308,7 +323,11 @@ pub fn write(format: Format, archive: &Archive, opts: &WriteOpts, cx: &Context) 
             let [only] = files.as_slice() else {
                 return Err(Error::new(
                     ErrorCode::UnsupportedVariant,
-                    format!(".{} holds exactly one file; use .tar.{} for several", c.extension(), c.extension()),
+                    format!(
+                        ".{} holds exactly one file; use .tar.{} for several",
+                        c.extension(),
+                        c.extension()
+                    ),
                 ));
             };
             c.compress(&only.data, opts.level)

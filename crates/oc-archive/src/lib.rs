@@ -9,8 +9,8 @@ pub mod crypto;
 pub mod entry;
 pub mod format;
 pub mod iso;
-pub mod sevenz;
 pub mod safety;
+pub mod sevenz;
 pub mod tar;
 pub mod zip;
 

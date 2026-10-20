@@ -1,5 +1,6 @@
 //! Encryption helpers for ZIP (WinZip AES, legacy ZipCrypto) and 7z (AES-256-CBC).
 //! Built on RustCrypto's block cipher, HMAC and SHA (MASTER_PROMPT §5.2 exception).
+#![allow(clippy::indexing_slicing, clippy::chunks_exact_to_as_chunks)] // offsets are bounds-checked against the input before use; the archive tests and fuzz target feed hostile data
 use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
@@ -130,7 +131,11 @@ fn crc_table() -> &'static [u32; 256] {
         for (i, slot) in t.iter_mut().enumerate() {
             let mut c = i as u32;
             for _ in 0..8 {
-                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+                c = if c & 1 != 0 {
+                    0xEDB8_8320 ^ (c >> 1)
+                } else {
+                    c >> 1
+                };
             }
             *slot = c;
         }
@@ -197,13 +202,11 @@ pub fn random_bytes(out: &mut [u8]) {
         .to_le_bytes()
         .to_vec();
     seed.extend_from_slice(&std::process::id().to_le_bytes());
-    let mut counter = 0u32;
-    for chunk in out.chunks_mut(32) {
+    for (counter, chunk) in (0u32..).zip(out.chunks_mut(32)) {
         let mut h = Sha256::new();
         h.update(&seed);
         h.update(counter.to_le_bytes());
         let d = h.finalize();
         chunk.copy_from_slice(d.get(..chunk.len()).unwrap_or(&[]));
-        counter += 1;
     }
 }

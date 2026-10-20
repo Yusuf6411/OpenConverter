@@ -75,8 +75,7 @@ pub(crate) fn read_tree(data: &[u8]) -> Result<(HufTable, usize)> {
         .first()
         .ok_or_else(|| Error::truncated("zstd: Huffman header"))?;
     let mut weights: Vec<u8> = Vec::new();
-    let used;
-    if hb >= 128 {
+    let used = if hb >= 128 {
         let n = usize::from(hb) - 127;
         let bytes = n.div_ceil(2);
         let body = data
@@ -86,7 +85,7 @@ pub(crate) fn read_tree(data: &[u8]) -> Result<(HufTable, usize)> {
             let b = body[i / 2];
             weights.push(if i % 2 == 0 { b >> 4 } else { b & 15 });
         }
-        used = 1 + bytes;
+        1 + bytes
     } else {
         let size = usize::from(hb);
         let body = data
@@ -116,8 +115,8 @@ pub(crate) fn read_tree(data: &[u8]) -> Result<(HufTable, usize)> {
                 break;
             }
         }
-        used = 1 + size;
-    }
+        1 + size
+    };
     if weights.len() > 255 {
         return Err(Error::corrupt("zstd: too many Huffman weights"));
     }

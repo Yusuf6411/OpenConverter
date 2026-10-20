@@ -72,7 +72,10 @@ impl Huff {
     fn new(lengths: &[u8]) -> Result<Self> {
         let max = lengths.iter().copied().max().unwrap_or(0);
         if max == 0 {
-            return Ok(Self { table: vec![0], bits: 0 });
+            return Ok(Self {
+                table: vec![0],
+                bits: 0,
+            });
         }
         if max > 16 {
             return Err(Error::corrupt("LZX: code length above 16"));
@@ -103,7 +106,10 @@ impl Huff {
             let first = (c << (bits - l)) as usize;
             let n = 1usize << (bits - l);
             let entry = ((sym as u32) << 5) | l;
-            for slot in table.get_mut(first..first + n).ok_or_else(|| Error::corrupt("LZX: bad code"))? {
+            for slot in table
+                .get_mut(first..first + n)
+                .ok_or_else(|| Error::corrupt("LZX: bad code"))?
+            {
                 *slot = entry;
             }
         }
@@ -114,7 +120,10 @@ impl Huff {
             return Ok(0);
         }
         let v = b.peek(self.bits) as usize;
-        let e = *self.table.get(v).ok_or_else(|| Error::corrupt("LZX: bad code"))?;
+        let e = *self
+            .table
+            .get(v)
+            .ok_or_else(|| Error::corrupt("LZX: bad code"))?;
         let l = e & 31;
         if l == 0 {
             return Err(Error::corrupt("LZX: invalid Huffman code"));
@@ -215,9 +224,16 @@ impl Lzx {
             };
             match sym {
                 17 | 18 => {
-                    let n = if sym == 17 { b.read(4) + 4 } else { b.read(5) + 20 } as usize;
+                    let n = if sym == 17 {
+                        b.read(4) + 4
+                    } else {
+                        b.read(5) + 20
+                    } as usize;
                     let end = (i + n).min(last);
-                    for l in lens.get_mut(i..end).ok_or_else(|| Error::corrupt("LZX: length overrun"))? {
+                    for l in lens
+                        .get_mut(i..end)
+                        .ok_or_else(|| Error::corrupt("LZX: length overrun"))?
+                    {
                         *l = 0;
                     }
                     i = end;
@@ -228,14 +244,19 @@ impl Lzx {
                     let prev = lens.get(i).copied().unwrap_or(0);
                     let v = step(prev, s2);
                     let end = (i + n).min(last);
-                    for l in lens.get_mut(i..end).ok_or_else(|| Error::corrupt("LZX: length overrun"))? {
+                    for l in lens
+                        .get_mut(i..end)
+                        .ok_or_else(|| Error::corrupt("LZX: length overrun"))?
+                    {
                         *l = v;
                     }
                     i = end;
                 }
                 s => {
                     let prev = lens.get(i).copied().unwrap_or(0);
-                    *lens.get_mut(i).ok_or_else(|| Error::corrupt("LZX: length overrun"))? = step(prev, s);
+                    *lens
+                        .get_mut(i)
+                        .ok_or_else(|| Error::corrupt("LZX: length overrun"))? = step(prev, s);
                     i += 1;
                 }
             }
@@ -319,7 +340,11 @@ impl Lzx {
                 let abs = i32::from_le_bytes([out[i], out[i + 1], out[i + 2], out[i + 3]]);
                 let abs64 = i64::from(abs);
                 if abs64 >= -cur && abs64 < size {
-                    let rel = if abs64 >= 0 { abs64 - cur } else { abs64 + size };
+                    let rel = if abs64 >= 0 {
+                        abs64 - cur
+                    } else {
+                        abs64 + size
+                    };
                     out[i..i + 4].copy_from_slice(&(rel as i32).to_le_bytes());
                 }
                 i += 4;
@@ -339,7 +364,11 @@ impl Lzx {
         self.stored_odd = false;
         match kind {
             1 | 2 => {
-                self.block = if kind == 1 { Block::Verbatim } else { Block::Aligned };
+                self.block = if kind == 1 {
+                    Block::Verbatim
+                } else {
+                    Block::Aligned
+                };
                 if kind == 2 {
                     let mut al = [0u8; ALIGNED_SYMS];
                     for a in &mut al {
@@ -375,7 +404,12 @@ impl Lzx {
                     .get(b.pos..b.pos + 12)
                     .ok_or_else(|| Error::truncated("LZX: stored block header cut short"))?;
                 for k in 0..3 {
-                    self.r[k] = u32::from_le_bytes([raw[k * 4], raw[k * 4 + 1], raw[k * 4 + 2], raw[k * 4 + 3]]) as usize;
+                    self.r[k] = u32::from_le_bytes([
+                        raw[k * 4],
+                        raw[k * 4 + 1],
+                        raw[k * 4 + 2],
+                        raw[k * 4 + 3],
+                    ]) as usize;
                 }
                 b.pos += 12;
                 self.stored_odd = self.remaining & 1 == 1;
@@ -389,8 +423,14 @@ impl Lzx {
     fn run(&mut self, b: &mut Bits<'_>, out: &mut Vec<u8>, limit: usize) -> Result<usize> {
         let begin = out.len();
         let window = 1usize << self.window_bits;
-        let main = self.main.as_ref().ok_or_else(|| Error::corrupt("LZX: missing main tree"))?;
-        let length = self.length.as_ref().ok_or_else(|| Error::corrupt("LZX: missing length tree"))?;
+        let main = self
+            .main
+            .as_ref()
+            .ok_or_else(|| Error::corrupt("LZX: missing main tree"))?;
+        let length = self
+            .length
+            .as_ref()
+            .ok_or_else(|| Error::corrupt("LZX: missing length tree"))?;
         let aligned_block = self.block == Block::Aligned;
         while out.len() < limit {
             let sym = main.decode(b)?;

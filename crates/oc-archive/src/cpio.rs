@@ -41,11 +41,13 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
             (f(12, 18)?, f(18, 24)?, f(48, 59)?, f(65, 76)?, f(59, 65)?)
         };
         let nstart = pos + hdr_len;
-        let nend = nstart + usize::try_from(namesize).map_err(|_| Error::corrupt("cpio: name size"))?;
+        let nend =
+            nstart + usize::try_from(namesize).map_err(|_| Error::corrupt("cpio: name size"))?;
         let name_raw = data
             .get(nstart..nend)
             .ok_or_else(|| Error::truncated("cpio: name cut short"))?;
-        let name = String::from_utf8_lossy(name_raw.split(|&c| c == 0).next().unwrap_or(&[])).into_owned();
+        let name =
+            String::from_utf8_lossy(name_raw.split(|&c| c == 0).next().unwrap_or(&[])).into_owned();
         let dstart = if name_pad4 { (nend + 3) & !3 } else { nend };
         if name == "TRAILER!!!" {
             break;
@@ -57,7 +59,10 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
             .get(dstart..dend)
             .ok_or_else(|| Error::truncated("cpio: member data cut short").at(dstart as u64))?;
         pos = if name_pad4 { (dend + 3) & !3 } else { dend };
-        let name = name.trim_start_matches("./").trim_end_matches('/').to_string();
+        let name = name
+            .trim_start_matches("./")
+            .trim_end_matches('/')
+            .to_string();
         if name.is_empty() || name == "." {
             continue;
         }
@@ -110,7 +115,13 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
 pub fn write(archive: &Archive, cx: &Context) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     let pad4 = |v: &mut Vec<u8>| v.resize(v.len().div_ceil(4) * 4, 0);
-    let emit = |out: &mut Vec<u8>, ino: u32, mode: u32, mtime: u32, nlink: u32, name: &str, body: &[u8]| {
+    let emit = |out: &mut Vec<u8>,
+                ino: u32,
+                mode: u32,
+                mtime: u32,
+                nlink: u32,
+                name: &str,
+                body: &[u8]| {
         let mut nm = name.as_bytes().to_vec();
         nm.push(0);
         out.extend_from_slice(b"070701");
@@ -141,12 +152,19 @@ pub fn write(archive: &Archive, cx: &Context) -> Result<Vec<u8>> {
         let name = clean_for_write(&e.path)?;
         let mtime = e.mtime.unwrap_or(0).clamp(0, i64::from(u32::MAX)) as u32;
         if e.size() > u64::from(u32::MAX) {
-            return Err(Error::limit("max_output", "cpio newc cannot hold members over 4 GiB"));
+            return Err(Error::limit(
+                "max_output",
+                "cpio newc cannot hold members over 4 GiB",
+            ));
         }
         let (mode, body, nlink): (u32, Vec<u8>, u32) = match e.kind {
             EntryKind::File => (0o100_000 | (e.mode & 0o7777), e.data.clone(), 1),
             EntryKind::Dir => (0o040_000 | (e.mode & 0o7777), Vec::new(), 2),
-            EntryKind::Symlink => (0o120_777, e.link.clone().unwrap_or_default().into_bytes(), 1),
+            EntryKind::Symlink => (
+                0o120_777,
+                e.link.clone().unwrap_or_default().into_bytes(),
+                1,
+            ),
         };
         emit(&mut out, i as u32 + 1, mode, mtime, nlink, &name, &body);
     }

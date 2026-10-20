@@ -1,10 +1,15 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 //! Development helper: `codec_tool <codec> <d|c> <level> <in> <out>` for interop checks
 //! against other implementations (see tools/interop.py).
 use oc_core::{Limits, NoProgress};
 
 fn main() {
     let a: Vec<String> = std::env::args().collect();
-    let (codec, mode, level) = (a[1].as_str(), a[2].as_str(), a[3].parse::<u32>().unwrap_or(6));
+    let (codec, mode, level) = (
+        a[1].as_str(),
+        a[2].as_str(),
+        a[3].parse::<u32>().unwrap_or(6),
+    );
     let data = std::fs::read(&a[4]).unwrap();
     let l = Limits::default();
     let out = match (codec, mode) {

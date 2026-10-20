@@ -166,7 +166,8 @@ fn convert(engine: &Engine, args: &[String], worker: bool) -> ExitCode {
         Ok(o) => o,
         Err(e) if e.code == ErrorCode::InvalidOptions && !worker => {
             // An unused password variable must not break conversions to formats without one.
-            a.raw_options.retain(|(k, _)| k != "password" && k != "source_password");
+            a.raw_options
+                .retain(|(k, _)| k != "password" && k != "source_password");
             match engine.parse_options(a.output.as_ref(), &a.raw_options) {
                 Ok(o) => o,
                 Err(e) => return fail(&e),
@@ -300,7 +301,11 @@ fn fmt_time(t: i64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("{y:04}-{m:02}-{d:02} {:02}:{:02}", secs / 3600, secs % 3600 / 60)
+    format!(
+        "{y:04}-{m:02}-{d:02} {:02}:{:02}",
+        secs / 3600,
+        secs % 3600 / 60
+    )
 }
 
 fn list(engine: &Engine, args: &[String], worker: bool) -> ExitCode {
@@ -313,7 +318,13 @@ fn list(engine: &Engine, args: &[String], worker: bool) -> ExitCode {
     let pw = password_from_env(worker);
     let result = if a.isolate && !worker {
         match isolation() {
-            Some(iso) => oc_engine::isolated::list_isolated(engine, &iso, path.as_ref(), pw.as_deref(), &CancelToken::new()),
+            Some(iso) => oc_engine::isolated::list_isolated(
+                engine,
+                &iso,
+                path.as_ref(),
+                pw.as_deref(),
+                &CancelToken::new(),
+            ),
             None => return ExitCode::from(1),
         }
     } else {
@@ -343,7 +354,11 @@ fn list(engine: &Engine, args: &[String], worker: bool) -> ExitCode {
                 )
             })
             .collect();
-        println!("{{\"format\":{},\"entries\":[{}]}}", json_str(format.0), items.join(","));
+        println!(
+            "{{\"format\":{},\"entries\":[{}]}}",
+            json_str(format.0),
+            items.join(",")
+        );
     } else {
         println!("{} entries ({})", entries.len(), format.0);
         for e in &entries {
@@ -358,7 +373,9 @@ fn list(engine: &Engine, args: &[String], worker: bool) -> ExitCode {
                 e.size,
                 e.mtime.map_or(String::new(), fmt_time),
                 e.path,
-                e.link.as_ref().map_or(String::new(), |l| format!(" -> {l}")),
+                e.link
+                    .as_ref()
+                    .map_or(String::new(), |l| format!(" -> {l}")),
                 if e.encrypted { " [encrypted]" } else { "" }
             );
         }
@@ -383,11 +400,24 @@ fn extract(engine: &Engine, args: &[String], worker: bool) -> ExitCode {
     };
     let result = if a.isolate && !worker {
         match isolation() {
-            Some(iso) => oc_engine::isolated::extract_isolated(&iso, path.as_ref(), dest.as_ref(), &opts, pw.as_deref(), &CancelToken::new()),
+            Some(iso) => oc_engine::isolated::extract_isolated(
+                &iso,
+                path.as_ref(),
+                dest.as_ref(),
+                &opts,
+                pw.as_deref(),
+                &CancelToken::new(),
+            ),
             None => return ExitCode::from(1),
         }
     } else {
-        engine.archive_extract(path.as_ref(), dest.as_ref(), &opts, pw.as_deref(), &NoProgress)
+        engine.archive_extract(
+            path.as_ref(),
+            dest.as_ref(),
+            &opts,
+            pw.as_deref(),
+            &NoProgress,
+        )
     };
     match result {
         Ok(r) => {
@@ -395,11 +425,18 @@ fn extract(engine: &Engine, args: &[String], worker: bool) -> ExitCode {
                 print!("{}", oc_engine::isolated::encode_extract(&r));
                 return ExitCode::SUCCESS;
             }
-            println!("extracted {} files, {} folders, {} links ({} bytes)", r.files, r.dirs, r.symlinks, r.bytes);
+            println!(
+                "extracted {} files, {} folders, {} links ({} bytes)",
+                r.files, r.dirs, r.symlinks, r.bytes
+            );
             for (p, why) in &r.skipped {
                 eprintln!("skipped: {p} ({why})");
             }
-            if r.skipped.is_empty() { ExitCode::SUCCESS } else { ExitCode::from(3) }
+            if r.skipped.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(3)
+            }
         }
         Err(e) => fail(&e),
     }
@@ -418,7 +455,8 @@ fn create(engine: &Engine, args: &[String], worker: bool) -> ExitCode {
     let options = match engine.parse_options(output.as_ref(), &a.raw_options) {
         Ok(o) => o,
         Err(e) if e.code == ErrorCode::InvalidOptions && !worker => {
-            a.raw_options.retain(|(k, _)| k != "password" && k != "source_password");
+            a.raw_options
+                .retain(|(k, _)| k != "password" && k != "source_password");
             match engine.parse_options(output.as_ref(), &a.raw_options) {
                 Ok(o) => o,
                 Err(e) => return fail(&e),
@@ -428,11 +466,25 @@ fn create(engine: &Engine, args: &[String], worker: bool) -> ExitCode {
     };
     let result = if a.isolate && !worker {
         match isolation() {
-            Some(iso) => oc_engine::isolated::create_isolated(engine, &iso, &sources, output.as_ref(), a.overwrite, &options, &CancelToken::new()),
+            Some(iso) => oc_engine::isolated::create_isolated(
+                engine,
+                &iso,
+                &sources,
+                output.as_ref(),
+                a.overwrite,
+                &options,
+                &CancelToken::new(),
+            ),
             None => return ExitCode::from(1),
         }
     } else {
-        engine.archive_create(&sources, output.as_ref(), a.overwrite, &options, &NoProgress)
+        engine.archive_create(
+            &sources,
+            output.as_ref(),
+            a.overwrite,
+            &options,
+            &NoProgress,
+        )
     };
     match result {
         Ok(rep) => {

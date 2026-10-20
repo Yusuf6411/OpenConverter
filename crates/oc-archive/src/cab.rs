@@ -1,5 +1,6 @@
 //! Microsoft Cabinet files: stored, MSZIP and LZX folders. Read only; multi-cabinet sets
 //! are not followed.
+#![allow(clippy::indexing_slicing, clippy::chunks_exact_to_as_chunks)] // offsets are bounds-checked against the input before use; the archive tests and fuzz target feed hostile data
 use crate::entry::{Archive, Budget, Entry};
 use crate::Context;
 use oc_compress::{inflate, lzx::Lzx};
@@ -33,7 +34,11 @@ fn dos_time(date: u16, time: u16) -> Option<i64> {
     if date == 0 {
         return None;
     }
-    let (y, m, d) = (i64::from(date >> 9) + 1980, i64::from((date >> 5) & 15), i64::from(date & 31));
+    let (y, m, d) = (
+        i64::from(date >> 9) + 1980,
+        i64::from((date >> 5) & 15),
+        i64::from(date & 31),
+    );
     if m == 0 || d == 0 {
         return None;
     }
@@ -45,16 +50,34 @@ fn dos_time(date: u16, time: u16) -> Option<i64> {
     )
 }
 
-fn decode_folder(data: &[u8], f: &Folder, reserve_data: usize, expected: u64, cx: &Context, budget: &Budget<'_>) -> Result<Vec<u8>> {
+fn decode_folder(
+    data: &[u8],
+    f: &Folder,
+    reserve_data: usize,
+    expected: u64,
+    cx: &Context,
+    budget: &Budget<'_>,
+) -> Result<Vec<u8>> {
     let mut out: Vec<u8> = Vec::new();
-    let mut pos = usize::try_from(f.data_off).map_err(|_| Error::corrupt("CAB: bad data offset"))?;
+    let mut pos =
+        usize::try_from(f.data_off).map_err(|_| Error::corrupt("CAB: bad data offset"))?;
     let kind = f.method & 0x0F;
-    let mut lzx = if kind == 3 { Some(Lzx::new(u32::from((f.method >> 8) & 0x1F))?) } else { None };
+    let mut lzx = if kind == 3 {
+        Some(Lzx::new(u32::from((f.method >> 8) & 0x1F))?)
+    } else {
+        None
+    };
     if kind == 2 {
-        return Err(Error::new(ErrorCode::UnsupportedVariant, "CAB: Quantum compression is not supported"));
+        return Err(Error::new(
+            ErrorCode::UnsupportedVariant,
+            "CAB: Quantum compression is not supported",
+        ));
     }
     if kind > 3 {
-        return Err(Error::new(ErrorCode::UnsupportedVariant, "CAB: unknown compression type"));
+        return Err(Error::new(
+            ErrorCode::UnsupportedVariant,
+            "CAB: unknown compression type",
+        ));
     }
     let lim = Limits {
         max_output: 1 << 17,
@@ -87,7 +110,12 @@ fn decode_folder(data: &[u8], f: &Folder, reserve_data: usize, expected: u64, cx
                 }
                 let from = out.len().saturating_sub(32768);
                 let dict = out.get(from..).unwrap_or(&[]).to_vec();
-                let r = inflate::inflate_with_dict(body.get(2..).unwrap_or(&[]), &dict, &lim, cx.progress)?;
+                let r = inflate::inflate_with_dict(
+                    body.get(2..).unwrap_or(&[]),
+                    &dict,
+                    &lim,
+                    cx.progress,
+                )?;
                 out.extend_from_slice(&r.data);
             }
             _ => {
@@ -97,7 +125,9 @@ fn decode_folder(data: &[u8], f: &Folder, reserve_data: usize, expected: u64, cx
             }
         }
         if out.len() as u64 > expected.max(1) + 65536 {
-            return Err(Error::corrupt("CAB: folder holds more data than its files declare"));
+            return Err(Error::corrupt(
+                "CAB: folder holds more data than its files declare",
+            ));
         }
         cx.limits.check_alloc(out.len() as u64)?;
     }
@@ -142,9 +172,16 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
         let n = r.u16_le()?;
         let m = r.u16_le()?;
         r.skip(res_folder)?;
-        folders.push(Folder { data_off: off, n_data: n, method: m });
+        folders.push(Folder {
+            data_off: off,
+            n_data: n,
+            method: m,
+        });
     }
-    let mut fr = ByteReader::new(data.get(files_off..).ok_or_else(|| Error::truncated("CAB: file table beyond end"))?);
+    let mut fr = ByteReader::new(
+        data.get(files_off..)
+            .ok_or_else(|| Error::truncated("CAB: file table beyond end"))?,
+    );
     struct F {
         size: u32,
         off: u32,
@@ -180,18 +217,26 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
     for f in &files {
         budget.entry()?;
         if f.folder >= 0xFFFD {
-            return Err(Error::new(ErrorCode::UnsupportedVariant, "CAB: file continues from another cabinet"));
+            return Err(Error::new(
+                ErrorCode::UnsupportedVariant,
+                "CAB: file continues from another cabinet",
+            ));
         }
         let fi = usize::from(f.folder);
         if cx.list_only {
             budget.add_output(u64::from(f.size))?;
-            let mut e = Entry::listed(f.name.trim_start_matches('/').to_string(), u64::from(f.size));
+            let mut e = Entry::listed(
+                f.name.trim_start_matches('/').to_string(),
+                u64::from(f.size),
+            );
             e.mtime = f.mtime;
             archive.entries.push(e);
             continue;
         }
         if cache.as_ref().map(|(k, _)| *k) != Some(fi) {
-            let fold = folders.get(fi).ok_or_else(|| Error::corrupt("CAB: file refers to a missing folder"))?;
+            let fold = folders
+                .get(fi)
+                .ok_or_else(|| Error::corrupt("CAB: file refers to a missing folder"))?;
             let expected = files
                 .iter()
                 .filter(|x| usize::from(x.folder) == fi)

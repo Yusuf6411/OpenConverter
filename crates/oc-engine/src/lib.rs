@@ -279,7 +279,17 @@ impl Engine {
         let route = self.registry.plan(from, to, false)?;
 
         let (out, route_text) = if archive::is_archive(to) {
-            archive::convert(from, to, &data, &req.input, req.display_name.as_deref(), &opts, &self.limits, progress, &mut notes)?
+            archive::convert(
+                from,
+                to,
+                &data,
+                &req.input,
+                req.display_name.as_deref(),
+                &opts,
+                &self.limits,
+                progress,
+                &mut notes,
+            )?
         } else if table::is_table(from) {
             let (out, n) = table::convert(from, to, &data, &opts, &self.limits, progress)?;
             notes.extend(n);
@@ -393,9 +403,7 @@ impl Engine {
     pub fn detect(&self, data: &[u8], name: &Path) -> Option<FormatId> {
         self.detect_image(data)
             .or_else(|| self.format_for_path(name).filter(|f| !image::is_image(*f)))
-            .or_else(|| {
-                oc_archive::Format::sniff(data).and_then(archive::id_of)
-            })
+            .or_else(|| oc_archive::Format::sniff(data).and_then(archive::id_of))
             // A file of a type we do not know can still be stored in an archive, but a file
             // that claims a known type and does not match it is refused.
             .or_else(|| {
@@ -436,13 +444,18 @@ impl Engine {
         options: &[(String, OptionValue)],
         progress: &dyn Progress,
     ) -> Result<ConvertReport> {
-        let to = self.format_for_path(output).filter(|f| archive::is_archive(*f)).ok_or_else(|| {
-            Error::new(ErrorCode::UnsupportedFormat, "unknown archive type")
-                .with_detail(output.display().to_string())
-        })?;
+        let to = self
+            .format_for_path(output)
+            .filter(|f| archive::is_archive(*f))
+            .ok_or_else(|| {
+                Error::new(ErrorCode::UnsupportedFormat, "unknown archive type")
+                    .with_detail(output.display().to_string())
+            })?;
         if output.exists() && !overwrite {
-            return Err(Error::new(ErrorCode::OutputExists, "output file already exists")
-                .with_detail(output.display().to_string()));
+            return Err(
+                Error::new(ErrorCode::OutputExists, "output file already exists")
+                    .with_detail(output.display().to_string()),
+            );
         }
         let schema = &self
             .registry
@@ -603,7 +616,7 @@ mod tests {
                 input: i,
                 output: o.clone(),
                 overwrite: false,
- display_name: None,
+                display_name: None,
                 options: opts
                     .iter()
                     .map(|(k, v)| ((*k).to_string(), v.clone()))
@@ -709,7 +722,7 @@ mod tests {
                 input: from.to_path_buf(),
                 output: to.to_path_buf(),
                 overwrite: true,
- display_name: None,
+                display_name: None,
                 options,
             },
             &NoProgress,
@@ -1118,7 +1131,7 @@ mod tests {
             input: dir.join("a.xyz"),
             output: dir.join("b.txt"),
             overwrite: false,
- display_name: None,
+            display_name: None,
             options: vec![],
         };
         assert_eq!(

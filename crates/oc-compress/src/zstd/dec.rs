@@ -20,7 +20,9 @@ pub(crate) const ML_BASE: [u32; 53] = [
 ];
 pub(crate) const ML_BITS: [u8; 53] = {
     let mut t = [0u8; 53];
-    let tail = [1u8, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    let tail = [
+        1u8, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+    ];
     let mut i = 0;
     while i < tail.len() {
         t[32 + i] = tail[i];
@@ -52,19 +54,6 @@ pub(crate) const OF_DEFAULT: [i16; 29] = [
 ];
 
 const MAX_BLOCK: usize = 128 * 1024;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_distributions_sum_to_their_table_size() {
-        let sum = |t: &[i16]| t.iter().map(|c| i32::from(c.abs().max(if *c == -1 { 1 } else { 0 }))).sum::<i32>();
-        assert_eq!(sum(&LL_DEFAULT), 64);
-        assert_eq!(sum(&ML_DEFAULT), 64);
-        assert_eq!(sum(&OF_DEFAULT), 32);
-    }
-}
 
 pub(crate) fn default_tables() -> (Table, Table, Table) {
     (
@@ -125,17 +114,36 @@ fn literals(data: &[u8], st: &mut FrameState) -> Result<(Vec<u8>, usize)> {
         0 | 1 => {
             let h = need(3)?;
             let v = u32::from(h[0]) | u32::from(h[1]) << 8 | u32::from(h[2]) << 16;
-            (3, ((v >> 4) & 0x3FF) as usize, ((v >> 14) & 0x3FF) as usize, fmt == 1)
+            (
+                3,
+                ((v >> 4) & 0x3FF) as usize,
+                ((v >> 14) & 0x3FF) as usize,
+                fmt == 1,
+            )
         }
         2 => {
             let h = need(4)?;
             let v = u32::from_le_bytes([h[0], h[1], h[2], h[3]]);
-            (4, ((v >> 4) & 0x3FFF) as usize, ((v >> 18) & 0x3FFF) as usize, true)
+            (
+                4,
+                ((v >> 4) & 0x3FFF) as usize,
+                ((v >> 18) & 0x3FFF) as usize,
+                true,
+            )
         }
         _ => {
             let h = need(5)?;
-            let v = u64::from(h[0]) | u64::from(h[1]) << 8 | u64::from(h[2]) << 16 | u64::from(h[3]) << 24 | u64::from(h[4]) << 32;
-            (5, ((v >> 4) & 0x3FFFF) as usize, ((v >> 22) & 0x3FFFF) as usize, true)
+            let v = u64::from(h[0])
+                | u64::from(h[1]) << 8
+                | u64::from(h[2]) << 16
+                | u64::from(h[3]) << 24
+                | u64::from(h[4]) << 32;
+            (
+                5,
+                ((v >> 4) & 0x3FFFF) as usize,
+                ((v >> 22) & 0x3FFFF) as usize,
+                true,
+            )
         }
     };
     if regen > MAX_BLOCK {
@@ -218,12 +226,7 @@ fn sequence_table(
     }
 }
 
-fn block(
-    data: &[u8],
-    out: &mut Vec<u8>,
-    frame_start: usize,
-    st: &mut FrameState,
-) -> Result<()> {
+fn block(data: &[u8], out: &mut Vec<u8>, frame_start: usize, st: &mut FrameState) -> Result<()> {
     let (lits, mut pos) = literals(data, st)?;
     let b0 = *data
         .get(pos)
@@ -234,11 +237,15 @@ fn block(
     } else if b0 < 128 {
         usize::from(b0)
     } else if b0 < 255 {
-        let b1 = *data.get(pos).ok_or_else(|| Error::truncated("zstd: sequence count"))?;
+        let b1 = *data
+            .get(pos)
+            .ok_or_else(|| Error::truncated("zstd: sequence count"))?;
         pos += 1;
         ((usize::from(b0) - 128) << 8) + usize::from(b1)
     } else {
-        let h = data.get(pos..pos + 2).ok_or_else(|| Error::truncated("zstd: sequence count"))?;
+        let h = data
+            .get(pos..pos + 2)
+            .ok_or_else(|| Error::truncated("zstd: sequence count"))?;
         pos += 2;
         usize::from(h[0]) + (usize::from(h[1]) << 8) + 0x7F00
     };
@@ -266,7 +273,11 @@ fn block(
         let mut block_out = 0usize;
         for i in 0..nseq {
             let (cl, co, cm) = (ll.cells[sl], of.cells[so], ml.cells[sm]);
-            let (lc, oc, mc) = (usize::from(cl.symbol), usize::from(co.symbol), usize::from(cm.symbol));
+            let (lc, oc, mc) = (
+                usize::from(cl.symbol),
+                usize::from(co.symbol),
+                usize::from(cm.symbol),
+            );
             if lc > 35 || mc > 52 || oc > 31 {
                 return Err(Error::corrupt("zstd: sequence code out of range"));
             }
@@ -317,7 +328,8 @@ fn block(
             let produced = out.len() - frame_start;
             let off = offset as usize;
             if off > produced {
-                return Err(Error::corrupt("zstd: offset beyond the start of the frame").at(out.len() as u64));
+                return Err(Error::corrupt("zstd: offset beyond the start of the frame")
+                    .at(out.len() as u64));
             }
             let start = out.len() - off;
             if off >= ml_n {
@@ -367,7 +379,9 @@ pub fn decompress(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Res
             return Err(Error::corrupt("zstd: unexpected data after the last frame").at(pos as u64));
         }
         pos += 4;
-        let fd = *input.get(pos).ok_or_else(|| Error::truncated("zstd: frame descriptor"))?;
+        let fd = *input
+            .get(pos)
+            .ok_or_else(|| Error::truncated("zstd: frame descriptor"))?;
         pos += 1;
         let fcs_flag = fd >> 6;
         let single = fd & 0x20 != 0;
@@ -378,7 +392,9 @@ pub fn decompress(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Res
         }
         let mut window = 0u64;
         if !single {
-            let w = *input.get(pos).ok_or_else(|| Error::truncated("zstd: window"))?;
+            let w = *input
+                .get(pos)
+                .ok_or_else(|| Error::truncated("zstd: window"))?;
             pos += 1;
             let exp = u32::from(w >> 3);
             let base = 1u64 << (10 + exp);
@@ -408,7 +424,10 @@ pub fn decompress(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Res
             .get(pos..pos + fcs_len)
             .ok_or_else(|| Error::truncated("zstd: content size"))?;
         pos += fcs_len;
-        let mut fcs = fcs_bytes.iter().rev().fold(0u64, |a, &b| (a << 8) | u64::from(b));
+        let mut fcs = fcs_bytes
+            .iter()
+            .rev()
+            .fold(0u64, |a, &b| (a << 8) | u64::from(b));
         if fcs_flag == 1 {
             fcs += 256;
         }
@@ -448,7 +467,9 @@ pub fn decompress(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Res
                     pos += bsize;
                 }
                 1 => {
-                    let b = *input.get(pos).ok_or_else(|| Error::truncated("zstd: RLE block"))?;
+                    let b = *input
+                        .get(pos)
+                        .ok_or_else(|| Error::truncated("zstd: RLE block"))?;
                     limits.check_alloc((out.len() + bsize) as u64)?;
                     out.resize(out.len() + bsize, b);
                     pos += 1;
@@ -488,4 +509,22 @@ pub fn decompress(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Res
         progress.report(pos as u64, input.len() as u64, "zstd");
     }
     Ok(out)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_distributions_sum_to_their_table_size() {
+        let sum = |t: &[i16]| {
+            t.iter()
+                .map(|c| i32::from(c.abs().max(if *c == -1 { 1 } else { 0 })))
+                .sum::<i32>()
+        };
+        assert_eq!(sum(&LL_DEFAULT), 64);
+        assert_eq!(sum(&ML_DEFAULT), 64);
+        assert_eq!(sum(&OF_DEFAULT), 32);
+    }
 }

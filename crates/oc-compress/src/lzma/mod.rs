@@ -460,7 +460,9 @@ pub fn decode_lzma2_counted(
                 base = out.len();
                 need_dict_reset = false;
             } else if need_dict_reset {
-                return Err(Error::corrupt("LZMA2: first chunk must reset the dictionary"));
+                return Err(Error::corrupt(
+                    "LZMA2: first chunk must reset the dictionary",
+                ));
             }
             let body = data
                 .get(pos..pos + n)
@@ -471,7 +473,10 @@ pub fn decode_lzma2_counted(
             let hdr = data
                 .get(pos..pos + 4)
                 .ok_or_else(|| Error::truncated("LZMA2: chunk header"))?;
-            let usize_ = ((usize::from(ctl & 0x1F) << 16) | (usize::from(hdr[0]) << 8) | usize::from(hdr[1])) + 1;
+            let usize_ = ((usize::from(ctl & 0x1F) << 16)
+                | (usize::from(hdr[0]) << 8)
+                | usize::from(hdr[1]))
+                + 1;
             let csize = (usize::from(hdr[2]) << 8 | usize::from(hdr[3])) + 1;
             pos += 4;
             let reset = (ctl >> 5) & 3;
@@ -479,7 +484,9 @@ pub fn decode_lzma2_counted(
                 base = out.len();
                 need_dict_reset = false;
             } else if need_dict_reset {
-                return Err(Error::corrupt("LZMA2: first chunk must reset the dictionary"));
+                return Err(Error::corrupt(
+                    "LZMA2: first chunk must reset the dictionary",
+                ));
             }
             if reset >= 2 {
                 let b = *data

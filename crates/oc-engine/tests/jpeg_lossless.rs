@@ -25,7 +25,7 @@ fn run(tag: &str, opts: &[(&str, &str)]) -> (Vec<u8>, oc_engine::ConvertReport) 
                 input: data_dir().join("t420.jpg"),
                 output: o.clone(),
                 overwrite: true,
- display_name: None,
+                display_name: None,
                 options,
             },
             &NoProgress,

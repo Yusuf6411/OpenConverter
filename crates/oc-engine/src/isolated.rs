@@ -254,7 +254,10 @@ pub fn convert_isolated(
 }
 
 fn esc(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('\t', "\\t").replace('\n', "\\n").replace('\r', "\\r")
+    s.replace('\\', "\\\\")
+        .replace('\t', "\\t")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 fn unesc(s: &str) -> String {
@@ -294,23 +297,33 @@ pub fn encode_list(format: FormatId, entries: &[crate::archive::EntryInfo]) -> S
     s
 }
 
-pub fn decode_list(engine: &Engine, text: &str) -> Result<(FormatId, Vec<crate::archive::EntryInfo>)> {
-    let bad = || Error::new(ErrorCode::WorkerCrashed, "worker produced an unreadable result");
+pub fn decode_list(
+    engine: &Engine,
+    text: &str,
+) -> Result<(FormatId, Vec<crate::archive::EntryInfo>)> {
+    let bad = || {
+        Error::new(
+            ErrorCode::WorkerCrashed,
+            "worker produced an unreadable result",
+        )
+    };
     let mut format = None;
     let mut entries = Vec::new();
     for line in text.lines() {
         let f: Vec<&str> = line.splitn(8, '\t').collect();
         match f.as_slice() {
             ["FORMAT", id] => format = Some(engine.format_by_name(id).ok_or_else(bad)?),
-            ["ENTRY", kind, mode, size, mtime, enc, path, link] => entries.push(crate::archive::EntryInfo {
-                kind: kind.chars().next().ok_or_else(bad)?,
-                mode: u32::from_str_radix(mode, 8).map_err(|_| bad())?,
-                size: size.parse().map_err(|_| bad())?,
-                mtime: mtime.parse().ok(),
-                encrypted: *enc == "1",
-                path: unesc(path),
-                link: Some(unesc(link)).filter(|l| !l.is_empty()),
-            }),
+            ["ENTRY", kind, mode, size, mtime, enc, path, link] => {
+                entries.push(crate::archive::EntryInfo {
+                    kind: kind.chars().next().ok_or_else(bad)?,
+                    mode: u32::from_str_radix(mode, 8).map_err(|_| bad())?,
+                    size: size.parse().map_err(|_| bad())?,
+                    mtime: mtime.parse().ok(),
+                    encrypted: *enc == "1",
+                    path: unesc(path),
+                    link: Some(unesc(link)).filter(|l| !l.is_empty()),
+                })
+            }
             _ => {}
         }
     }
@@ -325,7 +338,11 @@ pub fn list_isolated(
     password: Option<&str>,
     cancel: &CancelToken,
 ) -> Result<(FormatId, Vec<crate::archive::EntryInfo>)> {
-    let args = vec!["__worker".to_string(), "list".to_string(), path.display().to_string()];
+    let args = vec![
+        "__worker".to_string(),
+        "list".to_string(),
+        path.display().to_string(),
+    ];
     let envs: Vec<(String, String)> = password
         .map(|p| vec![(secret_env_name("source_password"), p.to_string())])
         .unwrap_or_default();
@@ -334,7 +351,10 @@ pub fn list_isolated(
 }
 
 pub fn encode_extract(r: &oc_archive::safety::ExtractReport) -> String {
-    let mut s = format!("DONE\t{}\t{}\t{}\t{}\n", r.files, r.dirs, r.symlinks, r.bytes);
+    let mut s = format!(
+        "DONE\t{}\t{}\t{}\t{}\n",
+        r.files, r.dirs, r.symlinks, r.bytes
+    );
     for (p, why) in &r.skipped {
         s.push_str(&format!("SKIP\t{}\t{}\n", esc(p), esc(why)));
     }
@@ -342,7 +362,12 @@ pub fn encode_extract(r: &oc_archive::safety::ExtractReport) -> String {
 }
 
 pub fn decode_extract(text: &str) -> Result<oc_archive::safety::ExtractReport> {
-    let bad = || Error::new(ErrorCode::WorkerCrashed, "worker produced an unreadable result");
+    let bad = || {
+        Error::new(
+            ErrorCode::WorkerCrashed,
+            "worker produced an unreadable result",
+        )
+    };
     let mut rep = None;
     let mut skipped = Vec::new();
     for line in text.lines() {
@@ -414,7 +439,11 @@ pub fn create_isolated(
     options: &[(String, oc_core::options::OptionValue)],
     cancel: &CancelToken,
 ) -> Result<ConvertReport> {
-    let mut args = vec!["__worker".to_string(), "create".to_string(), output.display().to_string()];
+    let mut args = vec![
+        "__worker".to_string(),
+        "create".to_string(),
+        output.display().to_string(),
+    ];
     if overwrite {
         args.push("--overwrite".into());
     }

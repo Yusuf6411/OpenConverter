@@ -16,7 +16,11 @@ pub(crate) fn suffix_array(s: &[usize], upper: usize) -> Vec<usize> {
     // true = S-type suffix
     let mut ls = vec![false; n];
     for i in (0..n - 1).rev() {
-        ls[i] = if s[i] == s[i + 1] { ls[i + 1] } else { s[i] < s[i + 1] };
+        ls[i] = if s[i] == s[i + 1] {
+            ls[i + 1]
+        } else {
+            s[i] < s[i + 1]
+        };
     }
     let mut sum_l = vec![0usize; upper + 2];
     let mut sum_s = vec![0usize; upper + 2];
@@ -90,8 +94,16 @@ pub(crate) fn suffix_array(s: &[usize], upper: usize) -> Vec<usize> {
         for i in 1..m {
             let mut l = sorted_lms[i - 1];
             let mut r = sorted_lms[i];
-            let end_l = if lms_map[l] + 1 < m { lms[lms_map[l] + 1] } else { n };
-            let end_r = if lms_map[r] + 1 < m { lms[lms_map[r] + 1] } else { n };
+            let end_l = if lms_map[l] + 1 < m {
+                lms[lms_map[l] + 1]
+            } else {
+                n
+            };
+            let end_r = if lms_map[r] + 1 < m {
+                lms[lms_map[r] + 1]
+            } else {
+                n
+            };
             let mut same = true;
             if end_l - l != end_r - r {
                 same = false;
@@ -142,7 +154,11 @@ mod tests {
                         (x >> 16) as usize % alpha
                     })
                     .collect();
-                assert_eq!(suffix_array(&s, alpha.max(1)), naive(&s), "len {len} alpha {alpha}");
+                assert_eq!(
+                    suffix_array(&s, alpha.max(1)),
+                    naive(&s),
+                    "len {len} alpha {alpha}"
+                );
             }
         }
         let s: Vec<usize> = b"mississippi".iter().map(|&b| usize::from(b)).collect();

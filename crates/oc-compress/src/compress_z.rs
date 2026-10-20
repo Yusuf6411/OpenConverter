@@ -13,7 +13,10 @@ pub fn decompress(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Res
         return Err(Error::corrupt("compress: reserved flag bits set"));
     }
     if !(9..=16).contains(&max_bits) {
-        return Err(Error::new(ErrorCode::UnsupportedVariant, "compress: code size outside 9 to 16 bits"));
+        return Err(Error::new(
+            ErrorCode::UnsupportedVariant,
+            "compress: code size outside 9 to 16 bits",
+        ));
     }
     let data = &input[3..];
     let total_bits = data.len() * 8;
@@ -42,7 +45,11 @@ pub fn decompress(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Res
             pos = align(pos, n_bits, region);
             region = pos;
             n_bits += 1;
-            max_code = if n_bits == max_bits { max_max } else { (1usize << n_bits) - 1 };
+            max_code = if n_bits == max_bits {
+                max_max
+            } else {
+                (1usize << n_bits) - 1
+            };
         }
         if pos + n_bits as usize > total_bits {
             break;

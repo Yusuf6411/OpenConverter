@@ -1,6 +1,7 @@
 //! ZIP (PKWARE APPNOTE 6.3.x): reads and writes stored, deflate, bzip2, LZMA, zstd and xz
 //! members, ZIP64, Unicode names, timestamps, Unix permissions and symlinks, WinZip AES and
 //! traditional encryption; reads Deflate64.
+#![allow(clippy::indexing_slicing)] // offsets are bounds-checked against the input before use; the archive tests and fuzz target feed hostile data
 use crate::crypto::{self, AesKey, ZipCrypto};
 use crate::entry::{Archive, Budget, Entry, EntryKind};
 use crate::safety::clean_for_write;
@@ -90,7 +91,9 @@ fn unix_to_dos(t: i64) -> (u16, u16) {
         return (0xFF9F, 0xBF7D);
     }
     let date = (((y - 1980) as u16) << 9) | ((m as u16) << 5) | d as u16;
-    let time = (((secs / 3600) as u16) << 11) | ((((secs % 3600) / 60) as u16) << 5) | ((secs % 60 / 2) as u16);
+    let time = (((secs / 3600) as u16) << 11)
+        | ((((secs % 3600) / 60) as u16) << 5)
+        | ((secs % 60 / 2) as u16);
     (date, time)
 }
 
@@ -115,7 +118,9 @@ fn parse_extra(mut b: &[u8]) -> Extra {
                 ex.unicode_name = Some((crc, String::from_utf8_lossy(&body[5..]).into_owned()));
             }
             0x5455 if body.len() >= 5 && body[0] & 1 != 0 => {
-                ex.mtime = Some(i64::from(i32::from_le_bytes([body[1], body[2], body[3], body[4]])));
+                ex.mtime = Some(i64::from(i32::from_le_bytes([
+                    body[1], body[2], body[3], body[4],
+                ])));
             }
             0x9901 if body.len() >= 7 => {
                 ex.aes = Some((
@@ -265,7 +270,14 @@ fn read_central(r: &mut ByteReader<'_>) -> Result<Central> {
     })
 }
 
-fn decode_member(method: u16, data: &[u8], size: u64, flags: u16, b: &Budget<'_>, cx: &Context) -> Result<Vec<u8>> {
+fn decode_member(
+    method: u16,
+    data: &[u8],
+    size: u64,
+    flags: u16,
+    b: &Budget<'_>,
+    cx: &Context,
+) -> Result<Vec<u8>> {
     let lim = b.member_limits(size);
     let p = cx.progress;
     let out = match method {
@@ -278,8 +290,13 @@ fn decode_member(method: u16, data: &[u8], size: u64, flags: u16, b: &Budget<'_>
                 data.get(2).copied().unwrap_or(0),
                 data.get(3).copied().unwrap_or(0),
             ]));
-            let props = data.get(4).copied().ok_or_else(|| Error::truncated("ZIP: LZMA header"))?;
-            let body = data.get(4 + psize..).ok_or_else(|| Error::truncated("ZIP: LZMA header"))?;
+            let props = data
+                .get(4)
+                .copied()
+                .ok_or_else(|| Error::truncated("ZIP: LZMA header"))?;
+            let body = data
+                .get(4 + psize..)
+                .ok_or_else(|| Error::truncated("ZIP: LZMA header"))?;
             let _ = flags;
             lzma::decode_raw(props, body, Some(size), &lim, p)?
         }
@@ -303,7 +320,10 @@ fn aes_params(strength: u8) -> Result<(usize, usize)> {
         1 => Ok((8, 16)),
         2 => Ok((12, 24)),
         3 => Ok((16, 32)),
-        _ => Err(Error::new(ErrorCode::UnsupportedVariant, "ZIP: unknown AES strength")),
+        _ => Err(Error::new(
+            ErrorCode::UnsupportedVariant,
+            "ZIP: unknown AES strength",
+        )),
     }
 }
 
@@ -320,7 +340,8 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
         }
     }
     cx.limits.check_entries(eocd.entries)?;
-    let cd_start = usize::try_from(eocd.cd_offset + shift).map_err(|_| Error::corrupt("ZIP: bad directory offset"))?;
+    let cd_start = usize::try_from(eocd.cd_offset + shift)
+        .map_err(|_| Error::corrupt("ZIP: bad directory offset"))?;
     let cd = data
         .get(cd_start..)
         .ok_or_else(|| Error::truncated("ZIP: central directory out of range"))?;
@@ -333,7 +354,8 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
         cx.progress.report(i, eocd.entries, "reading ZIP members");
         let c = read_central(&mut r).map_err(|e| e.at(cd_start as u64 + r.position() as u64))?;
         budget.entry()?;
-        let lho = usize::try_from(c.lho + shift).map_err(|_| Error::corrupt("ZIP: bad member offset"))?;
+        let lho =
+            usize::try_from(c.lho + shift).map_err(|_| Error::corrupt("ZIP: bad member offset"))?;
         let mut lr = ByteReader::new(data.get(lho..).unwrap_or(&[]));
         if lr.u32_le().ok() != Some(SIG_LOCAL) {
             return Err(Error::corrupt("ZIP: bad local header signature").at(lho as u64));
@@ -343,7 +365,9 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
         let lelen = usize::from(lr.u16_le()?);
         let body_at = lho + 30 + lnlen + lelen;
         let body_end = body_at
-            .checked_add(usize::try_from(c.csize).map_err(|_| Error::corrupt("ZIP: size overflow"))?)
+            .checked_add(
+                usize::try_from(c.csize).map_err(|_| Error::corrupt("ZIP: size overflow"))?,
+            )
             .ok_or_else(|| Error::corrupt("ZIP: size overflow"))?;
         let raw = data
             .get(body_at..body_end)
@@ -366,7 +390,10 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
         if name.is_empty() {
             return Err(Error::corrupt("ZIP: empty member name"));
         }
-        let mtime = c.extra.mtime.or_else(|| dos_to_unix(c.dos_date, c.dos_time));
+        let mtime = c
+            .extra
+            .mtime
+            .or_else(|| dos_to_unix(c.dos_date, c.dos_time));
         let mut e;
         if is_dir {
             e = Entry::dir(name);
@@ -393,7 +420,10 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
             let mut check_crc = true;
             if encrypted {
                 let pw = cx.password.ok_or_else(|| {
-                    Error::new(ErrorCode::EncryptedNeedPassword, format!("'{name}' is encrypted"))
+                    Error::new(
+                        ErrorCode::EncryptedNeedPassword,
+                        format!("'{name}' is encrypted"),
+                    )
                 })?;
                 if c.method == 99 {
                     let (_ver, strength, real) = c
@@ -429,7 +459,11 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
                     let mut z = ZipCrypto::new(pw.as_bytes());
                     let mut buf = raw.to_vec();
                     z.decrypt(&mut buf);
-                    let check = if c.flags & 8 != 0 { (c.dos_time >> 8) as u8 } else { (c.crc >> 24) as u8 };
+                    let check = if c.flags & 8 != 0 {
+                        (c.dos_time >> 8) as u8
+                    } else {
+                        (c.crc >> 24) as u8
+                    };
                     if buf.get(11).copied() != Some(check) {
                         return Err(Error::new(ErrorCode::WrongPassword, "wrong password"));
                     }
@@ -454,7 +488,11 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
         }
         e.mtime = mtime;
         if unix && mode_full & 0o7777 != 0 {
-            e.mode = if e.kind == EntryKind::Symlink { 0o777 } else { mode_full & 0o7777 };
+            e.mode = if e.kind == EntryKind::Symlink {
+                0o777
+            } else {
+                mode_full & 0o7777
+            };
         }
         archive.entries.push(e);
     }
@@ -529,7 +567,8 @@ fn compress_member(method: Method, level: u32, data: &[u8]) -> (u16, Vec<u8>) {
         }
         Method::Bzip2 => (12, bzip2::compress(data, level.clamp(1, 9))),
         Method::Lzma => {
-            let (props, dict, stream) = lzma::encode_lzma(data, lzma::Level(level.clamp(0, 9)), false);
+            let (props, dict, stream) =
+                lzma::encode_lzma(data, lzma::Level(level.clamp(0, 9)), false);
             let mut out = vec![9, 20, 5, 0, props];
             out.extend_from_slice(&dict.to_le_bytes());
             out.extend(stream);
@@ -582,7 +621,11 @@ pub fn write(archive: &Archive, opts: &WriteOptions, cx: &Context) -> Result<Vec
         cx.progress.check_cancelled()?;
         cx.progress.report(i as u64, total, "writing ZIP members");
         let clean = clean_for_write(&e.path)?;
-        let name = if e.kind == EntryKind::Dir { format!("{clean}/") } else { clean };
+        let name = if e.kind == EntryKind::Dir {
+            format!("{clean}/")
+        } else {
+            clean
+        };
         let payload: Vec<u8> = match e.kind {
             EntryKind::File => e.data.clone(),
             EntryKind::Dir => Vec::new(),
@@ -685,7 +728,14 @@ pub fn write(archive: &Archive, opts: &WriteOptions, cx: &Context) -> Result<Vec
         put16(&mut out, dos.0);
         put32(&mut out, header_crc);
         put32(&mut out, if big_sizes { 0xFFFF_FFFF } else { csize as u32 });
-        put32(&mut out, if big_sizes { 0xFFFF_FFFF } else { usize_ as u32 });
+        put32(
+            &mut out,
+            if big_sizes {
+                0xFFFF_FFFF
+            } else {
+                usize_ as u32
+            },
+        );
         put16(&mut out, name.len() as u16);
         put16(&mut out, loc_extra.len() as u16);
         out.extend_from_slice(name.as_bytes());
@@ -768,8 +818,15 @@ pub fn write(archive: &Archive, opts: &WriteOptions, cx: &Context) -> Result<Vec
         put64(&mut out, rec_pos);
         put32(&mut out, 1);
     }
-    let comment = opts.comment.as_deref().or(archive.comment.as_deref()).unwrap_or("");
-    let comment = comment.as_bytes().get(..comment.len().min(65535)).unwrap_or(&[]);
+    let comment = opts
+        .comment
+        .as_deref()
+        .or(archive.comment.as_deref())
+        .unwrap_or("");
+    let comment = comment
+        .as_bytes()
+        .get(..comment.len().min(65535))
+        .unwrap_or(&[]);
     put32(&mut out, SIG_EOCD);
     put16(&mut out, 0);
     put16(&mut out, 0);

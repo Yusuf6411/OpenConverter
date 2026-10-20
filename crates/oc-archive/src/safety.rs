@@ -27,7 +27,7 @@ pub fn components(name: &str) -> std::result::Result<Vec<String>, Unsafe> {
         return Err(Unsafe::Absolute);
     }
     let b = norm.as_bytes();
-    if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+    if matches!(b, [a, b':', ..] if a.is_ascii_alphabetic()) {
         return Err(Unsafe::DriveLetter);
     }
     let mut out = Vec::new();
@@ -197,7 +197,12 @@ pub fn extract(archive: &Archive, dest: &Path, opts: &ExtractOptions) -> Result<
     Ok(rep)
 }
 
-fn extract_one(e: &Entry, root: &Path, opts: &ExtractOptions, rep: &mut ExtractReport) -> Result<()> {
+fn extract_one(
+    e: &Entry,
+    root: &Path,
+    opts: &ExtractOptions,
+    rep: &mut ExtractReport,
+) -> Result<()> {
     let bad = |why: &str| Error::new(ErrorCode::InvalidOptions, why.to_string());
     let comps = components(&e.path).map_err(|u| bad(&format!("unsafe path ({u:?})")))?;
     if comps.len() <= opts.strip_components {
@@ -265,7 +270,10 @@ fn make_symlink(link: &str, target: &Path) -> Result<()> {
 }
 #[cfg(not(any(unix, windows)))]
 fn make_symlink(_link: &str, _target: &Path) -> Result<()> {
-    Err(Error::new(ErrorCode::InvalidOptions, "symlinks unsupported here"))
+    Err(Error::new(
+        ErrorCode::InvalidOptions,
+        "symlinks unsupported here",
+    ))
 }
 
 #[cfg(unix)]

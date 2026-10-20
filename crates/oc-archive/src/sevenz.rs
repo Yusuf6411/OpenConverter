@@ -1,5 +1,6 @@
 //! 7z: reads and writes LZMA, LZMA2, BZip2, Deflate, Copy, Zstandard folders with
 //! BCJ/delta filters and AES-256 encryption (including encrypted headers).
+#![allow(clippy::indexing_slicing, clippy::chunks_exact_to_as_chunks)] // offsets are bounds-checked against the input before use; the archive tests and fuzz target feed hostile data
 use crate::crypto::{self, AesKey};
 use crate::entry::{Archive, Budget, Entry, EntryKind};
 use crate::format::WriteOpts;
@@ -193,12 +194,18 @@ fn read_folder(r: &mut Rd<'_>) -> Result<Folder> {
         let flags = r.u8()?;
         let idlen = usize::from(flags & 0x0F);
         if flags & 0x80 != 0 {
-            return Err(Error::new(ErrorCode::UnsupportedVariant, "7z: alternative coder methods"));
+            return Err(Error::new(
+                ErrorCode::UnsupportedVariant,
+                "7z: alternative coder methods",
+            ));
         }
         if idlen > 8 {
             return Err(Error::corrupt("7z: method id too long"));
         }
-        let method = r.take(idlen)?.iter().fold(0u64, |a, &b| (a << 8) | u64::from(b));
+        let method = r
+            .take(idlen)?
+            .iter()
+            .fold(0u64, |a, &b| (a << 8) | u64::from(b));
         let (n_in, n_out) = if flags & 0x10 != 0 {
             (r.count(32)?, r.count(32)?)
         } else {
@@ -210,7 +217,12 @@ fn read_folder(r: &mut Rd<'_>) -> Result<Folder> {
         } else {
             Vec::new()
         };
-        f.coders.push(Coder { method, n_in, n_out, props });
+        f.coders.push(Coder {
+            method,
+            n_in,
+            n_out,
+            props,
+        });
     }
     let (tin, tout) = (f.total_in(), f.total_out());
     if tout == 0 {
@@ -222,7 +234,9 @@ fn read_folder(r: &mut Rd<'_>) -> Result<Folder> {
         let o = r.count(tout as u64)?;
         f.bind.push((i, o));
     }
-    let npacked = tin.checked_sub(nbind).ok_or_else(|| Error::corrupt("7z: bad bind pairs"))?;
+    let npacked = tin
+        .checked_sub(nbind)
+        .ok_or_else(|| Error::corrupt("7z: bad bind pairs"))?;
     if npacked == 1 {
         let p = (0..tin)
             .find(|i| !f.bind.iter().any(|(bi, _)| bi == i))
@@ -264,7 +278,10 @@ fn read_streams(r: &mut Rd<'_>, cx: &Context) -> Result<Streams> {
                 }
                 let n = r.count(cx.limits.max_entries)?;
                 if r.u8()? != 0 {
-                    return Err(Error::new(ErrorCode::UnsupportedVariant, "7z: external folder data"));
+                    return Err(Error::new(
+                        ErrorCode::UnsupportedVariant,
+                        "7z: external folder data",
+                    ));
                 }
                 let mut first = 0usize;
                 for _ in 0..n {
@@ -318,9 +335,9 @@ fn read_streams(r: &mut Rd<'_>, cx: &Context) -> Result<Streams> {
                             return Err(Error::corrupt("7z: missing substream sizes"));
                         }
                         v.push(
-                            f.size()
-                                .checked_sub(sum)
-                                .ok_or_else(|| Error::corrupt("7z: substream sizes exceed folder"))?,
+                            f.size().checked_sub(sum).ok_or_else(|| {
+                                Error::corrupt("7z: substream sizes exceed folder")
+                            })?,
                         );
                     }
                     sizes.push(v);
@@ -367,18 +384,27 @@ fn read_streams(r: &mut Rd<'_>, cx: &Context) -> Result<Streams> {
 }
 
 fn aes_key(props: &[u8], password: &str) -> Result<(AesKey, [u8; 16])> {
-    let b0 = *props.first().ok_or_else(|| Error::corrupt("7z: AES properties missing"))?;
+    let b0 = *props
+        .first()
+        .ok_or_else(|| Error::corrupt("7z: AES properties missing"))?;
     let cycles = u32::from(b0 & 0x3F);
     let (mut salt, mut iv) = (Vec::new(), [0u8; 16]);
     if b0 & 0xC0 != 0 {
-        let b1 = *props.get(1).ok_or_else(|| Error::corrupt("7z: AES properties cut short"))?;
+        let b1 = *props
+            .get(1)
+            .ok_or_else(|| Error::corrupt("7z: AES properties cut short"))?;
         let ssz = usize::from((b0 >> 7) & 1) + usize::from(b1 >> 4);
         let isz = usize::from((b0 >> 6) & 1) + usize::from(b1 & 0xF);
         if isz > 16 {
             return Err(Error::corrupt("7z: bad AES IV size"));
         }
-        salt = props.get(2..2 + ssz).ok_or_else(|| Error::corrupt("7z: AES salt cut short"))?.to_vec();
-        let ivb = props.get(2 + ssz..2 + ssz + isz).ok_or_else(|| Error::corrupt("7z: AES IV cut short"))?;
+        salt = props
+            .get(2..2 + ssz)
+            .ok_or_else(|| Error::corrupt("7z: AES salt cut short"))?
+            .to_vec();
+        let ivb = props
+            .get(2 + ssz..2 + ssz + isz)
+            .ok_or_else(|| Error::corrupt("7z: AES IV cut short"))?;
         iv[..isz].copy_from_slice(ivb);
     }
     let pw: Vec<u8> = password.encode_utf16().flat_map(u16::to_le_bytes).collect();
@@ -401,7 +427,13 @@ fn aes_key(props: &[u8], password: &str) -> Result<(AesKey, [u8; 16])> {
     Ok((AesKey::new(&key)?, iv))
 }
 
-fn run_coder(c: &Coder, mut inputs: Vec<Vec<u8>>, out_size: u64, cx: &Context, budget: &Budget<'_>) -> Result<Vec<u8>> {
+fn run_coder(
+    c: &Coder,
+    mut inputs: Vec<Vec<u8>>,
+    out_size: u64,
+    cx: &Context,
+    budget: &Budget<'_>,
+) -> Result<Vec<u8>> {
     cx.limits.check_alloc(out_size)?;
     let mut lim = budget.member_limits(out_size);
     lim.max_ratio = cx.limits.max_ratio;
@@ -411,22 +443,41 @@ fn run_coder(c: &Coder, mut inputs: Vec<Vec<u8>>, out_size: u64, cx: &Context, b
         let jump = inputs.pop().unwrap_or_default();
         let call = inputs.pop().unwrap_or_default();
         let main = inputs.pop().unwrap_or_default();
-        let out = bcj::bcj2_decode(&main, &call, &jump, &rc, usize::try_from(out_size).unwrap_or(usize::MAX))?;
+        let out = bcj::bcj2_decode(
+            &main,
+            &call,
+            &jump,
+            &rc,
+            usize::try_from(out_size).unwrap_or(usize::MAX),
+        )?;
         return Ok(out);
     }
     if inputs.len() != 1 {
         return Err(Error::new(
             ErrorCode::UnsupportedVariant,
-            format!("7z: coder {:#x} with {} inputs is not supported", c.method, inputs.len()),
+            format!(
+                "7z: coder {:#x} with {} inputs is not supported",
+                c.method,
+                inputs.len()
+            ),
         ));
     }
     let input = inputs.pop().unwrap_or_default();
     let mut out = match c.method {
         M_COPY => input,
-        M_PPMD => ppmd7::decode(&c.props, &input, usize::try_from(out_size).unwrap_or(usize::MAX), &lim, p)?,
+        M_PPMD => ppmd7::decode(
+            &c.props,
+            &input,
+            usize::try_from(out_size).unwrap_or(usize::MAX),
+            &lim,
+            p,
+        )?,
         M_LZMA2 => lzma::decode_lzma2(&input, 0, &lim, p)?,
         M_LZMA => {
-            let props = *c.props.first().ok_or_else(|| Error::corrupt("7z: LZMA properties missing"))?;
+            let props = *c
+                .props
+                .first()
+                .ok_or_else(|| Error::corrupt("7z: LZMA properties missing"))?;
             lzma::decode_raw(props, &input, Some(out_size), &lim, p)?
         }
         M_BZIP2 => bzip2::decompress(&input, &lim, p)?,
@@ -440,7 +491,8 @@ fn run_coder(c: &Coder, mut inputs: Vec<Vec<u8>>, out_size: u64, cx: &Context, b
             bcj::delta(&mut v, d, false);
             v
         }
-        m @ (0x03030103 | 0x04 | 0x03030205 | 0x05 | 0x03030501 | 0x07 | 0x03030701 | 0x08 | 0x03030805 | 0x09 | 0x0A) => {
+        m @ (0x03030103 | 0x04 | 0x03030205 | 0x05 | 0x03030501 | 0x07 | 0x03030701 | 0x08
+        | 0x03030805 | 0x09 | 0x0A) => {
             let arch = match m {
                 0x03030103 | 0x04 => Arch::X86,
                 0x03030205 | 0x05 => Arch::PowerPc,
@@ -454,7 +506,9 @@ fn run_coder(c: &Coder, mut inputs: Vec<Vec<u8>>, out_size: u64, cx: &Context, b
             v
         }
         M_AES => {
-            let pw = cx.password.ok_or_else(|| Error::new(ErrorCode::EncryptedNeedPassword, "archive is encrypted"))?;
+            let pw = cx.password.ok_or_else(|| {
+                Error::new(ErrorCode::EncryptedNeedPassword, "archive is encrypted")
+            })?;
             let (key, iv) = aes_key(&c.props, pw)?;
             let mut v = input;
             let whole = v.len() / 16 * 16;
@@ -478,7 +532,12 @@ fn run_coder(c: &Coder, mut inputs: Vec<Vec<u8>>, out_size: u64, cx: &Context, b
     Ok(out)
 }
 
-fn decode_folder(f: &Folder, packs: &[&[u8]], cx: &Context, budget: &Budget<'_>) -> Result<Vec<u8>> {
+fn decode_folder(
+    f: &Folder,
+    packs: &[&[u8]],
+    cx: &Context,
+    budget: &Budget<'_>,
+) -> Result<Vec<u8>> {
     fn out_of(
         f: &Folder,
         out_idx: usize,
@@ -494,7 +553,10 @@ fn decode_folder(f: &Folder, packs: &[&[u8]], cx: &Context, budget: &Budget<'_>)
         for c in &f.coders {
             if out_idx >= out_base && out_idx < out_base + c.n_out {
                 if c.n_out != 1 {
-                    return Err(Error::new(ErrorCode::UnsupportedVariant, "7z: multi-output coder"));
+                    return Err(Error::new(
+                        ErrorCode::UnsupportedVariant,
+                        "7z: multi-output coder",
+                    ));
                 }
                 let mut inputs = Vec::new();
                 for j in 0..c.n_in {
@@ -524,8 +586,17 @@ fn decode_folder(f: &Folder, packs: &[&[u8]], cx: &Context, budget: &Budget<'_>)
     out_of(f, f.main_out()?, packs, cx, budget, 0)
 }
 
-fn decode_folder_at(s: &Streams, fi: usize, data: &[u8], cx: &Context, budget: &Budget<'_>) -> Result<Vec<u8>> {
-    let f = s.folders.get(fi).ok_or_else(|| Error::corrupt("7z: folder index"))?;
+fn decode_folder_at(
+    s: &Streams,
+    fi: usize,
+    data: &[u8],
+    cx: &Context,
+    budget: &Budget<'_>,
+) -> Result<Vec<u8>> {
+    let f = s
+        .folders
+        .get(fi)
+        .ok_or_else(|| Error::corrupt("7z: folder index"))?;
     let mut off: u64 = 32 + s.pack_pos;
     for sz in s.pack_sizes.iter().take(f.first_pack) {
         off = off.saturating_add(*sz);
@@ -537,7 +608,8 @@ fn decode_folder_at(s: &Streams, fi: usize, data: &[u8], cx: &Context, budget: &
             .get(f.first_pack + k)
             .ok_or_else(|| Error::corrupt("7z: missing pack size"))?;
         let a = usize::try_from(off).map_err(|_| Error::corrupt("7z: offset overflow"))?;
-        let b = usize::try_from(off.saturating_add(sz)).map_err(|_| Error::corrupt("7z: offset overflow"))?;
+        let b = usize::try_from(off.saturating_add(sz))
+            .map_err(|_| Error::corrupt("7z: offset overflow"))?;
         packs.push(
             data.get(a..b)
                 .ok_or_else(|| Error::truncated("7z: pack stream cut short").at(a as u64))?,
@@ -567,7 +639,10 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
     if data.get(..6) != Some(&SIGNATURE[..]) {
         return Err(Error::corrupt("7z: bad signature"));
     }
-    let mut r = Rd::new(data.get(6..32).ok_or_else(|| Error::truncated("7z: start header cut short"))?);
+    let mut r = Rd::new(
+        data.get(6..32)
+            .ok_or_else(|| Error::truncated("7z: start header cut short"))?,
+    );
     let (_maj, _min) = (r.u8()?, r.u8()?);
     let start_crc = r.u32()?;
     let hdr_off = r.u64()?;
@@ -581,7 +656,8 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
         return Ok(archive);
     }
     let a = usize::try_from(32 + hdr_off).map_err(|_| Error::corrupt("7z: header offset"))?;
-    let b = usize::try_from(32 + hdr_off + hdr_size).map_err(|_| Error::corrupt("7z: header size"))?;
+    let b =
+        usize::try_from(32 + hdr_off + hdr_size).map_err(|_| Error::corrupt("7z: header size"))?;
     let mut header: Vec<u8> = data
         .get(a..b)
         .ok_or_else(|| Error::truncated("7z: header lies beyond the end of the file").at(a as u64))?
@@ -598,7 +674,10 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
                 let s = read_streams(&mut hr, cx)?;
                 let out = decode_folder_at(&s, 0, data, cx, &budget).map_err(|e| {
                     if e.code == ErrorCode::EncryptedNeedPassword {
-                        Error::new(ErrorCode::EncryptedNeedPassword, "the archive's file list is encrypted")
+                        Error::new(
+                            ErrorCode::EncryptedNeedPassword,
+                            "the archive's file list is encrypted",
+                        )
                     } else {
                         e
                     }
@@ -611,7 +690,9 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
     }
     let mut hr = Rd::new(&header);
     if hr.u8()? != id::HEADER {
-        return Err(Error::corrupt("7z: header did not decode to a plain header"));
+        return Err(Error::corrupt(
+            "7z: header did not decode to a plain header",
+        ));
     }
     let mut streams = Streams::default();
     let mut names: Vec<String> = Vec::new();
@@ -630,7 +711,10 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
                 hr.take(n)?;
             },
             id::ADDITIONAL => {
-                return Err(Error::new(ErrorCode::UnsupportedVariant, "7z: additional streams"));
+                return Err(Error::new(
+                    ErrorCode::UnsupportedVariant,
+                    "7z: additional streams",
+                ));
             }
             id::MAIN_STREAMS => streams = read_streams(&mut hr, cx)?,
             id::FILES_INFO => {
@@ -651,7 +735,10 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
                         }
                         id::NAMES => {
                             if br.u8()? != 0 {
-                                return Err(Error::new(ErrorCode::UnsupportedVariant, "7z: external names"));
+                                return Err(Error::new(
+                                    ErrorCode::UnsupportedVariant,
+                                    "7z: external names",
+                                ));
                             }
                             let rest = br.b.get(br.p..).unwrap_or(&[]);
                             let units: Vec<u16> = rest
@@ -667,13 +754,18 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
                         id::MTIME => {
                             let def = br.defined(n)?;
                             if br.u8()? != 0 {
-                                return Err(Error::new(ErrorCode::UnsupportedVariant, "7z: external times"));
+                                return Err(Error::new(
+                                    ErrorCode::UnsupportedVariant,
+                                    "7z: external times",
+                                ));
                             }
                             mtimes = def
                                 .into_iter()
                                 .map(|d| {
                                     if d {
-                                        br.u64().map(|ft| Some((ft / 10_000_000) as i64 - 11_644_473_600))
+                                        br.u64().map(|ft| {
+                                            Some((ft / 10_000_000) as i64 - 11_644_473_600)
+                                        })
                                     } else {
                                         Ok(None)
                                     }
@@ -683,7 +775,10 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
                         id::WIN_ATTRIBUTES => {
                             let def = br.defined(n)?;
                             if br.u8()? != 0 {
-                                return Err(Error::new(ErrorCode::UnsupportedVariant, "7z: external attributes"));
+                                return Err(Error::new(
+                                    ErrorCode::UnsupportedVariant,
+                                    "7z: external attributes",
+                                ));
                             }
                             attrs = def
                                 .into_iter()
@@ -694,7 +789,9 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
                     }
                 }
                 if names.len() != n {
-                    return Err(Error::corrupt("7z: file name count differs from file count"));
+                    return Err(Error::corrupt(
+                        "7z: file name count differs from file count",
+                    ));
                 }
                 if empty_stream.is_empty() {
                     empty_stream = vec![false; n];
@@ -709,7 +806,8 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
     let mut empty_idx = 0usize;
     for (i, name) in names.iter().enumerate() {
         cx.progress.check_cancelled()?;
-        cx.progress.report(i as u64, names.len() as u64, "reading 7z members");
+        cx.progress
+            .report(i as u64, names.len() as u64, "reading 7z members");
         budget.entry()?;
         let attr = attrs.get(i).copied().flatten();
         let name = name.replace('\\', "/").trim_end_matches('/').to_string();
@@ -723,7 +821,11 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
             let is_file = empty_file.get(empty_idx).copied().unwrap_or(false);
             empty_idx += 1;
             let dir_attr = attr.is_some_and(|a| a & 0x10 != 0);
-            e = if is_file && !dir_attr { Entry::file(name, Vec::new()) } else { Entry::dir(name) };
+            e = if is_file && !dir_attr {
+                Entry::file(name, Vec::new())
+            } else {
+                Entry::dir(name)
+            };
         } else {
             // Advance to the next non-empty substream.
             loop {
@@ -735,21 +837,37 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
                 }
             }
             let (fi, si, off) = sub_cursor;
-            let (size, crc) = streams.subs.get(fi).and_then(|v| v.get(si)).copied().unwrap_or((0, None));
-            let end = off.checked_add(size as usize).ok_or_else(|| Error::corrupt("7z: size overflow"))?;
+            let (size, crc) = streams
+                .subs
+                .get(fi)
+                .and_then(|v| v.get(si))
+                .copied()
+                .unwrap_or((0, None));
+            let end = off
+                .checked_add(size as usize)
+                .ok_or_else(|| Error::corrupt("7z: size overflow"))?;
             let is_link = unix_mode.is_some_and(|m| m & 0o170_000 == 0o120_000);
             if cx.list_only {
                 budget.add_output(size)?;
                 sub_cursor = (fi, si + 1, end);
-                e = if is_link { Entry::symlink(name, String::new()) } else { Entry::listed(name, size) };
+                e = if is_link {
+                    Entry::symlink(name, String::new())
+                } else {
+                    Entry::listed(name, size)
+                };
             } else {
                 if folder_data.as_ref().map(|(k, _)| *k) != Some(fi) {
                     let d = decode_folder_at(&streams, fi, data, cx, &budget)?;
                     budget.add_output(d.len() as u64)?;
                     folder_data = Some((fi, d));
                 }
-                let fd = folder_data.as_ref().map(|(_, d)| d.as_slice()).unwrap_or(&[]);
-                let body = fd.get(off..end).ok_or_else(|| Error::corrupt("7z: stream beyond folder"))?;
+                let fd = folder_data
+                    .as_ref()
+                    .map(|(_, d)| d.as_slice())
+                    .unwrap_or(&[]);
+                let body = fd
+                    .get(off..end)
+                    .ok_or_else(|| Error::corrupt("7z: stream beyond folder"))?;
                 if let Some(c) = crc {
                     if crc32(body) != c {
                         return Err(Error::corrupt(format!("7z: CRC mismatch in '{name}'")));
@@ -841,7 +959,12 @@ struct PackedFolder {
     packed: Vec<u8>,
 }
 
-fn encode_stream(data: &[u8], method: Method, level: u32, password: Option<&str>) -> Result<PackedFolder> {
+fn encode_stream(
+    data: &[u8],
+    method: Method,
+    level: u32,
+    password: Option<&str>,
+) -> Result<PackedFolder> {
     let (mid, props, mut packed): (u64, Vec<u8>, Vec<u8>) = match method {
         Method::Copy => (M_COPY, vec![], data.to_vec()),
         Method::Lzma2 => {
@@ -855,8 +978,16 @@ fn encode_stream(data: &[u8], method: Method, level: u32, password: Option<&str>
             (M_LZMA, props, body)
         }
         Method::Bzip2 => (M_BZIP2, vec![], bzip2::compress(data, level.clamp(1, 9))),
-        Method::Deflate => (M_DEFLATE, vec![], oc_compress::deflate::deflate(data, level.clamp(1, 9))),
-        Method::Zstd => (M_ZSTD, vec![1, 5, 0, 0, 0], zstd::compress(data, level.clamp(1, 19) as i32, true)),
+        Method::Deflate => (
+            M_DEFLATE,
+            vec![],
+            oc_compress::deflate::deflate(data, level.clamp(1, 9)),
+        ),
+        Method::Zstd => (
+            M_ZSTD,
+            vec![1, 5, 0, 0, 0],
+            zstd::compress(data, level.clamp(1, 19) as i32, true),
+        ),
     };
     let mut coders = vec![(mid, props)];
     let mut sizes = vec![data.len() as u64];
@@ -874,13 +1005,22 @@ fn encode_stream(data: &[u8], method: Method, level: u32, password: Option<&str>
         crypto::cbc_encrypt(&key, &iv, &mut packed);
         coders.insert(0, (M_AES, props));
     }
-    Ok(PackedFolder { coders, unpack_sizes: sizes, packed })
+    Ok(PackedFolder {
+        coders,
+        unpack_sizes: sizes,
+        packed,
+    })
 }
 
 fn put_folder(v: &mut Vec<u8>, f: &PackedFolder) {
     put_num(v, f.coders.len() as u64);
     for (m, props) in &f.coders {
-        let idb: Vec<u8> = m.to_be_bytes().iter().copied().skip_while(|&b| b == 0).collect();
+        let idb: Vec<u8> = m
+            .to_be_bytes()
+            .iter()
+            .copied()
+            .skip_while(|&b| b == 0)
+            .collect();
         let idb = if idb.is_empty() { vec![0] } else { idb };
         let mut flags = idb.len() as u8;
         if !props.is_empty() {
@@ -963,7 +1103,10 @@ pub fn write(archive: &Archive, opts: &WriteOpts, cx: &Context) -> Result<Vec<u8
         h.push(id::NUM_UNPACK_STREAM);
         put_num(&mut h, stream_sizes.len() as u64);
         h.push(id::SIZE);
-        for s in stream_sizes.iter().take(stream_sizes.len().saturating_sub(1)) {
+        for s in stream_sizes
+            .iter()
+            .take(stream_sizes.len().saturating_sub(1))
+        {
             put_num(&mut h, *s);
         }
         h.push(id::CRC);

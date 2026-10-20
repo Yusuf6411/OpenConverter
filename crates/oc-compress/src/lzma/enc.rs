@@ -1,6 +1,7 @@
 //! LZMA and LZMA2 encoder: hash-chain match finder, repeat-distance aware greedy parse with
 //! one step of lazy evaluation. Compression levels 0 to 9 trade chain depth and window size.
-use super::{unsupported, Model, LenModel, ALIGN_BITS, END_POS_MODEL, MATCH_MIN};
+#![allow(clippy::indexing_slicing)] // table and buffer positions are bounded by the block and alphabet sizes checked above them
+use super::{unsupported, LenModel, Model, ALIGN_BITS, END_POS_MODEL, MATCH_MIN};
 use oc_core::Result;
 
 const MATCH_MAX: usize = 273;
@@ -17,8 +18,30 @@ struct Params {
 
 fn params(level: Level) -> Params {
     let l = level.0.min(9);
-    let dict = [1 << 18, 1 << 20, 1 << 21, 1 << 22, 1 << 22, 1 << 23, 1 << 23, 1 << 24, 1 << 24, 1 << 24][l as usize];
-    let (nice, depth) = [(16, 4), (24, 10), (32, 20), (48, 40), (64, 80), (96, 160), (128, 320), (192, 640), (273, 1280), (273, 2560)][l as usize];
+    let dict = [
+        1 << 18,
+        1 << 20,
+        1 << 21,
+        1 << 22,
+        1 << 22,
+        1 << 23,
+        1 << 23,
+        1 << 24,
+        1 << 24,
+        1 << 24,
+    ][l as usize];
+    let (nice, depth) = [
+        (16, 4),
+        (24, 10),
+        (32, 20),
+        (48, 40),
+        (64, 80),
+        (96, 160),
+        (128, 320),
+        (192, 640),
+        (273, 1280),
+        (273, 2560),
+    ][l as usize];
     Params {
         dict,
         nice,
@@ -177,7 +200,9 @@ impl Finder {
     }
     #[inline]
     fn h3(d: &[u8], i: usize) -> usize {
-        ((u32::from(d[i]) | u32::from(d[i + 1]) << 8 | u32::from(d[i + 2]) << 16).wrapping_mul(2_654_435_761) >> 16) as usize
+        ((u32::from(d[i]) | u32::from(d[i + 1]) << 8 | u32::from(d[i + 2]) << 16)
+            .wrapping_mul(2_654_435_761)
+            >> 16) as usize
     }
     #[inline]
     fn h2(d: &[u8], i: usize) -> usize {
@@ -313,7 +338,8 @@ impl Coder {
         let ps = self.pos_state(pos);
         rc.bit(&mut self.m.is_match[self.state][ps], 0);
         let prev = if pos > 0 { d[pos - 1] } else { 0 };
-        let lit_state = ((pos & ((1 << self.m.lp) - 1)) << self.m.lc) + (usize::from(prev) >> (8 - self.m.lc));
+        let lit_state =
+            ((pos & ((1 << self.m.lp) - 1)) << self.m.lc) + (usize::from(prev) >> (8 - self.m.lc));
         let probs = &mut self.m.literal[0x300 * lit_state..0x300 * (lit_state + 1)];
         let byte = usize::from(d[pos]);
         let mut sym = 1usize;
@@ -457,14 +483,20 @@ impl Parser<'_> {
         let nice = self.p.nice;
         while pos < end && rc.size_estimate() < byte_budget {
             let max = (end - pos).min(MATCH_MAX);
-            let (rlen, ridx) = if pos > 0 { self.rep_candidate(pos, max) } else { (0, 0) };
+            let (rlen, ridx) = if pos > 0 {
+                self.rep_candidate(pos, max)
+            } else {
+                (0, 0)
+            };
             let (mut mlen, mut mdist) = self.mf.find(d, pos, max);
             if mlen == 2 && mdist >= 128 {
                 mlen = 0;
             }
             // Take a repeat when it is nearly as long as the best new match.
             let use_rep = rlen >= 2
-                && (rlen + 1 >= mlen || (rlen + 2 >= mlen && mdist >= 1 << 9) || (rlen + 3 >= mlen && mdist >= 1 << 15));
+                && (rlen + 1 >= mlen
+                    || (rlen + 2 >= mlen && mdist >= 1 << 9)
+                    || (rlen + 3 >= mlen && mdist >= 1 << 15));
             let (len, is_rep) = if rlen >= nice.min(max) && rlen >= 2 {
                 (rlen, true)
             } else if mlen >= nice.min(max) && mlen >= 2 && !use_rep {
@@ -476,7 +508,11 @@ impl Parser<'_> {
             };
             if len < 2 {
                 // Literal, or a one-byte repeat of the last distance.
-                if pos > self.c.reps[0] && d[pos] == d[pos - self.c.reps[0] - 1] && self.c.state >= 7 && pos > 0 {
+                if pos > self.c.reps[0]
+                    && d[pos] == d[pos - self.c.reps[0] - 1]
+                    && self.c.state >= 7
+                    && pos > 0
+                {
                     self.c.short_rep(rc, pos);
                 } else {
                     self.c.literal(rc, d, pos);
@@ -496,7 +532,12 @@ impl Parser<'_> {
                         l2 > len || (l2 == len && d2 < mdist)
                     }
                 };
-                if (rlen2 >= 2 && rlen2 > len + 1 && is_rep) || (rlen2 >= len + 2 && !is_rep) || better(probe.0, probe.1) && probe.0 >= 3 && (probe.0 > len + 1 || probe.1 < mdist / 4) {
+                if (rlen2 >= 2 && rlen2 > len + 1 && is_rep)
+                    || (rlen2 >= len + 2 && !is_rep)
+                    || better(probe.0, probe.1)
+                        && probe.0 >= 3
+                        && (probe.0 > len + 1 || probe.1 < mdist / 4)
+                {
                     self.c.literal(rc, d, pos);
                     pos += 1;
                     continue;
@@ -555,7 +596,7 @@ pub fn encode_lzma(data: &[u8], level: Level, end_marker: bool) -> (u8, u32, Vec
         ps.c.end_marker(&mut rc, pos);
     }
     let dict = ps.mf.window().max(4096) as u32;
-    ((2 * 5 + 0) * 9 + 3, dict, rc.finish())
+    (2 * 5 * 9 + 3, dict, rc.finish())
 }
 
 /// LZMA2 chunk stream; returns the dictionary-size property byte and the data.
@@ -567,7 +608,7 @@ pub fn encode_lzma2(data: &[u8], level: Level) -> Result<(u8, Vec<u8>)> {
     let mut pos = 0usize;
     let mut first = true;
     let mut need_state_reset = true;
-    let props_byte = ((2 * 5 + 0) * 9 + 3) as u8;
+    let props_byte = (2 * 5 * 9 + 3) as u8;
     while pos < data.len() {
         let start = pos;
         let end = (start + (1 << 21)).min(data.len());

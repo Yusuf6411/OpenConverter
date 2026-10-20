@@ -1,13 +1,14 @@
 //! The .xz container (XZ file format 1.1): blocks, index, footer, CRC-32/CRC-64/SHA-256
 //! checks, LZMA2 with the delta and branch filters.
+#![allow(clippy::indexing_slicing)] // table and buffer positions are bounded by the block and alphabet sizes checked above them
 use crate::bcj::{self, Arch};
 use crate::lzma::{self, Level};
 use oc_checksum::{crc32, crc64_xz};
 use oc_core::{Error, ErrorCode, Limits, Progress, Result};
 use sha2::{Digest, Sha256};
 
-const MAGIC: [u8; 6] = [0xFD, b'7', b'z', b'X', b'Z', 0];
-const FOOTER_MAGIC: [u8; 2] = [b'Y', b'Z'];
+const MAGIC: [u8; 6] = *b"\xFD7zXZ\0";
+const FOOTER_MAGIC: [u8; 2] = *b"YZ";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Check {
@@ -111,20 +112,25 @@ pub fn decompress(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Res
             p += 1;
         }
         if streams > 0 && p >= input.len() {
-            if (p - pos) % 4 != 0 {
-                return Err(Error::corrupt("xz: stream padding is not a multiple of four"));
+            if !(p - pos).is_multiple_of(4) {
+                return Err(Error::corrupt(
+                    "xz: stream padding is not a multiple of four",
+                ));
             }
             break;
         }
-        if streams > 0 && (p - pos) % 4 != 0 {
-            return Err(Error::corrupt("xz: stream padding is not a multiple of four"));
+        if streams > 0 && !(p - pos).is_multiple_of(4) {
+            return Err(Error::corrupt(
+                "xz: stream padding is not a multiple of four",
+            ));
         }
         pos = p;
-        let used = stream(input.get(pos..).unwrap_or(&[]), &mut out, limits, progress)
-            .map_err(|e| match e.offset {
+        let used = stream(input.get(pos..).unwrap_or(&[]), &mut out, limits, progress).map_err(
+            |e| match e.offset {
                 Some(o) => e.at(o + pos as u64),
                 None => e,
-            })?;
+            },
+        )?;
         pos += used;
         streams += 1;
         if pos >= input.len() {
@@ -134,12 +140,23 @@ pub fn decompress(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Res
     Ok(out)
 }
 
-fn stream(data: &[u8], out: &mut Vec<u8>, limits: &Limits, progress: &dyn Progress) -> Result<usize> {
+fn stream(
+    data: &[u8],
+    out: &mut Vec<u8>,
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<usize> {
     if data.len() < 12 || data.get(..6) != Some(&MAGIC[..]) {
         return Err(Error::corrupt("not an xz stream"));
     }
-    let flags = data.get(6..8).ok_or_else(|| Error::truncated("xz: header"))?;
-    let hcrc = u32::from_le_bytes(data.get(8..12).and_then(|s| s.try_into().ok()).unwrap_or([0; 4]));
+    let flags = data
+        .get(6..8)
+        .ok_or_else(|| Error::truncated("xz: header"))?;
+    let hcrc = u32::from_le_bytes(
+        data.get(8..12)
+            .and_then(|s| s.try_into().ok())
+            .unwrap_or([0; 4]),
+    );
     if crc32(flags) != hcrc {
         return Err(Error::corrupt("xz: stream header CRC mismatch"));
     }
@@ -172,8 +189,16 @@ fn stream(data: &[u8], out: &mut Vec<u8>, limits: &Limits, progress: &dyn Progre
         let n_filters = usize::from(bf & 3) + 1;
         let mut hp = 2usize;
         let h = &header[..hsize - 4];
-        let comp_size = if bf & 0x40 != 0 { Some(varint(h, &mut hp)?) } else { None };
-        let uncomp_size = if bf & 0x80 != 0 { Some(varint(h, &mut hp)?) } else { None };
+        let comp_size = if bf & 0x40 != 0 {
+            Some(varint(h, &mut hp)?)
+        } else {
+            None
+        };
+        let uncomp_size = if bf & 0x80 != 0 {
+            Some(varint(h, &mut hp)?)
+        } else {
+            None
+        };
         let mut steps: Vec<Step> = Vec::new();
         let mut dict = 0u32;
         for i in 0..n_filters {
@@ -193,7 +218,11 @@ fn stream(data: &[u8], out: &mut Vec<u8>, limits: &Limits, progress: &dyn Progre
                     if b > 40 {
                         return Err(Error::corrupt("xz: bad LZMA2 dictionary size"));
                     }
-                    dict = if b == 40 { u32::MAX } else { (2 | u32::from(b & 1)) << (b / 2 + 11) };
+                    dict = if b == 40 {
+                        u32::MAX
+                    } else {
+                        (2 | u32::from(b & 1)) << (b / 2 + 11)
+                    };
                 }
                 0x03 => {
                     if last || psize != 1 {
@@ -245,7 +274,9 @@ fn stream(data: &[u8], out: &mut Vec<u8>, limits: &Limits, progress: &dyn Progre
             .get(padded..padded + cs)
             .ok_or_else(|| Error::truncated("xz: block check"))?;
         if check.compute(&block) != stored {
-            return Err(Error::corrupt("xz: integrity check failed").at((body_start + padded) as u64));
+            return Err(
+                Error::corrupt("xz: integrity check failed").at((body_start + padded) as u64)
+            );
         }
         records.push(((hsize + used + cs) as u64, block.len() as u64));
         pos = body_start + padded + cs;
@@ -267,7 +298,7 @@ fn stream(data: &[u8], out: &mut Vec<u8>, limits: &Limits, progress: &dyn Progre
             return Err(Error::corrupt("xz: index does not match the blocks"));
         }
     }
-    while (pos - idx_start) % 4 != 0 {
+    while !(pos - idx_start).is_multiple_of(4) {
         if data.get(pos) != Some(&0) {
             return Err(Error::corrupt("xz: index padding is not zero"));
         }
@@ -293,7 +324,9 @@ fn stream(data: &[u8], out: &mut Vec<u8>, limits: &Limits, progress: &dyn Progre
     }
     let backward = (u32::from_le_bytes(f[4..8].try_into().unwrap_or([0; 4])) as usize + 1) * 4;
     if backward != index_size || f[8..10] != *flags || f[10..12] != FOOTER_MAGIC {
-        return Err(Error::corrupt("xz: stream footer does not match the header"));
+        return Err(Error::corrupt(
+            "xz: stream footer does not match the header",
+        ));
     }
     Ok(pos + 12)
 }
@@ -369,8 +402,8 @@ pub fn compress_filtered(data: &[u8], level: u32, check: Check, filter: Filter) 
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
-    #![allow(clippy::indexing_slicing)]
     use super::*;
     use oc_core::NoProgress;
 
@@ -398,7 +431,12 @@ mod tests {
             b"0123456789".repeat(30_000),
         ];
         for c in &cases {
-            for (level, check) in [(0, Check::Crc32), (3, Check::Crc64), (6, Check::Sha256), (9, Check::None)] {
+            for (level, check) in [
+                (0, Check::Crc32),
+                (3, Check::Crc64),
+                (6, Check::Sha256),
+                (9, Check::None),
+            ] {
                 let z = compress(c, level, check);
                 assert_eq!(&d(&z).unwrap(), c, "len {} level {level}", c.len());
             }
@@ -408,8 +446,16 @@ mod tests {
     #[test]
     fn filters_roundtrip() {
         let data = lcg(50_000, 8, 255);
-        for f in [Filter::Delta(4), Filter::Branch(Arch::X86), Filter::Branch(Arch::Arm64)] {
-            assert_eq!(d(&compress_filtered(&data, 4, Check::Crc64, f)).unwrap(), data, "{f:?}");
+        for f in [
+            Filter::Delta(4),
+            Filter::Branch(Arch::X86),
+            Filter::Branch(Arch::Arm64),
+        ] {
+            assert_eq!(
+                d(&compress_filtered(&data, 4, Check::Crc64, f)).unwrap(),
+                data,
+                "{f:?}"
+            );
         }
     }
 

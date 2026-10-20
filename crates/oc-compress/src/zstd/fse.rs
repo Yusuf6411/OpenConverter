@@ -139,9 +139,7 @@ impl Table {
         for (s, &c) in counts.iter().enumerate() {
             if c == -1 {
                 cells[high].symbol = s as u8;
-                if high > 0 {
-                    high -= 1;
-                }
+                high = high.saturating_sub(1);
                 next[s] = 1;
             } else {
                 next[s] = c.max(0) as u16;
@@ -176,7 +174,11 @@ impl Table {
 
 /// Reads an FSE table description; returns the normalised counts, the accuracy log and the
 /// number of bytes it took.
-pub(crate) fn read_counts(data: &[u8], max_symbol: usize, max_al: u32) -> Result<(Vec<i16>, u32, usize)> {
+pub(crate) fn read_counts(
+    data: &[u8],
+    max_symbol: usize,
+    max_al: u32,
+) -> Result<(Vec<i16>, u32, usize)> {
     let mut r = LsbReader::new(data);
     let al = r.read(4)? + 5;
     if al > max_al {
@@ -191,9 +193,7 @@ pub(crate) fn read_counts(data: &[u8], max_symbol: usize, max_al: u32) -> Result
         if prev_zero {
             loop {
                 let rep = r.read(2)?;
-                for _ in 0..rep {
-                    counts.push(0);
-                }
+                counts.resize(counts.len() + rep as usize, 0);
                 if counts.len() > max_symbol + 1 {
                     return Err(Error::corrupt("zstd: FSE symbol overflow"));
                 }

@@ -16,7 +16,9 @@ const BIN_SCALE: u32 = 1 << (INT_BITS + PERIOD_BITS);
 const NUM_INDEXES: usize = 38;
 const TOP: u32 = 1 << 24;
 
-const INIT_BIN_ESC: [u16; 8] = [0x3CDD, 0x1F3F, 0x59BF, 0x48F3, 0x64A1, 0x5ABC, 0x6632, 0x6051];
+const INIT_BIN_ESC: [u16; 8] = [
+    0x3CDD, 0x1F3F, 0x59BF, 0x48F3, 0x64A1, 0x5ABC, 0x6632, 0x6051,
+];
 const EXP_ESCAPE: [u8; 16] = [25, 14, 9, 7, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 2, 2];
 
 #[derive(Clone, Copy, Default)]
@@ -74,7 +76,12 @@ impl Model {
     }
     fn u32_at(&self, o: u32) -> u32 {
         let o = o as usize;
-        u32::from_le_bytes([self.mem[o], self.mem[o + 1], self.mem[o + 2], self.mem[o + 3]])
+        u32::from_le_bytes([
+            self.mem[o],
+            self.mem[o + 1],
+            self.mem[o + 2],
+            self.mem[o + 3],
+        ])
     }
     fn set_u32(&mut self, o: u32, v: u32) {
         let o = o as usize;
@@ -115,7 +122,14 @@ impl Model {
     }
     fn read_state(&self, s: u32) -> [u8; 6] {
         let s = s as usize;
-        [self.mem[s], self.mem[s + 1], self.mem[s + 2], self.mem[s + 3], self.mem[s + 4], self.mem[s + 5]]
+        [
+            self.mem[s],
+            self.mem[s + 1],
+            self.mem[s + 2],
+            self.mem[s + 3],
+            self.mem[s + 4],
+            self.mem[s + 5],
+        ]
     }
     fn write_state(&mut self, s: u32, v: [u8; 6]) {
         let s = s as usize;
@@ -166,7 +180,11 @@ impl Model {
             init_rl: 0,
             bin_summ: Box::new([[0; 64]; 128]),
             see: Box::new([[See::default(); 16]; 25]),
-            dummy_see: See { summ: 0, shift: PERIOD_BITS as u8, count: 64 },
+            dummy_see: See {
+                summ: 0,
+                shift: PERIOD_BITS as u8,
+                count: 64,
+            },
         };
         let mut k = 0usize;
         for i in 0..NUM_INDEXES {
@@ -383,17 +401,21 @@ impl Model {
             let s = self.found + i * 6;
             self.write_state(s, [i as u8, 1, 0, 0, 0, 0]);
         }
-        for i in 0..128usize {
-            for k in 0..8usize {
-                let val = (BIN_SCALE - u32::from(INIT_BIN_ESC[k]) / (i as u32 + 2)) as u16;
+        for (i, row) in self.bin_summ.iter_mut().enumerate() {
+            for (k, esc) in INIT_BIN_ESC.iter().enumerate() {
+                let val = (BIN_SCALE - u32::from(*esc) / (i as u32 + 2)) as u16;
                 for m in (0..64).step_by(8) {
-                    self.bin_summ[i][k + m] = val;
+                    row[k + m] = val;
                 }
             }
         }
         for i in 0..25usize {
             for k in 0..16usize {
-                self.see[i][k] = See { summ: ((5 * i as u32 + 10) << (PERIOD_BITS - 4)) as u16, shift: (PERIOD_BITS - 4) as u8, count: 4 };
+                self.see[i][k] = See {
+                    summ: ((5 * i as u32 + 10) << (PERIOD_BITS - 4)) as u16,
+                    shift: (PERIOD_BITS - 4) as u8,
+                    count: 4,
+                };
             }
         }
     }
@@ -442,7 +464,11 @@ impl Model {
             }
             let cf = self.freq(s) - 1;
             let s0 = self.summ_freq(c) - self.num_stats(c) - cf;
-            1 + if 2 * cf <= s0 { u32::from(5 * cf > s0) } else { (2 * cf + 3 * s0 - 1) / (2 * s0) }
+            1 + if 2 * cf <= s0 {
+                u32::from(5 * cf > s0)
+            } else {
+                (2 * cf + 3 * s0 - 1) / (2 * s0)
+            }
         };
         loop {
             let c1 = if self.hi_unit != self.lo_unit {
@@ -571,7 +597,8 @@ impl Model {
                     }
                 }
                 let sf = self.summ_freq(c);
-                let add = u32::from(2 * ns1 < ns) + 2 * u32::from((4 * ns1 <= ns) & (sf <= 8 * ns1));
+                let add =
+                    u32::from(2 * ns1 < ns) + 2 * u32::from((4 * ns1 <= ns) & (sf <= 8 * ns1));
                 self.set_u16(c + 2, sf + add);
             } else {
                 let s = self.alloc_units(0);
@@ -582,7 +609,11 @@ impl Model {
                 self.copy_state(s, Self::one_state(c));
                 self.set_u32(c + 4, s);
                 let f = self.freq(s);
-                let nf = if f < MAX_FREQ / 4 - 1 { f << 1 } else { MAX_FREQ - 4 };
+                let nf = if f < MAX_FREQ / 4 - 1 {
+                    f << 1
+                } else {
+                    MAX_FREQ - 4
+                };
                 self.set_freq(s, nf);
                 self.set_u16(c + 2, nf + self.init_esc + u32::from(ns > 3));
             }
@@ -593,7 +624,10 @@ impl Model {
                 cf = 1 + u32::from(cf > sf) + u32::from(cf >= 4 * sf);
                 self.set_u16(c + 2, sfc + 3);
             } else {
-                cf = 4 + u32::from(cf >= 9 * sf) + u32::from(cf >= 12 * sf) + u32::from(cf >= 15 * sf);
+                cf = 4
+                    + u32::from(cf >= 9 * sf)
+                    + u32::from(cf >= 12 * sf)
+                    + u32::from(cf >= 15 * sf);
                 self.set_u16(c + 2, sfc + cf);
             }
             let s = self.stats(c) + ns1 * 6;
@@ -907,7 +941,10 @@ impl Model {
                 self.order_fall += 1;
                 let suffix = self.suffix(self.min_ctx);
                 if suffix == 0 {
-                    return Err(Error::new(ErrorCode::CorruptFile, "PPMd: end mark inside the data"));
+                    return Err(Error::new(
+                        ErrorCode::CorruptFile,
+                        "PPMd: end mark inside the data",
+                    ));
                 }
                 self.min_ctx = suffix;
                 if self.num_stats(suffix) != num_masked {
@@ -960,14 +997,23 @@ impl Model {
 
 /// Decodes `out_len` bytes of a 7z PPMd stream. `props` is the order (1 byte) followed by the
 /// model memory size (u32, little endian).
-pub fn decode(props: &[u8], data: &[u8], out_len: usize, limits: &Limits, progress: &dyn Progress) -> Result<Vec<u8>> {
+pub fn decode(
+    props: &[u8],
+    data: &[u8],
+    out_len: usize,
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<Vec<u8>> {
     let [order, m0, m1, m2, m3, ..] = *props else {
         return Err(Error::corrupt("PPMd: properties are 5 bytes"));
     };
     let mem = u32::from_le_bytes([m0, m1, m2, m3]);
     let order = u32::from(order);
-    if !(2..=MAX_ORDER).contains(&order) || mem < (1 << 11) || mem > 0xFFFF_FFFF - 12 * 3 {
-        return Err(Error::new(ErrorCode::UnsupportedVariant, "PPMd: unsupported order or memory size"));
+    if !(2..=MAX_ORDER).contains(&order) || !(1 << 11..=0xFFFF_FFFF - 12 * 3).contains(&mem) {
+        return Err(Error::new(
+            ErrorCode::UnsupportedVariant,
+            "PPMd: unsupported order or memory size",
+        ));
     }
     limits.check_alloc(u64::from(mem))?;
     limits.check_alloc(out_len as u64)?;

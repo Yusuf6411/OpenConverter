@@ -36,13 +36,18 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
         let mut name = raw_name.clone();
         if let Some(n) = raw_name.strip_prefix("#1/") {
             // BSD: the name precedes the data and counts toward the size.
-            let nl: usize = n.parse().map_err(|_| Error::corrupt("ar: bad BSD name length"))?;
+            let nl: usize = n
+                .parse()
+                .map_err(|_| Error::corrupt("ar: bad BSD name length"))?;
             let nb = data
                 .get(start..start + nl)
                 .ok_or_else(|| Error::truncated("ar: name cut short"))?;
-            name = String::from_utf8_lossy(nb.split(|&c| c == 0).next().unwrap_or(&[])).into_owned();
+            name =
+                String::from_utf8_lossy(nb.split(|&c| c == 0).next().unwrap_or(&[])).into_owned();
             start += nl;
-            size = size.checked_sub(nl).ok_or_else(|| Error::corrupt("ar: name longer than member"))?;
+            size = size
+                .checked_sub(nl)
+                .ok_or_else(|| Error::corrupt("ar: name longer than member"))?;
         }
         let end = start
             .checked_add(size)
@@ -58,9 +63,15 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
         if raw_name == "/" || raw_name == "/SYM64/" || raw_name.starts_with("__.SYMDEF") {
             continue; // symbol tables carry no files
         }
-        if let Some(idx) = raw_name.strip_prefix('/').and_then(|d| d.parse::<usize>().ok()) {
+        if let Some(idx) = raw_name
+            .strip_prefix('/')
+            .and_then(|d| d.parse::<usize>().ok())
+        {
             let tail = names.get(idx..).unwrap_or(&[]);
-            let end = tail.iter().position(|&c| c == b'\n' || c == 0).unwrap_or(tail.len());
+            let end = tail
+                .iter()
+                .position(|&c| c == b'\n' || c == 0)
+                .unwrap_or(tail.len());
             name = String::from_utf8_lossy(tail.get(..end).unwrap_or(&[])).into_owned();
         }
         let name = name.trim_end_matches('/').to_string();
@@ -106,7 +117,11 @@ pub fn write(archive: &Archive, cx: &Context) -> Result<Vec<u8>> {
     let mut out = MAGIC.to_vec();
     let hdr = |out: &mut Vec<u8>, name: &str, mtime: i64, mode: u32, size: usize| {
         out.extend_from_slice(
-            format!("{name:<16}{mtime:<12}{:<6}{:<6}{mode:<8o}{size:<10}`\n", 0, 0).as_bytes(),
+            format!(
+                "{name:<16}{mtime:<12}{:<6}{:<6}{mode:<8o}{size:<10}`\n",
+                0, 0
+            )
+            .as_bytes(),
         );
     };
     if !table.is_empty() {
@@ -118,7 +133,13 @@ pub fn write(archive: &Archive, cx: &Context) -> Result<Vec<u8>> {
     }
     for (e, slot) in archive.entries.iter().zip(slots.iter()) {
         cx.progress.check_cancelled()?;
-        hdr(&mut out, slot, e.mtime.unwrap_or(0).max(0), 0o100_000 | (e.mode & 0o7777), e.data.len());
+        hdr(
+            &mut out,
+            slot,
+            e.mtime.unwrap_or(0).max(0),
+            0o100_000 | (e.mode & 0o7777),
+            e.data.len(),
+        );
         out.extend_from_slice(&e.data);
         if e.data.len() & 1 == 1 {
             out.push(b'\n');

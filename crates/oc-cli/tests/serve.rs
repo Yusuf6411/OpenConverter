@@ -334,20 +334,37 @@ fn archives_through_the_api() {
     assert!(list.has("\"path\":\"notes.xyz\""), "{}", list.0);
 
     // One entry comes back as itself, several as a ZIP.
-    let (st, one) = s.json("POST", &format!("/api/files/{zid}/extract"), "{\"paths\":[\"notes.xyz\"]}");
+    let (st, one) = s.json(
+        "POST",
+        &format!("/api/files/{zid}/extract"),
+        "{\"paths\":[\"notes.xyz\"]}",
+    );
     assert_eq!(st, 200, "{}", one.0);
     assert_eq!(one.str("output_name"), "notes.xyz");
-    let (_, _, data) = s.request("GET", &format!("/api/outputs/{}/download", one.str("output_id")), &[], b"");
+    let (_, _, data) = s.request(
+        "GET",
+        &format!("/api/outputs/{}/download", one.str("output_id")),
+        &[],
+        b"",
+    );
     assert_eq!(data, b"gamma");
     let (st, all) = s.json("POST", &format!("/api/files/{zid}/extract"), "{}");
     assert_eq!(st, 200, "{}", all.0);
     assert_eq!(all.str("output_name"), "bundle-files.zip");
-    let (st, none) = s.json("POST", &format!("/api/files/{zid}/extract"), "{\"paths\":[\"missing\"]}");
+    let (st, none) = s.json(
+        "POST",
+        &format!("/api/files/{zid}/extract"),
+        "{\"paths\":[\"missing\"]}",
+    );
     assert_eq!(st, 400, "{}", none.0);
 
     // Not an archive; and a password-protected ZIP asks for its password.
     let (_, bmp) = s.upload("p.bmp", &png_1x1());
-    let (st, _) = s.json("POST", &format!("/api/files/{}/entries", bmp.str("file_id")), "{}");
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/files/{}/entries", bmp.str("file_id")),
+        "{}",
+    );
     assert_eq!(st, 415);
     let body = format!(
         "{{\"file_ids\":[\"{}\"],\"target_format\":\"zip\",\"options\":{{\"password\":\"hunter2\"}}}}",
@@ -356,14 +373,27 @@ fn archives_through_the_api() {
     let (st, job) = s.json("POST", "/api/archives", &body);
     assert_eq!(st, 201, "{}", job.0);
     let done = wait_job(&s, &job.str("job_id"));
-    let (_, _, enc) = s.request("GET", &format!("/api/outputs/{}/download", done.str("output_id")), &[], b"");
+    let (_, _, enc) = s.request(
+        "GET",
+        &format!("/api/outputs/{}/download", done.str("output_id")),
+        &[],
+        b"",
+    );
     let (_, up) = s.upload("secret.zip", &enc);
     let eid = up.str("file_id");
     let (st, r) = s.json("POST", &format!("/api/files/{eid}/extract"), "{}");
     assert_eq!(st, 401, "{}", r.0);
     assert!(r.has("encrypted_need_password"), "{}", r.0);
-    let (st, _) = s.json("POST", &format!("/api/files/{eid}/extract"), "{\"password\":\"nope\"}");
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/files/{eid}/extract"),
+        "{\"password\":\"nope\"}",
+    );
     assert_eq!(st, 401);
-    let (st, _) = s.json("POST", &format!("/api/files/{eid}/extract"), "{\"password\":\"hunter2\"}");
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/files/{eid}/extract"),
+        "{\"password\":\"hunter2\"}",
+    );
     assert_eq!(st, 200);
 }

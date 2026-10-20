@@ -1,5 +1,6 @@
-use std::time::Instant;
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 use oc_core::{Limits, NoProgress};
+use std::time::Instant;
 fn main() {
     let a: Vec<String> = std::env::args().collect();
     let data = std::fs::read(&a[2]).unwrap();
@@ -20,5 +21,14 @@ fn main() {
     };
     let td = t.elapsed();
     let mb = data.len() as f64 / 1e6;
-    println!("{} level {level}: {} -> {} ({:.1}%)  enc {:.1} MB/s  dec {:.1} MB/s  ok {}", a[1], data.len(), z.len(), 100.0 * z.len() as f64 / data.len() as f64, mb / tc.as_secs_f64(), mb / td.as_secs_f64(), back == data);
+    println!(
+        "{} level {level}: {} -> {} ({:.1}%)  enc {:.1} MB/s  dec {:.1} MB/s  ok {}",
+        a[1],
+        data.len(),
+        z.len(),
+        100.0 * z.len() as f64 / data.len() as f64,
+        mb / tc.as_secs_f64(),
+        mb / td.as_secs_f64(),
+        back == data
+    );
 }

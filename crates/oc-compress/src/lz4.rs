@@ -19,7 +19,9 @@ pub fn decode_block(src: &[u8], out: &mut Vec<u8>, floor: usize, limit: usize) -
         let mut ll = usize::from(token >> 4);
         if ll == 15 {
             loop {
-                let b = *src.get(i).ok_or_else(|| Error::truncated("lz4: literal length"))?;
+                let b = *src
+                    .get(i)
+                    .ok_or_else(|| Error::truncated("lz4: literal length"))?;
                 i += 1;
                 ll += usize::from(b);
                 if b != 255 {
@@ -36,7 +38,9 @@ pub fn decode_block(src: &[u8], out: &mut Vec<u8>, floor: usize, limit: usize) -
         out.extend_from_slice(lits);
         i += ll;
         if out.len() - start > limit {
-            return Err(Error::corrupt("lz4: block larger than its declared maximum"));
+            return Err(Error::corrupt(
+                "lz4: block larger than its declared maximum",
+            ));
         }
         if i == src.len() {
             return Ok(());
@@ -52,7 +56,9 @@ pub fn decode_block(src: &[u8], out: &mut Vec<u8>, floor: usize, limit: usize) -
         let mut ml = usize::from(token & 15);
         if ml == 15 {
             loop {
-                let b = *src.get(i).ok_or_else(|| Error::truncated("lz4: match length"))?;
+                let b = *src
+                    .get(i)
+                    .ok_or_else(|| Error::truncated("lz4: match length"))?;
                 i += 1;
                 ml += usize::from(b);
                 if b != 255 {
@@ -65,7 +71,9 @@ pub fn decode_block(src: &[u8], out: &mut Vec<u8>, floor: usize, limit: usize) -
         }
         ml += MIN_MATCH;
         if out.len() - start + ml > limit {
-            return Err(Error::corrupt("lz4: block larger than its declared maximum"));
+            return Err(Error::corrupt(
+                "lz4: block larger than its declared maximum",
+            ));
         }
         let from = out.len() - off;
         if off >= ml {
@@ -128,11 +136,18 @@ pub fn decompress(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Res
             });
         }
         let desc_start = pos;
-        let flg = *input.get(pos).ok_or_else(|| Error::truncated("lz4: descriptor"))?;
-        let bd = *input.get(pos + 1).ok_or_else(|| Error::truncated("lz4: descriptor"))?;
+        let flg = *input
+            .get(pos)
+            .ok_or_else(|| Error::truncated("lz4: descriptor"))?;
+        let bd = *input
+            .get(pos + 1)
+            .ok_or_else(|| Error::truncated("lz4: descriptor"))?;
         pos += 2;
         if flg >> 6 != 1 {
-            return Err(Error::new(ErrorCode::UnsupportedVariant, "lz4: unknown frame version"));
+            return Err(Error::new(
+                ErrorCode::UnsupportedVariant,
+                "lz4: unknown frame version",
+            ));
         }
         if flg & 2 != 0 || bd & 0x8F != 0 {
             return Err(Error::corrupt("lz4: reserved bits set"));
@@ -151,14 +166,21 @@ pub fn decompress(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Res
         };
         let mut content_size = None;
         if has_size {
-            let b = input.get(pos..pos + 8).ok_or_else(|| Error::truncated("lz4: content size"))?;
+            let b = input
+                .get(pos..pos + 8)
+                .ok_or_else(|| Error::truncated("lz4: content size"))?;
             content_size = Some(u64::from_le_bytes(b.try_into().unwrap_or([0; 8])));
             pos += 8;
         }
         if has_dict {
-            return Err(Error::new(ErrorCode::UnsupportedVariant, "lz4: frames with a dictionary are not supported"));
+            return Err(Error::new(
+                ErrorCode::UnsupportedVariant,
+                "lz4: frames with a dictionary are not supported",
+            ));
         }
-        let hc = *input.get(pos).ok_or_else(|| Error::truncated("lz4: header checksum"))?;
+        let hc = *input
+            .get(pos)
+            .ok_or_else(|| Error::truncated("lz4: header checksum"))?;
         if ((xxhash32(&input[desc_start..pos], 0) >> 8) & 0xFF) as u8 != hc {
             return Err(Error::corrupt("lz4: header checksum mismatch"));
         }
@@ -176,9 +198,13 @@ pub fn decompress(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Res
             let stored = raw & 0x8000_0000 != 0;
             let n = (raw & 0x7FFF_FFFF) as usize;
             if n > max_block + 16 {
-                return Err(Error::corrupt("lz4: block larger than the declared maximum"));
+                return Err(Error::corrupt(
+                    "lz4: block larger than the declared maximum",
+                ));
             }
-            let body = input.get(pos..pos + n).ok_or_else(|| Error::truncated("lz4: block"))?;
+            let body = input
+                .get(pos..pos + n)
+                .ok_or_else(|| Error::truncated("lz4: block"))?;
             pos += n;
             if block_sum {
                 if xxhash32(body, 0) != u32_at(pos)? {
@@ -190,7 +216,11 @@ pub fn decompress(input: &[u8], limits: &Limits, progress: &dyn Progress) -> Res
                 out.extend_from_slice(body);
             } else {
                 // Linked blocks may reach up to 64 KiB back into earlier blocks.
-                let floor = if indep { out.len() } else { out.len().saturating_sub(65_536).max(frame_start) };
+                let floor = if indep {
+                    out.len()
+                } else {
+                    out.len().saturating_sub(65_536).max(frame_start)
+                };
                 decode_block(body, &mut out, floor, max_block)?;
             }
             limits.check_expansion(input.len() as u64, out.len() as u64)?;
@@ -220,11 +250,26 @@ struct Params {
 
 fn params(level: u32) -> Params {
     match level {
-        0..=2 => Params { depth: 1, skip: true },
-        3 => Params { depth: 8, skip: false },
-        4..=6 => Params { depth: 32, skip: false },
-        7..=9 => Params { depth: 128, skip: false },
-        _ => Params { depth: 1024, skip: false },
+        0..=2 => Params {
+            depth: 1,
+            skip: true,
+        },
+        3 => Params {
+            depth: 8,
+            skip: false,
+        },
+        4..=6 => Params {
+            depth: 32,
+            skip: false,
+        },
+        7..=9 => Params {
+            depth: 128,
+            skip: false,
+        },
+        _ => Params {
+            depth: 1024,
+            skip: false,
+        },
     }
 }
 
@@ -263,7 +308,11 @@ pub fn compress_block(src: &[u8], level: u32) -> Vec<u8> {
     }
     let hash_bits = 16;
     let mut head = vec![u32::MAX; 1 << hash_bits];
-    let mut prev = if p.depth > 1 { vec![u32::MAX; n] } else { Vec::new() };
+    let mut prev = if p.depth > 1 {
+        vec![u32::MAX; n]
+    } else {
+        Vec::new()
+    };
     let hash = |i: usize| -> usize {
         let w = u32::from_le_bytes([src[i], src[i + 1], src[i + 2], src[i + 3]]);
         (w.wrapping_mul(2_654_435_761) >> (32 - hash_bits)) as usize
@@ -366,8 +415,8 @@ pub fn compress(data: &[u8], level: u32) -> Vec<u8> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
-    #![allow(clippy::indexing_slicing)]
     use super::*;
     use oc_core::NoProgress;
 
@@ -381,7 +430,7 @@ mod tests {
         while v.len() < n {
             s = s.wrapping_mul(1_103_515_245).wrapping_add(12345);
             let r = (s >> 16) as usize;
-            if r % 3 == 0 && v.len() > 20 {
+            if r.is_multiple_of(3) && v.len() > 20 {
                 let from = r % (v.len() - 10);
                 let len = 4 + r % 40;
                 for k in 0..len {

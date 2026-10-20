@@ -95,23 +95,19 @@ fn normalize(hist: &[u32], tl: u32) -> Option<Vec<i16>> {
     while sum != size {
         if sum < size {
             // Give a cell to the symbol that gains the most from it.
-            let best = (0..norm.len())
-                .filter(|&s| norm[s] > 0)
-                .max_by(|&a, &b| {
-                    let ga = f64::from(hist[a]) / norm[a] as f64;
-                    let gb = f64::from(hist[b]) / norm[b] as f64;
-                    ga.total_cmp(&gb)
-                })?;
+            let best = (0..norm.len()).filter(|&s| norm[s] > 0).max_by(|&a, &b| {
+                let ga = f64::from(hist[a]) / norm[a] as f64;
+                let gb = f64::from(hist[b]) / norm[b] as f64;
+                ga.total_cmp(&gb)
+            })?;
             norm[best] += 1;
             sum += 1;
         } else {
-            let best = (0..norm.len())
-                .filter(|&s| norm[s] > 1)
-                .min_by(|&a, &b| {
-                    let la = f64::from(hist[a]) / (norm[a] - 1) as f64;
-                    let lb = f64::from(hist[b]) / (norm[b] - 1) as f64;
-                    la.total_cmp(&lb)
-                })?;
+            let best = (0..norm.len()).filter(|&s| norm[s] > 1).min_by(|&a, &b| {
+                let la = f64::from(hist[a]) / (norm[a] - 1) as f64;
+                let lb = f64::from(hist[b]) / (norm[b] - 1) as f64;
+                la.total_cmp(&lb)
+            })?;
             norm[best] -= 1;
             sum -= 1;
         }
@@ -180,7 +176,10 @@ impl EncTable {
         for v in &mut by_symbol {
             v.sort_unstable();
         }
-        Self { al: t.al, by_symbol }
+        Self {
+            al: t.al,
+            by_symbol,
+        }
     }
 
     /// A cell that decodes `sym` (the state the encoder starts from for the last symbol).
@@ -275,7 +274,10 @@ impl HufEnc {
     fn stream(&self, data: &[u8]) -> Vec<u8> {
         let mut w = BitW::default();
         for &b in data.iter().rev() {
-            w.put(self.codes[usize::from(b)], u32::from(self.lens[usize::from(b)]));
+            w.put(
+                self.codes[usize::from(b)],
+                u32::from(self.lens[usize::from(b)]),
+            );
         }
         w.close()
     }
@@ -283,7 +285,7 @@ impl HufEnc {
 
 /// FSE-compressed Huffman weights (accuracy up to 6), or `None` if they do not compress.
 fn fse_weights(weights: &[u8]) -> Option<Vec<u8>> {
-    let mut hist = vec![0u32; 13];
+    let mut hist = [0u32; 13];
     for &w in weights {
         hist[usize::from(w)] += 1;
     }
@@ -374,7 +376,7 @@ fn literals_section(lits: &[u8]) -> Vec<u8> {
         body.extend(huf.stream(lits));
     }
     let comp = body.len();
-    if comp + 4 >= n + 1 || comp >= 1 << 18 {
+    if comp + 4 > n || comp >= 1 << 18 {
         return plain(lits);
     }
     // Header: type 2 (compressed), size format by size, regenerated and compressed sizes.
@@ -504,7 +506,11 @@ fn sequences_section(seqs: &[Seq]) -> Vec<u8> {
     let t_ll = build(&ll_mode, def_ll, &mut out);
     let t_of = build(&of_mode, def_of, &mut out);
     let t_ml = build(&ml_mode, def_ml, &mut out);
-    let (e_ll, e_of, e_ml) = (EncTable::new(&t_ll, 36), EncTable::new(&t_of, 32), EncTable::new(&t_ml, 53));
+    let (e_ll, e_of, e_ml) = (
+        EncTable::new(&t_ll, 36),
+        EncTable::new(&t_of, 32),
+        EncTable::new(&t_ml, 53),
+    );
     let mut w = BitW::default();
     let last = n - 1;
     let mut s_ll = e_ll.start(ll_codes[last]);
@@ -727,8 +733,16 @@ fn parse(
         }
         let (mlen, mdist) = m.find(i, max);
         m.insert(i);
-        let g_main = if mlen >= 4 { gain(mlen, mdist, is_repeat(mdist as u32, ll, reps)) } else { i64::MIN };
-        let g_rep = if rep_best.0 >= MIN_MATCH { gain(rep_best.0, rep_best.1, true) } else { i64::MIN };
+        let g_main = if mlen >= 4 {
+            gain(mlen, mdist, is_repeat(mdist as u32, ll, reps))
+        } else {
+            i64::MIN
+        };
+        let g_rep = if rep_best.0 >= MIN_MATCH {
+            gain(rep_best.0, rep_best.1, true)
+        } else {
+            i64::MIN
+        };
         let (mut len, mut dist, mut g) = if g_rep >= g_main && g_rep != i64::MIN {
             (rep_best.0, rep_best.1, g_rep)
         } else if g_main != i64::MIN {
@@ -744,7 +758,11 @@ fn parse(
         let mut depth = 0;
         while len < nice && m.p.lazy > depth && i + 1 < end {
             let (l2, d2) = m.find(i + 1, end - i - 1);
-            let g2 = if l2 >= 4 { gain(l2, d2, is_repeat(d2 as u32, ll + 1, reps)) - 4 } else { i64::MIN };
+            let g2 = if l2 >= 4 {
+                gain(l2, d2, is_repeat(d2 as u32, ll + 1, reps)) - 4
+            } else {
+                i64::MIN
+            };
             if g2 > g {
                 m.insert(i + 1);
                 i += 1;
@@ -803,7 +821,11 @@ pub fn compress(data: &[u8], level: i32, checksum: bool) -> Vec<u8> {
         4 => out.extend_from_slice(&(n as u32).to_le_bytes()),
         _ => out.extend_from_slice(&n.to_le_bytes()),
     }
-    let window = if single { n as usize } else { 1usize << window_log };
+    let window = if single {
+        n as usize
+    } else {
+        1usize << window_log
+    };
     let mut m = Matcher::new(data, window.max(1024), params(level));
     let mut reps = [1u32, 4, 8];
     let mut pos = 0usize;
@@ -848,6 +870,7 @@ pub fn compress(data: &[u8], level: i32, checksum: bool) -> Vec<u8> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
     use crate::zstd::fse::read_counts;
@@ -857,7 +880,7 @@ mod tests {
         let mut s = 7u32;
         let mut r = move || {
             s = s.wrapping_mul(1_103_515_245).wrapping_add(12345);
-            (s >> 16) as u32
+            s >> 16
         };
         for _ in 0..500 {
             let syms = 2 + (r() % 50) as usize;
@@ -873,7 +896,9 @@ mod tests {
             let total: usize = hist.iter().map(|&h| h as usize).sum();
             let max_sym = hist.iter().rposition(|&h| h > 0).unwrap();
             let tl = optimal_log(9, total, max_sym);
-            let Some(norm) = normalize(&hist[..=max_sym], tl) else { continue };
+            let Some(norm) = normalize(&hist[..=max_sym], tl) else {
+                continue;
+            };
             let bytes = write_counts(&norm, tl);
             let (got, al, used) = read_counts(&bytes, max_sym.max(35), 9).unwrap();
             assert_eq!(al, tl);

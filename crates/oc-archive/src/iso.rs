@@ -1,5 +1,6 @@
 //! ISO 9660 images: primary and Joliet volume descriptors, Rock Ridge names, permissions,
 //! symlinks and timestamps. Read only.
+#![allow(clippy::indexing_slicing, clippy::chunks_exact_to_as_chunks)] // offsets are bounds-checked against the input before use; the archive tests and fuzz target feed hostile data
 use crate::entry::{Archive, Budget, Entry};
 use crate::Context;
 use oc_core::{Error, ErrorCode, Result};
@@ -33,7 +34,8 @@ fn dir_date(b: &[u8]) -> Option<i64> {
     if d[1] == 0 {
         return None;
     }
-    let days = crate::zip::days_from_civil(1900 + i64::from(d[0]), i64::from(d[1]), i64::from(d[2]));
+    let days =
+        crate::zip::days_from_civil(1900 + i64::from(d[0]), i64::from(d[1]), i64::from(d[2]));
     let tz = i64::from(d[6] as i8) * 900;
     Some(days * 86400 + i64::from(d[3]) * 3600 + i64::from(d[4]) * 60 + i64::from(d[5]) - tz)
 }
@@ -132,7 +134,11 @@ fn parse_rr(data: &[u8], sys: &[u8], depth: u32) -> Rr {
                 b"CL" if body.len() >= 4 => rr.child_link = Some(le32(body, 0)),
                 b"RE" => rr.relocated = true,
                 b"CE" if body.len() >= 24 && hops < 8 && depth < 8 => {
-                    let (lba, off, l) = (le32(body, 0) as usize, le32(body, 8) as usize, le32(body, 16) as usize);
+                    let (lba, off, l) = (
+                        le32(body, 0) as usize,
+                        le32(body, 8) as usize,
+                        le32(body, 16) as usize,
+                    );
                     let start = lba * SECTOR + off;
                     if let Some(c) = data.get(start..start + l) {
                         next = Some(c.to_vec());
@@ -154,18 +160,23 @@ fn parse_rr(data: &[u8], sys: &[u8], depth: u32) -> Rr {
         rr.name = Some(name);
     }
     if !link_parts.is_empty() {
-        rr.link = Some(if link_parts.first().is_some_and(String::is_empty) && link_parts.len() > 1 {
-            format!("/{}", link_parts[1..].join("/"))
-        } else {
-            link_parts.join("/")
-        });
+        rr.link = Some(
+            if link_parts.first().is_some_and(String::is_empty) && link_parts.len() > 1 {
+                format!("/{}", link_parts[1..].join("/"))
+            } else {
+                link_parts.join("/")
+            },
+        );
     }
     rr
 }
 
 fn iso_name(raw: &[u8], joliet: bool) -> String {
     let s = if joliet {
-        let units: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+        let units: Vec<u16> = raw
+            .chunks_exact(2)
+            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .collect();
         String::from_utf16_lossy(&units)
     } else {
         String::from_utf8_lossy(raw).into_owned()
@@ -176,6 +187,9 @@ fn iso_name(raw: &[u8], joliet: bool) -> String {
     };
     s.strip_suffix('.').map(str::to_string).unwrap_or(s)
 }
+
+/// A multi-extent file being collected: path, bytes so far, length, mtime, mode.
+type Pending = (String, Vec<u8>, u64, Option<i64>, u32);
 
 struct Walker<'a, 'c> {
     data: &'a [u8],
@@ -190,9 +204,9 @@ struct Walker<'a, 'c> {
 impl Walker<'_, '_> {
     fn extent(&self, lba: u32, len: u32) -> Result<&[u8]> {
         let a = lba as usize * SECTOR;
-        self.data
-            .get(a..a + len as usize)
-            .ok_or_else(|| Error::truncated("ISO: extent lies beyond the end of the image").at(a as u64))
+        self.data.get(a..a + len as usize).ok_or_else(|| {
+            Error::truncated("ISO: extent lies beyond the end of the image").at(a as u64)
+        })
     }
 
     fn walk(&mut self, lba: u32, len: u32, prefix: &str, depth: u32) -> Result<()> {
@@ -203,7 +217,7 @@ impl Walker<'_, '_> {
         let dir = self.extent(lba, len)?.to_vec();
         let mut pos = 0usize;
         // Multi-extent files: consecutive records with the same name.
-        let mut pending: Option<(String, Vec<u8>, u64, Option<i64>, u32)> = None;
+        let mut pending: Option<Pending> = None;
         while pos < dir.len() {
             self.cx.progress.check_cancelled()?;
             let l = usize::from(dir[pos]);
@@ -212,18 +226,30 @@ impl Walker<'_, '_> {
                 continue;
             }
             let Some(rec) = dir.get(pos..pos + l).and_then(parse_record) else {
-                return Err(Error::corrupt("ISO: bad directory record").at((lba as usize * SECTOR + pos) as u64));
+                return Err(Error::corrupt("ISO: bad directory record")
+                    .at((lba as usize * SECTOR + pos) as u64));
             };
             pos += l;
             if rec.name == [0] || rec.name == [1] {
                 continue;
             }
-            let rr = if self.use_rr { parse_rr(self.data, &rec.sys, 0) } else { Rr::default() };
+            let rr = if self.use_rr {
+                parse_rr(self.data, &rec.sys, 0)
+            } else {
+                Rr::default()
+            };
             if rr.relocated {
                 continue;
             }
-            let name = rr.name.clone().unwrap_or_else(|| iso_name(&rec.name, self.joliet));
-            let path = if prefix.is_empty() { name.clone() } else { format!("{prefix}/{name}") };
+            let name = rr
+                .name
+                .clone()
+                .unwrap_or_else(|| iso_name(&rec.name, self.joliet));
+            let path = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}/{name}")
+            };
             let is_dir = rec.flags & 2 != 0 || rr.child_link.is_some();
             self.budget.entry()?;
             if is_dir {
@@ -243,7 +269,11 @@ impl Walker<'_, '_> {
                 self.walk(dl, dlen, &path, depth + 1)?;
                 continue;
             }
-            if let Some(link) = rr.link.clone().filter(|_| rr.mode.is_some_and(|m| m & 0o170_000 == 0o120_000)) {
+            if let Some(link) = rr
+                .link
+                .clone()
+                .filter(|_| rr.mode.is_some_and(|m| m & 0o170_000 == 0o120_000))
+            {
                 let mut e = Entry::symlink(path, link);
                 e.mtime = rr.mtime.or(rec.mtime);
                 self.out.entries.push(e);
@@ -264,7 +294,11 @@ impl Walker<'_, '_> {
                 pending = Some((path, acc, len, rec.mtime, rr.mode.unwrap_or(0o644)));
                 continue;
             }
-            let mut e = if self.cx.list_only { Entry::listed(path, len) } else { Entry::file(path, acc) };
+            let mut e = if self.cx.list_only {
+                Entry::listed(path, len)
+            } else {
+                Entry::file(path, acc)
+            };
             e.mtime = rr.mtime.or(rec.mtime);
             if let Some(m) = rr.mode {
                 e.mode = m & 0o7777;
@@ -272,7 +306,11 @@ impl Walker<'_, '_> {
             self.out.entries.push(e);
         }
         if let Some((path, acc, len, mtime, mode)) = pending {
-            let mut e = if self.cx.list_only { Entry::listed(path, len) } else { Entry::file(path, acc) };
+            let mut e = if self.cx.list_only {
+                Entry::listed(path, len)
+            } else {
+                Entry::file(path, acc)
+            };
             e.mtime = mtime;
             e.mode = mode & 0o7777;
             self.out.entries.push(e);
@@ -300,7 +338,10 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
                     joliet: false,
                 })
             }
-            2 if d.get(88..91).is_some_and(|e| matches!(e, b"%/@" | b"%/C" | b"%/E")) => {
+            2 if d
+                .get(88..91)
+                .is_some_and(|e| matches!(e, b"%/@" | b"%/C" | b"%/E")) =>
+            {
                 joliet = Some(Vd {
                     root_lba: le32(d, 158),
                     root_len: le32(d, 166),
@@ -315,7 +356,12 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
             break;
         }
     }
-    let pvd = primary.ok_or_else(|| Error::new(ErrorCode::UnsupportedVariant, "ISO: no primary volume descriptor (UDF-only images are not supported)"))?;
+    let pvd = primary.ok_or_else(|| {
+        Error::new(
+            ErrorCode::UnsupportedVariant,
+            "ISO: no primary volume descriptor (UDF-only images are not supported)",
+        )
+    })?;
     // Rock Ridge lives in the primary tree; check the root's "." record for SUSP.
     let root = data
         .get(pvd.root_lba as usize * SECTOR..)

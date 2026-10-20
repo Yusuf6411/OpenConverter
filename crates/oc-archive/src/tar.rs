@@ -22,7 +22,11 @@ fn num(b: &[u8]) -> Result<i64> {
             let neg = first & 0x40 != 0;
             let mut v: i128 = if neg { -1 } else { 0 };
             for (i, &c) in b.iter().enumerate() {
-                let c = if i == 0 { c & 0x7F | if neg { 0x80 } else { 0 } } else { c };
+                let c = if i == 0 {
+                    c & 0x7F | if neg { 0x80 } else { 0 }
+                } else {
+                    c
+                };
                 v = (v << 8) | i128::from(c);
                 if v > i128::from(i64::MAX) || v < i128::from(i64::MIN) {
                     return Err(Error::corrupt("tar number out of range"));
@@ -115,12 +119,7 @@ fn parse_pax(data: &[u8]) -> Result<Pax> {
                 "path" => p.path = Some(val),
                 "linkpath" => p.linkpath = Some(val),
                 "size" => p.size = val.parse().ok(),
-                "mtime" => {
-                    p.mtime = val
-                        .split('.')
-                        .next()
-                        .and_then(|s| s.parse::<i64>().ok())
-                }
+                "mtime" => p.mtime = val.split('.').next().and_then(|s| s.parse::<i64>().ok()),
                 _ => {}
             }
         }
@@ -168,11 +167,20 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
             .map(|v| v & !511)
             .ok_or_else(|| Error::corrupt("tar size overflow"))?;
         let body_end = body_start as u64 + size;
-        let is_data_type = !matches!(typeflag, b'x' | b'g' | b'L' | b'K' | b'1' | b'2' | b'3' | b'4' | b'5' | b'6');
+        let is_data_type = !matches!(
+            typeflag,
+            b'x' | b'g' | b'L' | b'K' | b'1' | b'2' | b'3' | b'4' | b'5' | b'6'
+        );
         if is_data_type && body_end > data.len() as u64 {
             return Err(Error::truncated("tar member data cut short").at(pos as u64));
         }
-        let next = (body_start as u64).saturating_add(if is_data_type || matches!(typeflag, b'x' | b'g' | b'L' | b'K') { padded } else { 0 });
+        let next = (body_start as u64).saturating_add(
+            if is_data_type || matches!(typeflag, b'x' | b'g' | b'L' | b'K') {
+                padded
+            } else {
+                0
+            },
+        );
         let body: &[u8] = if is_data_type || matches!(typeflag, b'x' | b'g' | b'L' | b'K') {
             let end = usize::try_from(body_end).map_err(|_| Error::corrupt("tar size overflow"))?;
             data.get(body_start..end)
@@ -231,7 +239,8 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
         local = Pax::default();
         let mode = (num(field(h, 100, 108)).unwrap_or(0o644) & 0o7777) as u32;
         let name = name.trim_end_matches('/').to_string();
-        let kind_dir = typeflag == b'5' || (typeflag == 0 && h.first() != Some(&0) && cstr(field(h, 0, 100)).ends_with('/'));
+        let kind_dir = typeflag == b'5'
+            || (typeflag == 0 && h.first() != Some(&0) && cstr(field(h, 0, 100)).ends_with('/'));
         let mut entry = match typeflag {
             b'0' | 0 | b'7' if !kind_dir => Entry::from_body(name, body, cx.list_only),
             b'5' => Entry::dir(name),
@@ -258,7 +267,11 @@ pub fn read(data: &[u8], cx: &Context) -> Result<Archive> {
         if entry.path.is_empty() {
             return Err(Error::corrupt("empty tar member name"));
         }
-        entry.mode = if entry.kind == EntryKind::Symlink { 0o777 } else { mode };
+        entry.mode = if entry.kind == EntryKind::Symlink {
+            0o777
+        } else {
+            mode
+        };
         entry.mtime = mtime;
         budget.entry()?;
         budget.add_output(entry.size())?;
@@ -292,11 +305,21 @@ fn pax_record(key: &str, val: &str) -> Vec<u8> {
     format!("{len} {key}={val}\n").into_bytes()
 }
 
-fn header(name: &str, prefix: &str, size: u64, mode: u32, mtime: u64, typeflag: u8, link: &str) -> [u8; BLOCK] {
+fn header(
+    name: &str,
+    prefix: &str,
+    size: u64,
+    mode: u32,
+    mtime: u64,
+    typeflag: u8,
+    link: &str,
+) -> [u8; BLOCK] {
     let mut h = [0u8; BLOCK];
     let put = |h: &mut [u8; BLOCK], at: usize, s: &str, max: usize| {
         for (i, b) in s.bytes().take(max).enumerate() {
-            h[at + i] = b;
+            if let Some(slot) = h.get_mut(at + i) {
+                *slot = b;
+            }
         }
     };
     put(&mut h, 0, name, 100);
@@ -342,9 +365,17 @@ pub fn write(archive: &Archive, cx: &Context) -> Result<Vec<u8>> {
         let path = if is_dir { format!("{clean}/") } else { clean };
         let link = e.link.clone().unwrap_or_default();
         let mtime = e.mtime;
-        let size = if e.kind == EntryKind::File { e.size() } else { 0 };
+        let size = if e.kind == EntryKind::File {
+            e.size()
+        } else {
+            0
+        };
         let mut pax: Vec<u8> = Vec::new();
-        let split = if path.is_ascii() { split_path(&path) } else { None };
+        let split = if path.is_ascii() {
+            split_path(&path)
+        } else {
+            None
+        };
         let (prefix, name) = match split {
             Some(x) => x,
             None => {

@@ -1,5 +1,6 @@
 //! bzip2 (Burrows-Wheeler block sorting, move-to-front, run-length and Huffman coding).
 //! Reads concatenated streams; the obsolete "randomised" block mode is refused.
+#![allow(clippy::indexing_slicing)] // table and buffer positions are bounded by the block and alphabet sizes checked above them
 use crate::deflate::code_lengths;
 use crate::msb::{MsbReader, MsbWriter};
 use crate::sais::suffix_array;
@@ -38,7 +39,12 @@ impl Crc {
     }
     fn update(&self, mut c: u32, data: &[u8]) -> u32 {
         for &b in data {
-            c = (c << 8) ^ self.t.get(usize::from((c >> 24) as u8 ^ b)).copied().unwrap_or(0);
+            c = (c << 8)
+                ^ self
+                    .t
+                    .get(usize::from((c >> 24) as u8 ^ b))
+                    .copied()
+                    .unwrap_or(0);
         }
         c
     }
@@ -467,8 +473,12 @@ fn write_block(w: &mut MsbWriter, block: &[u8], block_crc: u32) {
                 acc -= u64::from(freq[ge as usize]);
                 ge -= 1;
             }
-            for v in 0..alpha {
-                lens[part - 1][v] = if (v as i64) >= gs as i64 && (v as i64) <= ge { 0 } else { 15 };
+            for (v, l) in lens[part - 1].iter_mut().enumerate().take(alpha) {
+                *l = if (gs as i64..=ge).contains(&(v as i64)) {
+                    0
+                } else {
+                    15
+                };
             }
             // 0 is not a legal length; bump below once real frequencies exist.
             part -= 1;
@@ -567,7 +577,10 @@ fn write_block(w: &mut MsbWriter, block: &[u8], block_crc: u32) {
     for (gi, chunk) in syms.chunks(GROUP).enumerate() {
         let t = usize::from(selectors[gi]);
         for &s in chunk {
-            w.put(table_codes[t][usize::from(s)], u32::from(lens[t][usize::from(s)]));
+            w.put(
+                table_codes[t][usize::from(s)],
+                u32::from(lens[t][usize::from(s)]),
+            );
         }
     }
 }
@@ -618,8 +631,8 @@ pub fn compress(data: &[u8], level: u32) -> Vec<u8> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
-    #![allow(clippy::indexing_slicing)]
     use super::*;
     use oc_core::NoProgress;
 

@@ -84,7 +84,11 @@ fn x86(buf: &mut [u8], enc: bool) {
             let mut dest;
             loop {
                 let pc = (i as u32).wrapping_add(5);
-                dest = if enc { src.wrapping_add(pc) } else { src.wrapping_sub(pc) };
+                dest = if enc {
+                    src.wrapping_add(pc)
+                } else {
+                    src.wrapping_sub(pc)
+                };
                 if prev_mask == 0 {
                     break;
                 }
@@ -110,9 +114,14 @@ fn arm(buf: &mut [u8], enc: bool) {
     let mut i = 0;
     while i + 4 <= buf.len() {
         if buf[i + 3] == 0xEB {
-            let src = (u32::from(buf[i + 2]) << 16 | u32::from(buf[i + 1]) << 8 | u32::from(buf[i])) << 2;
+            let src =
+                (u32::from(buf[i + 2]) << 16 | u32::from(buf[i + 1]) << 8 | u32::from(buf[i])) << 2;
             let pc = (i as u32).wrapping_add(8);
-            let dest = (if enc { src.wrapping_add(pc) } else { src.wrapping_sub(pc) }) >> 2;
+            let dest = (if enc {
+                src.wrapping_add(pc)
+            } else {
+                src.wrapping_sub(pc)
+            }) >> 2;
             buf[i] = dest as u8;
             buf[i + 1] = (dest >> 8) as u8;
             buf[i + 2] = (dest >> 16) as u8;
@@ -131,7 +140,11 @@ fn arm_thumb(buf: &mut [u8], enc: bool) {
                 | u32::from(buf[i + 2]))
                 << 1;
             let pc = (i as u32).wrapping_add(4);
-            let dest = (if enc { src.wrapping_add(pc) } else { src.wrapping_sub(pc) }) >> 1;
+            let dest = (if enc {
+                src.wrapping_add(pc)
+            } else {
+                src.wrapping_sub(pc)
+            }) >> 1;
             buf[i + 1] = 0xF0 | ((dest >> 19) & 7) as u8;
             buf[i] = (dest >> 11) as u8;
             buf[i + 3] = 0xF8 | ((dest >> 8) & 7) as u8;
@@ -151,7 +164,11 @@ fn ppc(buf: &mut [u8], enc: bool) {
                 | u32::from(buf[i + 2]) << 8
                 | (u32::from(buf[i + 3]) & !3);
             let pc = i as u32;
-            let dest = if enc { src.wrapping_add(pc) } else { src.wrapping_sub(pc) };
+            let dest = if enc {
+                src.wrapping_add(pc)
+            } else {
+                src.wrapping_sub(pc)
+            };
             buf[i] = 0x48 | ((dest >> 24) & 3) as u8;
             buf[i + 1] = (dest >> 16) as u8;
             buf[i + 2] = (dest >> 8) as u8;
@@ -164,11 +181,19 @@ fn ppc(buf: &mut [u8], enc: bool) {
 fn sparc(buf: &mut [u8], enc: bool) {
     let mut i = 0;
     while i + 4 <= buf.len() {
-        if (buf[i] == 0x40 && buf[i + 1] & 0xC0 == 0) || (buf[i] == 0x7F && buf[i + 1] & 0xC0 == 0xC0) {
+        if (buf[i] == 0x40 && buf[i + 1] & 0xC0 == 0)
+            || (buf[i] == 0x7F && buf[i + 1] & 0xC0 == 0xC0)
+        {
             let src = u32::from_be_bytes([buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]) << 2;
             let pc = i as u32;
-            let mut dest = (if enc { src.wrapping_add(pc) } else { src.wrapping_sub(pc) }) >> 2;
-            dest = ((0u32.wrapping_sub((dest >> 22) & 1) << 22) & 0x3FFF_FFFF) | (dest & 0x3F_FFFF) | 0x4000_0000;
+            let mut dest = (if enc {
+                src.wrapping_add(pc)
+            } else {
+                src.wrapping_sub(pc)
+            }) >> 2;
+            dest = ((0u32.wrapping_sub((dest >> 22) & 1) << 22) & 0x3FFF_FFFF)
+                | (dest & 0x3F_FFFF)
+                | 0x4000_0000;
             buf[i..i + 4].copy_from_slice(&dest.to_be_bytes());
         }
         i += 4;
@@ -181,14 +206,22 @@ fn arm64(buf: &mut [u8], enc: bool) {
         let mut instr = u32::from_le_bytes([buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]);
         if instr >> 26 == 0x25 {
             let pc = (i as u32) >> 2;
-            let dest = if enc { instr.wrapping_add(pc) } else { instr.wrapping_sub(pc) };
+            let dest = if enc {
+                instr.wrapping_add(pc)
+            } else {
+                instr.wrapping_sub(pc)
+            };
             instr = 0x9400_0000 | (dest & 0x03FF_FFFF);
             buf[i..i + 4].copy_from_slice(&instr.to_le_bytes());
         } else if instr & 0x9F00_0000 == 0x9000_0000 {
             let src = ((instr >> 29) & 3) | ((instr >> 3) & 0x001F_FFFC);
             if src.wrapping_add(0x0002_0000) & 0x001C_0000 == 0 {
                 let pc = (i as u32) >> 12;
-                let dest = if enc { src.wrapping_add(pc) } else { src.wrapping_sub(pc) };
+                let dest = if enc {
+                    src.wrapping_add(pc)
+                } else {
+                    src.wrapping_sub(pc)
+                };
                 instr &= 0x9000_001F;
                 instr |= (dest & 3) << 29;
                 instr |= (dest & 0x0003_FFFC) << 3;
@@ -227,7 +260,13 @@ pub fn delta(buf: &mut [u8], dist: usize, encode: bool) {
 
 /// The 7z BCJ2 decoder: x86 CALL/JMP/Jcc targets are split into a main stream, big-endian
 /// absolute call and jump targets, and a range-coded flag per candidate instruction.
-pub fn bcj2_decode(main: &[u8], call: &[u8], jump: &[u8], rc: &[u8], out_len: usize) -> Result<Vec<u8>> {
+pub fn bcj2_decode(
+    main: &[u8],
+    call: &[u8],
+    jump: &[u8],
+    rc: &[u8],
+    out_len: usize,
+) -> Result<Vec<u8>> {
     fn is_j(b0: u8, b1: u8) -> bool {
         (b1 & 0xFE) == 0xE8 || (b0 == 0x0F && (b1 & 0xF0) == 0x80)
     }
@@ -287,7 +326,11 @@ pub fn bcj2_decode(main: &[u8], call: &[u8], jump: &[u8], rc: &[u8], out_len: us
             prev = b;
             continue;
         }
-        let src = if b == 0xE8 { (call, &mut call_pos) } else { (jump, &mut jump_pos) };
+        let src = if b == 0xE8 {
+            (call, &mut call_pos)
+        } else {
+            (jump, &mut jump_pos)
+        };
         let v = src.0.get(*src.1..*src.1 + 4).ok_or_else(bad)?;
         *src.1 += 4;
         let dest = u32::from_be_bytes([v[0], v[1], v[2], v[3]]).wrapping_sub(out.len() as u32 + 4);
@@ -301,10 +344,15 @@ pub fn bcj2_decode(main: &[u8], call: &[u8], jump: &[u8], rc: &[u8], out_len: us
             }
         }
     }
-    if out.len() == out_len { Ok(out) } else { Err(bad()) }
+    if out.len() == out_len {
+        Ok(out)
+    } else {
+        Err(bad())
+    }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
 
@@ -314,10 +362,23 @@ mod tests {
         let data: Vec<u8> = (0..5000)
             .map(|i| {
                 x = x.wrapping_mul(1_103_515_245).wrapping_add(12345);
-                if i % 7 == 0 { 0xE8 } else if i % 11 == 0 { 0xEB } else { (x >> 16) as u8 }
+                if i % 7 == 0 {
+                    0xE8
+                } else if i % 11 == 0 {
+                    0xEB
+                } else {
+                    (x >> 16) as u8
+                }
             })
             .collect();
-        for arch in [Arch::X86, Arch::PowerPc, Arch::Arm, Arch::ArmThumb, Arch::Sparc, Arch::Arm64] {
+        for arch in [
+            Arch::X86,
+            Arch::PowerPc,
+            Arch::Arm,
+            Arch::ArmThumb,
+            Arch::Sparc,
+            Arch::Arm64,
+        ] {
             let mut b = data.clone();
             convert(arch, &mut b, true);
             convert(arch, &mut b, false);
@@ -331,10 +392,11 @@ mod tests {
 
     /// BCJ2 encoder in the shape of the reference one, to exercise the decoder both ways.
     fn bcj2_encode(data: &[u8], convert_all: bool) -> [Vec<u8>; 4] {
-        let (mut main, mut call, mut jump, mut rc) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let (mut main, mut call, mut jump, mut rc) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         let mut probs = [1u16 << 10; 258];
         let (mut low, mut range, mut cache, mut cache_size) = (0u64, 0xFFFF_FFFFu32, 0u8, 1u64);
-        let mut shift_low = |low: &mut u64, cache: &mut u8, cache_size: &mut u64, rc: &mut Vec<u8>| {
+        let shift_low = |low: &mut u64, cache: &mut u8, cache_size: &mut u64, rc: &mut Vec<u8>| {
             if (*low as u32) < 0xFF00_0000 || (*low >> 32) != 0 {
                 let mut t = *cache;
                 loop {
@@ -367,7 +429,11 @@ mod tests {
             }
             x = x.wrapping_mul(1_103_515_245).wrapping_add(12345);
             let take = i + 4 <= data.len() && (convert_all || (x >> 16) & 3 != 0);
-            let idx = match b { 0xE8 => usize::from(prev), 0xE9 => 256, _ => 257 };
+            let idx = match b {
+                0xE8 => usize::from(prev),
+                0xE9 => 256,
+                _ => 257,
+            };
             let p = u32::from(probs[idx]);
             let bound = (range >> 11) * p;
             if take {
@@ -388,7 +454,11 @@ mod tests {
             }
             let src = u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
             let abs = src.wrapping_add(i as u32 + 4);
-            if b == 0xE8 { call.extend_from_slice(&abs.to_be_bytes()) } else { jump.extend_from_slice(&abs.to_be_bytes()) }
+            if b == 0xE8 {
+                call.extend_from_slice(&abs.to_be_bytes())
+            } else {
+                jump.extend_from_slice(&abs.to_be_bytes())
+            }
             prev = data[i + 3];
             i += 4;
         }
@@ -406,11 +476,21 @@ mod tests {
                 let data: Vec<u8> = (0..len)
                     .map(|i| {
                         x = x.wrapping_mul(1_103_515_245).wrapping_add(12345);
-                        match i % 9 { 0 => 0xE8, 3 => 0xE9, 5 => 0x0F, 6 => 0x85, _ => (x >> 16) as u8 }
+                        match i % 9 {
+                            0 => 0xE8,
+                            3 => 0xE9,
+                            5 => 0x0F,
+                            6 => 0x85,
+                            _ => (x >> 16) as u8,
+                        }
                     })
                     .collect();
                 let [m, c, j, r] = bcj2_encode(&data, convert_all);
-                assert_eq!(bcj2_decode(&m, &c, &j, &r, data.len()).unwrap(), data, "len {len}");
+                assert_eq!(
+                    bcj2_decode(&m, &c, &j, &r, data.len()).unwrap(),
+                    data,
+                    "len {len}"
+                );
             }
         }
         assert!(bcj2_decode(&[0xE8, 1, 2], &[], &[], &[0; 5], 9).is_err());
