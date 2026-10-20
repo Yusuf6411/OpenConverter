@@ -163,6 +163,98 @@ for q in (0, 4, 8):
     ref = sh("ffprobe", "-v", "error", "-show_entries", "stream=channels,sample_rate", "-of", "csv=p=0", base).stdout.strip()
     check(f"vorbis quality {q} keeps channels and rate", r.stdout.strip() == "vorbis," + ref, r.stdout)
 
+# ---- 2c. MP3: our decoder against ffmpeg on LAME files, our encoder against ffmpeg's and libmpg123's decoders
+import struct
+try:
+    import numpy as np
+except ImportError:
+    np = None
+if np is not None:
+    def float_pcm(path, ch):
+        raw = pcm(path, "f32le", ("-ac", str(ch)))
+        return np.frombuffer(raw, "<f4").reshape(-1, ch)
+
+    def oc_float(path, ch):
+        dst = os.path.join(tmp, "f.wav")
+        oc(path, dst, "bit_depth=float")
+        b = open(dst, "rb").read()
+        i = b.index(b"data")
+        n = struct.unpack_from("<I", b, i + 4)[0]
+        return np.frombuffer(b[i + 8:i + 8 + n], "<f4").reshape(-1, ch)
+
+    rng = np.random.default_rng(11)
+    for name, rate, ch, args in [
+        ("mp3 44.1k stereo 128k", 44100, 2, ["-b:a", "128k"]),
+        ("mp3 48k stereo V0", 48000, 2, ["-q:a", "0"]),
+        ("mp3 32k mono 64k", 32000, 1, ["-b:a", "64k"]),
+        ("mp3 22.05k stereo 96k (MPEG-2)", 22050, 2, ["-b:a", "96k"]),
+        ("mp3 24k mono 48k", 24000, 1, ["-b:a", "48k"]),
+        ("mp3 11.025k mono 24k (MPEG-2.5)", 11025, 1, ["-b:a", "24k"]),
+        ("mp3 8k mono 16k (MPEG-2.5)", 8000, 1, ["-b:a", "16k"]),
+    ]:
+        n = rate * 3
+        t = np.arange(n) / rate
+        x = np.zeros((n, ch))
+        for c in range(ch):
+            for f in (220 * (c + 1), 660, 1750, 5100):
+                x[:, c] += 0.15 * np.sin(2 * np.pi * f * t)
+            x[:, c] += 0.01 * rng.standard_normal(n)
+        for k in range(0, n, rate // 2):
+            m = min(200, n - k)
+            x[k:k + m, :] += rng.standard_normal((m, ch)) * 0.5 * np.exp(-np.arange(m) / 40)[:, None]
+        raw = os.path.join(tmp, "src.f32")
+        np.clip(x, -1, 1).astype("<f4").tofile(raw)
+        mp3 = os.path.join(tmp, "lame.mp3")
+        ff("-f", "f32le", "-ar", str(rate), "-ac", str(ch), "-i", raw, "-c:a", "libmp3lame", *args, mp3)
+        ref = float_pcm(mp3, ch)
+        got = oc_float(mp3, ch)
+        m = min(len(ref), len(got))
+        err = float(np.abs(ref[:m] - got[:m]).max()) if m else 1.0
+        check(f"{name}: decoder matches ffmpeg ({err:.1e}, {len(got)} vs {len(ref)} frames)", len(ref) == len(got) and err < 1e-4)
+
+    # our encoder: ffmpeg must decode it, to the right length, close to the source
+    src = os.path.join(tmp, "src_music.wav")
+    ff("-f", "lavfi", "-i", "sine=frequency=440:duration=3:sample_rate=44100", "-f", "lavfi", "-i", "anoisesrc=d=3:a=0.02:r=44100", "-filter_complex", "amix=inputs=2:normalize=0,aformat=channel_layouts=stereo", "-c:a", "pcm_f32le", src)
+    ref = float_pcm(src, 2)
+    for opt in (["bitrate=64"], ["bitrate=128"], ["bitrate=256"], ["vbr_quality=2"], ["vbr_quality=7"], ["joint_stereo=false"]):
+        dst = os.path.join(tmp, "ours.mp3")
+        oc(src, dst, *opt)
+        r = sh("ffmpeg", "-v", "error", "-i", dst, "-f", "null", "-", check=False)
+        check(f"mp3 encoder {opt[0]}: ffmpeg decodes without errors", r.returncode == 0 and not r.stderr.strip(), r.stderr[:200])
+        d = float_pcm(dst, 2)
+        m = min(len(d), len(ref))
+        snr = 10 * np.log10((ref[:m] ** 2).sum() / max(((ref[:m] - d[:m]) ** 2).sum(), 1e-20))
+        check(f"mp3 encoder {opt[0]}: gapless length and SNR ({len(d)} vs {len(ref)}, {snr:.1f} dB)", len(d) == len(ref) and snr > 12)
+    try:
+        import ctypes
+        lib = ctypes.CDLL("libmpg123.so.0")
+        lib.mpg123_init()
+        lib.mpg123_new.restype = ctypes.c_void_p
+        h = lib.mpg123_new(None, None)
+        lib.mpg123_format_none(ctypes.c_void_p(h))
+        for r_ in (8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000):
+            lib.mpg123_format(ctypes.c_void_p(h), ctypes.c_long(r_), ctypes.c_int(3), ctypes.c_int(0x200))
+        dst = os.path.join(tmp, "ours.mp3")
+        oc(src, dst, "bitrate=128")
+        ok = lib.mpg123_open(ctypes.c_void_p(h), dst.encode()) == 0
+        fmt = (ctypes.c_long(), ctypes.c_int(), ctypes.c_int())
+        lib.mpg123_getformat(ctypes.c_void_p(h), ctypes.byref(fmt[0]), ctypes.byref(fmt[1]), ctypes.byref(fmt[2]))
+        buf = ctypes.create_string_buffer(1 << 16)
+        done = ctypes.c_size_t()
+        chunks = []
+        while ok:
+            r = lib.mpg123_read(ctypes.c_void_p(h), buf, len(buf), ctypes.byref(done))
+            chunks.append(buf.raw[:done.value])
+            if r != 0 and done.value == 0:
+                break
+        data = np.frombuffer(b"".join(chunks), "<f4")
+        ours = oc_float(dst, 2).reshape(-1)
+        k = min(len(data), len(ours))
+        diff = float(np.abs(data[:k] - ours[:k]).max()) if k else 1.0
+        check(f"mp3 encoder output decodes in libmpg123 like in ours ({len(data)} vs {len(ours)} samples, {diff:.1e})", ok and len(data) == len(ours) and diff < 1e-3)
+    except OSError:
+        print("skip libmpg123 not installed")
+
 # ---- 3. processing
 try:
     dst = os.path.join(tmp, "rs.wav")

@@ -591,8 +591,11 @@ impl Engine {
             .into_iter()
             .filter_map(|id| self.registry.format(id))
             .filter_map(|f| f.sniff(data).map(|c| (c, f.id)))
+            // MP3 has no real magic number: its candidates must also parse as frames.
+            .filter(|(_, id)| *id != audio::MP3 || oc_audio::mp3::sniff(data))
             .max_by_key(|(c, _)| *c)
             .map(|(_, id)| id)
+            .or_else(|| oc_audio::mp3::sniff(data).then_some(audio::MP3))
     }
 
     /// Identify an image by its leading bytes among the registered image formats.

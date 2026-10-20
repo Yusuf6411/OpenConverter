@@ -3,7 +3,7 @@
 //! Like images, every audio format connects to a hub (`audio-ir`), so a conversion is always
 //! "decode X, process, encode Y".
 use oc_audio::dsp::{self, Dither, Quality};
-use oc_audio::{aiff, caf, flac, vorbis, wav, Audio, Samples};
+use oc_audio::{aiff, caf, flac, mp3, vorbis, wav, Audio, Samples};
 use oc_core::options::{OptionKind, OptionSchema, OptionSpec, Options};
 use oc_core::planner::{Edge, EdgeKind, Registry};
 use oc_core::{
@@ -16,9 +16,10 @@ pub const AIFF: FormatId = FormatId("aiff");
 pub const CAF: FormatId = FormatId("caf");
 pub const FLAC: FormatId = FormatId("flac");
 pub const OGG: FormatId = FormatId("ogg");
+pub const MP3: FormatId = FormatId("mp3");
 pub const AUDIO_IR: FormatId = FormatId("audio-ir");
 
-pub const FORMATS: [FormatId; 5] = [WAV, AIFF, CAF, FLAC, OGG];
+pub const FORMATS: [FormatId; 6] = [WAV, AIFF, CAF, FLAC, OGG, MP3];
 
 pub fn is_audio(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -124,7 +125,7 @@ fn caps(id: FormatId) -> Caps {
             float: true,
         },
         // A lossy codec takes whatever the processing chain produced.
-        i if i == OGG => Caps {
+        i if i == OGG || i == MP3 => Caps {
             ints: &[16, 24, 32],
             float: true,
         },
@@ -274,6 +275,75 @@ pub fn register(registry: &mut Registry) {
             )]),
             "Vorbis I, RFC 3533 Ogg",
         ),
+        (
+            MP3,
+            "MP3",
+            &["mp3", "mp2"],
+            &["audio/mpeg", "audio/mp3"],
+            vec![
+                Sniffer {
+                    offset: 0,
+                    magic: b"ID3",
+                    confidence: 55,
+                },
+                Sniffer {
+                    offset: 0,
+                    magic: &[0xFF, 0xFB],
+                    confidence: 45,
+                },
+                Sniffer {
+                    offset: 0,
+                    magic: &[0xFF, 0xFA],
+                    confidence: 45,
+                },
+                Sniffer {
+                    offset: 0,
+                    magic: &[0xFF, 0xF3],
+                    confidence: 45,
+                },
+                Sniffer {
+                    offset: 0,
+                    magic: &[0xFF, 0xF2],
+                    confidence: 45,
+                },
+                Sniffer {
+                    offset: 0,
+                    magic: &[0xFF, 0xE3],
+                    confidence: 40,
+                },
+                Sniffer {
+                    offset: 0,
+                    magic: &[0xFF, 0xE2],
+                    confidence: 40,
+                },
+            ],
+            schema(vec![
+                OptionSpec {
+                    key: "bitrate",
+                    label: "Bit rate (kbit/s)",
+                    help: "Constant bit rate; the nearest rate the format has is used. Ignored when a VBR quality is set",
+                    i18n_key: "opt.mp3.bitrate",
+                    kind: OptionKind::Int { min: 8, max: 320, default: 128 },
+                },
+                float(
+                    "vbr_quality",
+                    "VBR quality",
+                    "0 (best) to 9 (smallest) for variable bit rate; -1 uses the constant bit rate instead",
+                    "opt.mp3.vbr_quality",
+                    -1.0,
+                    9.0,
+                    -1.0,
+                ),
+                OptionSpec {
+                    key: "joint_stereo",
+                    label: "Joint stereo",
+                    help: "Let the encoder code stereo frames as mid and side where that is smaller",
+                    i18n_key: "opt.mp3.joint_stereo",
+                    kind: OptionKind::Bool { default: true },
+                },
+            ]),
+            "ISO/IEC 11172-3 and 13818-3 layer III",
+        ),
     ];
     for (id, name, extensions, mime, sniffers, writer_options, spec) in rows {
         registry.add_format(FormatDescriptor {
@@ -322,6 +392,7 @@ pub fn decode(fmt: FormatId, data: &[u8], limits: &Limits) -> Result<(Audio, Not
         f if f == CAF => caf::read(data, limits),
         f if f == FLAC => flac::read(data, limits),
         f if f == OGG => vorbis::read(data, limits),
+        f if f == MP3 => mp3::read(data, limits),
         _ => Err(Error::new(
             ErrorCode::UnsupportedFormat,
             "no audio decoder for this format",
@@ -443,7 +514,7 @@ fn fit_depth(
     };
     let target: Option<u8> = match want {
         "keep" => {
-            if (src_float || fmt == OGG) && cap.float {
+            if (src_float || fmt == OGG || fmt == MP3) && cap.float {
                 None
             } else if src_float {
                 Some(
@@ -531,6 +602,16 @@ pub fn encode(
         }
         f if f == AIFF => aiff::write(&a, opts.bool("little_endian") == Some(true), &mut notes)?,
         f if f == CAF => caf::write(&a, &mut notes)?,
+        f if f == MP3 => {
+            let q = opts.float("vbr_quality").unwrap_or(-1.0);
+            let o = mp3::Options {
+                bitrate: opts.int("bitrate").unwrap_or(128) as u32,
+                vbr: (q >= 0.0).then_some(q as f32),
+                joint_stereo: opts.bool("joint_stereo") != Some(false),
+                id3: true,
+            };
+            mp3::write(&a, &o, &mut notes)?
+        }
         f if f == OGG => {
             let o = vorbis::Options {
                 quality: opts.float("quality").unwrap_or(4.0) as f32,

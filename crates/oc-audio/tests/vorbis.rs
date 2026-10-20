@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::chunks_exact_to_as_chunks)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::chunks_exact_to_as_chunks
+)]
 use oc_audio::{dsp, vorbis, Samples};
 use oc_core::Limits;
 

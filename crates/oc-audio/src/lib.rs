@@ -15,6 +15,8 @@ pub mod aiff;
 pub mod caf;
 pub mod dsp;
 pub mod flac;
+pub mod id3;
+pub mod mp3;
 pub mod ogg;
 pub mod tags;
 pub mod vorbis;
