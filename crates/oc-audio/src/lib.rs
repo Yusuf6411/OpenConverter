@@ -17,6 +17,7 @@ pub mod dsp;
 pub mod flac;
 pub mod ogg;
 pub mod tags;
+pub mod vorbis;
 pub mod wav;
 
 pub use tags::{Picture, Tags};

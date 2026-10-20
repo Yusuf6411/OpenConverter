@@ -3,7 +3,7 @@
 //! Like images, every audio format connects to a hub (`audio-ir`), so a conversion is always
 //! "decode X, process, encode Y".
 use oc_audio::dsp::{self, Dither, Quality};
-use oc_audio::{aiff, caf, flac, wav, Audio, Samples};
+use oc_audio::{aiff, caf, flac, vorbis, wav, Audio, Samples};
 use oc_core::options::{OptionKind, OptionSchema, OptionSpec, Options};
 use oc_core::planner::{Edge, EdgeKind, Registry};
 use oc_core::{
@@ -15,9 +15,10 @@ pub const WAV: FormatId = FormatId("wav");
 pub const AIFF: FormatId = FormatId("aiff");
 pub const CAF: FormatId = FormatId("caf");
 pub const FLAC: FormatId = FormatId("flac");
+pub const OGG: FormatId = FormatId("ogg");
 pub const AUDIO_IR: FormatId = FormatId("audio-ir");
 
-pub const FORMATS: [FormatId; 4] = [WAV, AIFF, CAF, FLAC];
+pub const FORMATS: [FormatId; 5] = [WAV, AIFF, CAF, FLAC, OGG];
 
 pub fn is_audio(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -247,6 +248,15 @@ pub fn register(registry: &mut Registry) {
             ]),
             "RFC 9639",
         ),
+        (
+            OGG,
+            "Ogg Vorbis",
+            &["ogg", "oga"],
+            &["audio/ogg", "audio/vorbis"],
+            vec![Sniffer { offset: 0, magic: b"OggS", confidence: 60 }],
+            schema(vec![depth_option(vec!["keep"])]),
+            "Vorbis I, RFC 3533 Ogg",
+        ),
     ];
     for (id, name, extensions, mime, sniffers, writer_options, spec) in rows {
         registry.add_format(FormatDescriptor {
@@ -276,6 +286,9 @@ pub fn register(registry: &mut Registry) {
             time: 2,
             description: "Decode audio",
         });
+        if id == OGG {
+            continue; // read-only until the encoder lands
+        }
         registry.add_edge(Edge {
             from: AUDIO_IR,
             to: id,
@@ -294,6 +307,7 @@ pub fn decode(fmt: FormatId, data: &[u8], limits: &Limits) -> Result<(Audio, Not
         f if f == AIFF => aiff::read(data, limits),
         f if f == CAF => caf::read(data, limits),
         f if f == FLAC => flac::read(data, limits),
+        f if f == OGG => vorbis::read(data, limits),
         _ => Err(Error::new(
             ErrorCode::UnsupportedFormat,
             "no audio decoder for this format",
