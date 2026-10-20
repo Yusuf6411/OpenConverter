@@ -129,6 +129,16 @@ fn caps(id: FormatId) -> Caps {
     }
 }
 
+type Row = (
+    FormatId,
+    &'static str,
+    &'static [&'static str],
+    &'static [&'static str],
+    Vec<Sniffer>,
+    OptionSchema,
+    &'static str,
+);
+
 pub fn register(registry: &mut Registry) {
     let rows: Vec<(
         FormatId,

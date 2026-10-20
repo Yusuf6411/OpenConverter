@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::precedence)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::precedence
+)]
 use oc_audio::flac::{self, Options};
 use oc_audio::{Audio, Samples};
 use oc_core::{Limits, Notes};
