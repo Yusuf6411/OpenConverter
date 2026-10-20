@@ -140,15 +140,7 @@ type Row = (
 );
 
 pub fn register(registry: &mut Registry) {
-    let rows: Vec<(
-        FormatId,
-        &'static str,
-        &'static [&'static str],
-        &'static [&'static str],
-        Vec<Sniffer>,
-        OptionSchema,
-        &'static str,
-    )> = vec![
+    let rows: Vec<Row> = vec![
         (
             WAV,
             "WAV",
