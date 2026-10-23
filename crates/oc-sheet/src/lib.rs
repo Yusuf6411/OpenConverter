@@ -9,7 +9,9 @@ pub mod book;
 pub mod delimited;
 pub mod json;
 pub mod ods;
+pub mod sqlite;
 mod table;
+pub mod xls;
 pub mod xlsx;
 
 pub use book::{Sheet, Workbook};

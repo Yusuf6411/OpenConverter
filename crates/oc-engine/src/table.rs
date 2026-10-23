@@ -15,10 +15,12 @@ pub const XLSX: FormatId = FormatId("xlsx");
 pub const ODS: FormatId = FormatId("ods");
 pub const TABLE_IR: FormatId = FormatId("table-ir");
 
-pub const FORMATS: [FormatId; 5] = [CSV, TSV, JSON, XLSX, ODS];
+pub const SQLITE: FormatId = FormatId("sqlite");
+pub const XLS: FormatId = FormatId("xls");
+pub const FORMATS: [FormatId; 7] = [CSV, TSV, JSON, XLSX, ODS, SQLITE, XLS];
 
 fn is_workbook(id: FormatId) -> bool {
-    id == XLSX || id == ODS
+    id == XLSX || id == ODS || id == SQLITE || id == XLS
 }
 
 pub fn is_table(id: FormatId) -> bool {
@@ -203,6 +205,20 @@ pub fn register(registry: &mut Registry) {
             "OASIS ODF 1.3 spreadsheet (cells, repeats, dates)",
         ),
         (
+            SQLITE,
+            "SQLite database",
+            &["sqlite", "sqlite3", "db"][..],
+            &["application/vnd.sqlite3"][..],
+            "SQLite 3 file format: rowid tables read, one table per sheet written",
+        ),
+        (
+            XLS,
+            "XLS (Excel 97-2003)",
+            &["xls"][..],
+            &["application/vnd.ms-excel"][..],
+            "BIFF8 workbook streams in a compound file; read only (cells, shared strings, dates, cached formula values)",
+        ),
+        (
             JSON,
             "JSON table",
             &["json"][..],
@@ -217,10 +233,18 @@ pub fn register(registry: &mut Registry) {
             category: Category::Sheet,
             extensions,
             mime,
-            sniffers: Vec::new(),
+            sniffers: if id == SQLITE {
+                vec![oc_core::Sniffer {
+                    offset: 0,
+                    magic: b"SQLite format 3\0",
+                    confidence: 95,
+                }]
+            } else {
+                Vec::new()
+            },
             capabilities: Capabilities {
                 read: true,
-                write: true,
+                write: id != XLS,
                 ..Capabilities::default()
             },
             writer_options: options_for(id),
@@ -243,6 +267,9 @@ pub fn register(registry: &mut Registry) {
                 "Parse delimited text"
             },
         });
+        if id == XLS {
+            continue;
+        }
         registry.add_edge(Edge {
             from: TABLE_IR,
             to: id,
@@ -389,6 +416,12 @@ fn read_book(
     let has_header = opts.bool("has_header") != Some(false);
     if from == XLSX {
         return xlsx::read(data, limits, progress, has_header, notes);
+    }
+    if from == XLS {
+        return oc_sheet::xls::read(data, limits, has_header, notes);
+    }
+    if from == SQLITE {
+        return oc_sheet::sqlite::read(data, tl, has_header, notes);
     }
     if from == ODS {
         return ods::read(data, limits, progress, has_header, notes);
@@ -591,6 +624,8 @@ pub fn convert(
             .unwrap_or_default();
         if to == XLSX {
             xlsx::write(&book, &wo, limits, progress, &mut notes)?
+        } else if to == SQLITE {
+            oc_sheet::sqlite::write(&book, wo.detect_types, &mut notes)?
         } else {
             ods::write(
                 &book,

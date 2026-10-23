@@ -18,7 +18,9 @@ pub const EPUB: FormatId = FormatId("epub");
 pub const FB2: FormatId = FormatId("fb2");
 pub const PPTX: FormatId = FormatId("pptx");
 pub const ODP: FormatId = FormatId("odp");
-pub const FORMATS: [FormatId; 9] = [MD, HTML, DOCX, ODT, RTF, EPUB, FB2, PPTX, ODP];
+pub const DOC: FormatId = FormatId("doc");
+pub const PPT: FormatId = FormatId("ppt");
+pub const FORMATS: [FormatId; 11] = [MD, HTML, DOCX, ODT, RTF, EPUB, FB2, PPTX, ODP, DOC, PPT];
 
 pub fn is_document(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -173,6 +175,26 @@ fn infos() -> Vec<Info> {
             read: true,
             write: false,
             spec: "ISO/IEC 29500 PresentationML: slide text, lists, tables and pictures (own reader; read only)",
+        },
+        Info {
+            id: DOC,
+            name: "Word 97-2003 document (DOC)",
+            exts: &["doc"],
+            mime: &["application/msword"],
+            sniff: vec![],
+            read: true,
+            write: false,
+            spec: "Word binary format: text, tables and links from the piece table in a compound file (own reader; read only)",
+        },
+        Info {
+            id: PPT,
+            name: "PowerPoint 97-2003 presentation (PPT)",
+            exts: &["ppt"],
+            mime: &["application/vnd.ms-powerpoint"],
+            sniff: vec![],
+            read: true,
+            write: false,
+            spec: "PowerPoint binary format: slide text from the document stream in a compound file (own reader; read only)",
         },
         Info {
             id: ODP,
@@ -418,6 +440,8 @@ pub fn read(
         RTF => oc_document::rtf_in::read(data, limits, notes),
         EPUB => oc_document::epub_in::read(data, limits, notes),
         PPTX => oc_document::pptx_in::read(data, limits, notes),
+        DOC => oc_document::doc_in::read(data, limits, notes),
+        PPT => oc_document::ppt_in::read(data, limits, notes),
         ODP => oc_document::odt_in::read_presentation(data, limits, notes),
         FB2 => {
             let t = decode_text(data, from, notes)?;

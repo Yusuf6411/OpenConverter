@@ -53,7 +53,7 @@ fn find<'a>(a: &'a Archive, path: &str) -> Option<&'a [u8]> {
         .map(|e| e.data.as_slice())
 }
 
-fn is_date_format(id: u32, code: Option<&str>) -> (bool, bool) {
+pub(crate) fn is_date_format(id: u32, code: Option<&str>) -> (bool, bool) {
     // (has date part, has time part)
     match id {
         14..=17 | 27..=31 | 34..=36 | 50..=58 => return (true, false),

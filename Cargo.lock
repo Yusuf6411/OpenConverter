@@ -2147,7 +2147,7 @@ dependencies = [
 
 [[package]]
 name = "oc-archive"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "aes",
  "hmac",
@@ -2161,7 +2161,7 @@ dependencies = [
 
 [[package]]
 name = "oc-audio"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-checksum",
  "oc-container",
@@ -2172,11 +2172,11 @@ dependencies = [
 
 [[package]]
 name = "oc-checksum"
-version = "2.6.0"
+version = "2.7.0"
 
 [[package]]
 name = "oc-cli"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-archive",
  "oc-core",
@@ -2186,7 +2186,7 @@ dependencies = [
 
 [[package]]
 name = "oc-compress"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-checksum",
  "oc-core",
@@ -2196,18 +2196,18 @@ dependencies = [
 
 [[package]]
 name = "oc-container"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-core",
 ]
 
 [[package]]
 name = "oc-core"
-version = "2.6.0"
+version = "2.7.0"
 
 [[package]]
 name = "oc-desktop"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-cli",
  "oc-server",
@@ -2217,7 +2217,7 @@ dependencies = [
 
 [[package]]
 name = "oc-document"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-archive",
  "oc-core",
@@ -2227,7 +2227,7 @@ dependencies = [
 
 [[package]]
 name = "oc-engine"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-archive",
  "oc-audio",
@@ -2248,7 +2248,7 @@ dependencies = [
 
 [[package]]
 name = "oc-font"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-checksum",
  "oc-compress",
@@ -2258,7 +2258,7 @@ dependencies = [
 
 [[package]]
 name = "oc-image"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-checksum",
  "oc-compress",
@@ -2270,14 +2270,14 @@ dependencies = [
 
 [[package]]
 name = "oc-io"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-core",
 ]
 
 [[package]]
 name = "oc-pdf"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "aes",
  "md-5",
@@ -2293,15 +2293,15 @@ dependencies = [
 
 [[package]]
 name = "oc-python"
-version = "2.6.0"
+version = "2.7.0"
 
 [[package]]
 name = "oc-raster"
-version = "2.6.0"
+version = "2.7.0"
 
 [[package]]
 name = "oc-server"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "axum",
  "getrandom 0.4.3",
@@ -2317,7 +2317,7 @@ dependencies = [
 
 [[package]]
 name = "oc-sheet"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-archive",
  "oc-core",
@@ -2327,11 +2327,11 @@ dependencies = [
 
 [[package]]
 name = "oc-simd"
-version = "2.6.0"
+version = "2.7.0"
 
 [[package]]
 name = "oc-subtitle"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-core",
  "oc-xml",
@@ -2339,7 +2339,7 @@ dependencies = [
 
 [[package]]
 name = "oc-svg"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-core",
  "oc-font",
@@ -2351,14 +2351,14 @@ dependencies = [
 
 [[package]]
 name = "oc-text"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-core",
 ]
 
 [[package]]
 name = "oc-video"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-container",
  "oc-core",
@@ -2369,18 +2369,18 @@ dependencies = [
 
 [[package]]
 name = "oc-vp8"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-core",
 ]
 
 [[package]]
 name = "oc-worker"
-version = "2.6.0"
+version = "2.7.0"
 
 [[package]]
 name = "oc-xml"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "oc-core",
 ]

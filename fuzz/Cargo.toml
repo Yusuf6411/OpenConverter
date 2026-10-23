@@ -376,3 +376,27 @@ name = "fb2"
 path = "fuzz_targets/fb2.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "doc"
+path = "fuzz_targets/doc.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "ppt"
+path = "fuzz_targets/ppt.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "xls"
+path = "fuzz_targets/xls.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "sqlite"
+path = "fuzz_targets/sqlite.rs"
+test = false
+doc = false

@@ -103,6 +103,14 @@ Format notes: [formats/documents.md](formats/documents.md). Oracles used at test
 - Fuzz targets `docx`, `odt`, `rtf`, `epub`, `fb2`, `markdown`, `html`; `crates/oc-document/tests/hostile.rs` damages every package format.
 - Release v2.6.0 (tagged locally).
 
+## Phase 6c: SQLite tables and legacy Office
+Format notes: [formats/legacy.md](formats/legacy.md). Oracles: Python sqlite3 (`integrity_check`), LibreOffice (wrote the .doc, .ppt and .xls test files).
+- [~] M6.20 SQLite database files read and written as tables (own B-tree reader and writer: overflow pages, varints, 4096-byte pages; every table becomes a sheet). Not done: indexes, views, triggers, WAL files, encrypted databases.
+- [~] M6.21 compound-file (MS-CFB) reader in `oc-archive`; legacy XLS (BIFF8: shared strings across CONTINUE records, dates, numbers, formulas as cached values), DOC (piece table text, fields as links, tables, page breaks, title and author) and PPT (slide text) read-only. Not done: writing these formats, BIFF5, password-protected files (reported as encrypted), pictures, styles.
+- [ ] M6.22 JPEG XL, camera RAW (DNG), WavPack, APE, ProRes, Theora decoding, Brotli encoding and WOFF2 writing: not done (ADR-0013).
+- Fuzz targets `sqlite`, `xls`, `doc`, `ppt`; `crates/oc-engine/tests/legacy_office.rs` damages LibreOffice-made files; `crates/oc-sheet/tests/sqlite.rs` round-trips 300 tables.
+- Release v2.7.0 (tagged locally).
+
 ## Known gaps
 - 1.x Python test cases are not ported yet; they are available at tag v1.0.0. Port them as each Rust codec lands (M1.x, M2.x).
 - cargo-deny passes locally (advisories, bans, licenses, sources); the Tauri tree is allowed through named wrappers (ADR-0005).
@@ -112,6 +120,6 @@ Format notes: [formats/documents.md](formats/documents.md). Oracles used at test
 - [~] M2.8 [COMPATIBILITY.md](COMPATIBILITY.md) is generated from the registry by `tools/gen_compat.py`; screenshots of the UI are in `docs/screenshots/`.
 
 ## Next step
-Phase 6c: stretch formats.
+Phase 7: Python bindings.
 
 - **Tables (CSV, TSV, JSON, XLSX, ODS)**: `oc-sheet` reads and writes RFC 4180 delimited text (delimiter detection, lenient quotes, BOM, ragged rows padded), flat JSON tables (own strict parser) and, since Phase 3, XLSX and ODS workbooks (M3.5). Engine options mirror 1.x. Fuzz targets `table` and `workbook`.

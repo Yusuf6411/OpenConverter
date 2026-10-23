@@ -4,6 +4,7 @@
 
 pub mod ar;
 pub mod cab;
+pub mod cfb;
 pub mod cpio;
 pub mod crypto;
 pub mod entry;

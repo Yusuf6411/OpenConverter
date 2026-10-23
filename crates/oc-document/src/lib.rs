@@ -16,6 +16,7 @@
 
 pub mod base64;
 pub mod build;
+pub mod doc_in;
 pub mod docx_in;
 pub mod docx_out;
 pub mod entities;
@@ -32,6 +33,7 @@ pub mod md_out;
 pub mod model;
 pub mod odt_in;
 pub mod odt_out;
+pub mod ppt_in;
 pub mod pptx_in;
 pub mod rtf_in;
 pub mod rtf_out;
