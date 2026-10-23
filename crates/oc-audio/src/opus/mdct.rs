@@ -8,10 +8,16 @@ struct C {
 }
 impl C {
     fn mul(self, o: C) -> C {
-        C { re: self.re * o.re - self.im * o.im, im: self.re * o.im + self.im * o.re }
+        C {
+            re: self.re * o.re - self.im * o.im,
+            im: self.re * o.im + self.im * o.re,
+        }
     }
     fn add(self, o: C) -> C {
-        C { re: self.re + o.re, im: self.im + o.im }
+        C {
+            re: self.re + o.re,
+            im: self.im + o.im,
+        }
     }
 }
 
@@ -26,14 +32,14 @@ impl Fft {
         let mut factors = Vec::new();
         let mut m = n;
         for p in [4usize, 2, 3, 5] {
-            while m % p == 0 && m > 1 {
+            while m.is_multiple_of(p) && m > 1 {
                 factors.push(p);
                 m /= p;
             }
         }
         let mut f = 7;
         while m > 1 {
-            while m % f == 0 {
+            while m.is_multiple_of(f) {
                 factors.push(f);
                 m /= f;
             }
@@ -42,7 +48,10 @@ impl Fft {
         let tw = (0..n)
             .map(|k| {
                 let a = -2.0 * PI * k as f64 / n as f64;
-                C { re: a.cos(), im: a.sin() }
+                C {
+                    re: a.cos(),
+                    im: a.sin(),
+                }
             })
             .collect();
         Self { n, factors, tw }
@@ -91,16 +100,27 @@ impl Mdct {
         let twiddle = (0..n / 2)
             .map(|k| {
                 let a = -PI * (4 * k + 1) as f64 / (4 * n) as f64;
-                C { re: a.cos(), im: a.sin() }
+                C {
+                    re: a.cos(),
+                    im: a.sin(),
+                }
             })
             .collect();
         let pre = (0..n / 2)
             .map(|k| {
                 let a = -PI * k as f64 / n as f64;
-                C { re: a.cos(), im: a.sin() }
+                C {
+                    re: a.cos(),
+                    im: a.sin(),
+                }
             })
             .collect();
-        Self { n, fft: Fft::new(n / 2), pre, twiddle }
+        Self {
+            n,
+            fft: Fft::new(n / 2),
+            pre,
+            twiddle,
+        }
     }
 
     /// DCT-IV of `u` (length n): X[k] = sum u[j] cos(pi/n (j+1/2)(k+1/2)).
@@ -109,7 +129,11 @@ impl Mdct {
         let h = n / 2;
         let mut t = vec![C::default(); h];
         for j in 0..h {
-            t[j] = C { re: u[2 * j], im: u[n - 1 - 2 * j] }.mul(self.pre[j]);
+            t[j] = C {
+                re: u[2 * j],
+                im: u[n - 1 - 2 * j],
+            }
+            .mul(self.pre[j]);
         }
         let mut f = vec![C::default(); h];
         self.fft.run(&mut f, &t, 1, 0, h);
@@ -182,21 +206,28 @@ mod tests {
     fn mdct_matches_definition_and_reconstructs() {
         let n = 120;
         let m = Mdct::new(n);
-        let z: Vec<f32> = (0..2 * n).map(|i| (((i * 13 + 5) % 17) as f32 - 8.0) / 8.0).collect();
+        let z: Vec<f32> = (0..2 * n)
+            .map(|i| (((i * 13 + 5) % 17) as f32 - 8.0) / 8.0)
+            .collect();
         let mut x = vec![0f32; n];
         m.forward(&z, &mut x);
         for k in 0..n {
             let r: f64 = (0..2 * n)
                 .map(|j| {
                     f64::from(z[j])
-                        * (PI / n as f64 * (j as f64 + 0.5 + n as f64 / 2.0) * (k as f64 + 0.5)).cos()
+                        * (PI / n as f64 * (j as f64 + 0.5 + n as f64 / 2.0) * (k as f64 + 0.5))
+                            .cos()
                 })
                 .sum();
             assert!((r - f64::from(x[k])).abs() < 1e-3, "k={k}: {r} vs {}", x[k]);
         }
         // overlap-add of three blocks with a sine window reconstructs the middle block
-        let w: Vec<f32> = (0..2 * n).map(|i| ((i as f64 + 0.5) * PI / (2 * n) as f64).sin() as f32).collect();
-        let sig: Vec<f32> = (0..4 * n).map(|i| (((i * 31 + 7) % 23) as f32 - 11.0) / 11.0).collect();
+        let w: Vec<f32> = (0..2 * n)
+            .map(|i| ((i as f64 + 0.5) * PI / (2 * n) as f64).sin() as f32)
+            .collect();
+        let sig: Vec<f32> = (0..4 * n)
+            .map(|i| (((i * 31 + 7) % 23) as f32 - 11.0) / 11.0)
+            .collect();
         let mut acc = vec![0f32; 4 * n];
         for b in 0..3 {
             let blk: Vec<f32> = (0..2 * n).map(|i| sig[b * n + i] * w[i]).collect();
@@ -209,7 +240,12 @@ mod tests {
             }
         }
         for i in n..2 * n {
-            assert!((acc[i] - sig[i]).abs() < 1e-4, "i={i}: {} vs {}", acc[i], sig[i]);
+            assert!(
+                (acc[i] - sig[i]).abs() < 1e-4,
+                "i={i}: {} vs {}",
+                acc[i],
+                sig[i]
+            );
         }
     }
 }

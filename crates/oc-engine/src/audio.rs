@@ -3,7 +3,7 @@
 //! Like images, every audio format connects to a hub (`audio-ir`), so a conversion is always
 //! "decode X, process, encode Y".
 use oc_audio::dsp::{self, Dither, Quality};
-use oc_audio::{aiff, caf, flac, m4a, mp3, vorbis, wav, Audio, Samples};
+use oc_audio::{aiff, caf, flac, m4a, mp3, opus, vorbis, wav, Audio, Samples};
 use oc_core::options::{OptionKind, OptionSchema, OptionSpec, Options};
 use oc_core::planner::{Edge, EdgeKind, Registry};
 use oc_core::{
@@ -18,9 +18,10 @@ pub const FLAC: FormatId = FormatId("flac");
 pub const OGG: FormatId = FormatId("ogg");
 pub const MP3: FormatId = FormatId("mp3");
 pub const M4A: FormatId = FormatId("m4a");
+pub const OPUS: FormatId = FormatId("opus");
 pub const AUDIO_IR: FormatId = FormatId("audio-ir");
 
-pub const FORMATS: [FormatId; 7] = [WAV, AIFF, CAF, FLAC, OGG, MP3, M4A];
+pub const FORMATS: [FormatId; 8] = [WAV, AIFF, CAF, FLAC, OGG, MP3, M4A, OPUS];
 
 pub fn is_audio(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -126,7 +127,7 @@ fn caps(id: FormatId) -> Caps {
             float: true,
         },
         // A lossy codec takes whatever the processing chain produced.
-        i if i == OGG || i == MP3 => Caps {
+        i if i == OGG || i == MP3 || i == OPUS => Caps {
             ints: &[16, 24, 32],
             float: true,
         },
@@ -369,6 +370,41 @@ pub fn register(registry: &mut Registry) {
             schema(vec![depth_option(vec!["keep", "16", "20", "24", "32"])]),
             "ISO/IEC 14496-12 with Apple Lossless",
         ),
+        (
+            OPUS,
+            "Opus",
+            &["opus"],
+            &["audio/opus", "audio/ogg; codecs=opus"],
+            vec![Sniffer {
+                offset: 0,
+                magic: b"OggS",
+                confidence: 60,
+            }],
+            schema(vec![
+                OptionSpec {
+                    key: "bitrate",
+                    label: "Bit rate (kbit/s)",
+                    help: "Target rate for the whole file, 6 to 510; 0 picks 64 for mono, 96 for stereo and 48 per channel beyond",
+                    i18n_key: "opt.opus.bitrate",
+                    kind: OptionKind::Int { min: 0, max: 510, default: 0 },
+                },
+                OptionSpec {
+                    key: "rate_mode",
+                    label: "Rate control",
+                    help: "cbr keeps every packet the same size, vbr follows the signal, cvbr is vbr with a small reservoir",
+                    i18n_key: "opt.opus.rate_mode",
+                    kind: OptionKind::Enum { choices: vec!["cbr", "vbr", "cvbr"], default: "vbr" },
+                },
+                OptionSpec {
+                    key: "frame_ms",
+                    label: "Frame duration (ms)",
+                    help: "Shorter frames lower the delay and cost efficiency",
+                    i18n_key: "opt.opus.frame_ms",
+                    kind: OptionKind::Enum { choices: vec!["2.5", "5", "10", "20"], default: "20" },
+                },
+            ]),
+            "RFC 6716 (CELT), RFC 7845 Ogg encapsulation",
+        ),
     ];
     for (id, name, extensions, mime, sniffers, writer_options, spec) in rows {
         registry.add_format(FormatDescriptor {
@@ -419,6 +455,7 @@ pub fn decode(fmt: FormatId, data: &[u8], limits: &Limits) -> Result<(Audio, Not
         f if f == OGG => vorbis::read(data, limits),
         f if f == MP3 => mp3::read(data, limits),
         f if f == M4A => m4a::read(data, limits),
+        f if f == OPUS => opus::read(data, limits),
         _ => Err(Error::new(
             ErrorCode::UnsupportedFormat,
             "no audio decoder for this format",
@@ -547,7 +584,7 @@ fn fit_depth(
     };
     let target: Option<u8> = match want {
         "keep" => {
-            if (src_float || fmt == OGG || fmt == MP3) && cap.float {
+            if (src_float || fmt == OGG || fmt == MP3 || fmt == OPUS) && cap.float {
                 None
             } else if src_float {
                 Some(
@@ -658,6 +695,19 @@ pub fn encode(
                 ..vorbis::Options::default()
             };
             vorbis::write(&a, &o, &mut notes)?
+        }
+        f if f == OPUS => {
+            let o = opus::Options {
+                bitrate: (opts.int("bitrate").unwrap_or(0).max(0) as u32) * 1000,
+                mode: opus::RateMode::from_name(opts.text("rate_mode").unwrap_or("vbr"))
+                    .unwrap_or(opus::RateMode::Vbr),
+                frame_ms: opts
+                    .text("frame_ms")
+                    .and_then(|t| t.parse().ok())
+                    .unwrap_or(20.0),
+                ..opus::Options::default()
+            };
+            opus::write(&a, &o, &mut notes)?
         }
         f if f == FLAC => {
             let o = flac::Options {

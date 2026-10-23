@@ -218,7 +218,11 @@ mod tests {
             for i in 0..total {
                 let mut y = vec![0i32; n];
                 cwrsi(n, k, i, &mut y);
-                assert_eq!(y.iter().map(|v| v.abs()).sum::<i32>() as usize, k, "n={n} k={k} i={i} {y:?}");
+                assert_eq!(
+                    y.iter().map(|v| v.abs()).sum::<i32>() as usize,
+                    k,
+                    "n={n} k={k} i={i} {y:?}"
+                );
                 assert_eq!(icwrs(&y), i, "n={n} k={k} {y:?}");
                 assert!(seen.insert(y));
             }

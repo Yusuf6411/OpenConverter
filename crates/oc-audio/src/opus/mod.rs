@@ -1,5 +1,8 @@
 //! Opus (RFC 6716) in Ogg (RFC 7845). The CELT layer is our own implementation; SILK and
 //! hybrid frames are not decoded yet (see docs/formats/opus.md).
+// The band and range-coder code follows the reference's integer arithmetic closely, shift
+// expressions included, so that it is easy to check against RFC 6716.
+#![allow(clippy::precedence)]
 pub mod bands;
 pub mod celt;
 pub mod enc;
@@ -12,12 +15,14 @@ use crate::tags::parse_vorbis_comment;
 use crate::{check_samples, ogg, Audio, Samples};
 use oc_core::{Error, ErrorCode, Limits, Note, Notes, Result, Severity};
 
-pub use enc::{write, Options};
+pub use enc::{write, Options, RateMode};
 
 pub fn sniff(data: &[u8]) -> bool {
     ogg::sniff(data)
         && data.len() > 40
-        && data[..200.min(data.len())].windows(8).any(|w| w == b"OpusHead")
+        && data[..200.min(data.len())]
+            .windows(8)
+            .any(|w| w == b"OpusHead")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,8 +47,16 @@ pub fn parse_toc(b: u8) -> Toc {
     let config = b >> 3;
     let stereo = b & 4 != 0;
     let (mode, bandwidth, frame_size) = match config {
-        0..=11 => (Mode::Silk, config / 4, [480, 960, 1920, 2880][usize::from(config & 3)]),
-        12..=15 => (Mode::Hybrid, 3 + (config - 12) / 2, [480, 960][usize::from(config & 1)]),
+        0..=11 => (
+            Mode::Silk,
+            config / 4,
+            [480, 960, 1920, 2880][usize::from(config & 3)],
+        ),
+        12..=15 => (
+            Mode::Hybrid,
+            3 + (config - 12) / 2,
+            [480, 960][usize::from(config & 1)],
+        ),
         _ => {
             let c = config - 16;
             let bw = match c / 4 {
@@ -55,16 +68,25 @@ pub fn parse_toc(b: u8) -> Toc {
             (Mode::Celt, bw, [120, 240, 480, 960][usize::from(c & 3)])
         }
     };
-    Toc { mode, bandwidth, frame_size, stereo }
+    Toc {
+        mode,
+        bandwidth,
+        frame_size,
+        stereo,
+    }
 }
 
 fn frame_len(b: &[u8], at: &mut usize) -> Result<usize> {
-    let first = *b.get(*at).ok_or_else(|| Error::truncated("Opus packet ends in a length field"))?;
+    let first = *b
+        .get(*at)
+        .ok_or_else(|| Error::truncated("Opus packet ends in a length field"))?;
     *at += 1;
     if first < 252 {
         return Ok(usize::from(first));
     }
-    let second = *b.get(*at).ok_or_else(|| Error::truncated("Opus packet ends in a length field"))?;
+    let second = *b
+        .get(*at)
+        .ok_or_else(|| Error::truncated("Opus packet ends in a length field"))?;
     *at += 1;
     Ok(usize::from(second) * 4 + usize::from(first))
 }
@@ -72,7 +94,9 @@ fn frame_len(b: &[u8], at: &mut usize) -> Result<usize> {
 /// Split a packet into frames. With `self_delimited`, the last frame's length is coded too
 /// (multistream packets); the second value is the number of bytes the packet used.
 pub fn parse_packet(p: &[u8], self_delimited: bool) -> Result<(Toc, Vec<&[u8]>, usize)> {
-    let toc_byte = *p.first().ok_or_else(|| Error::truncated("empty Opus packet"))?;
+    let toc_byte = *p
+        .first()
+        .ok_or_else(|| Error::truncated("empty Opus packet"))?;
     let toc = parse_toc(toc_byte);
     let code = toc_byte & 3;
     let mut at = 1usize;
@@ -92,7 +116,7 @@ pub fn parse_packet(p: &[u8], self_delimited: bool) -> Result<(Toc, Vec<&[u8]>, 
                 let l = frame_len(p, &mut at)?;
                 sizes = vec![l, l];
             } else {
-                if (p.len() - 1) % 2 != 0 {
+                if !(p.len() - 1).is_multiple_of(2) {
                     return Err(corrupt("odd length for two equal frames"));
                 }
                 sizes = vec![(p.len() - 1) / 2; 2];
@@ -104,12 +128,17 @@ pub fn parse_packet(p: &[u8], self_delimited: bool) -> Result<(Toc, Vec<&[u8]>, 
                 let b = frame_len(p, &mut at)?;
                 sizes = vec![a, b];
             } else {
-                let rest = p.len().checked_sub(at + a).ok_or_else(|| corrupt("first frame overruns"))?;
+                let rest = p
+                    .len()
+                    .checked_sub(at + a)
+                    .ok_or_else(|| corrupt("first frame overruns"))?;
                 sizes = vec![a, rest];
             }
         }
         _ => {
-            let ctl = *p.get(at).ok_or_else(|| Error::truncated("Opus packet ends in its frame count"))?;
+            let ctl = *p
+                .get(at)
+                .ok_or_else(|| Error::truncated("Opus packet ends in its frame count"))?;
             at += 1;
             let vbr = ctl & 0x80 != 0;
             let has_padding = ctl & 0x40 != 0;
@@ -146,7 +175,10 @@ pub fn parse_packet(p: &[u8], self_delimited: bool) -> Result<(Toc, Vec<&[u8]>, 
                 let l = frame_len(p, &mut at)?;
                 sizes = vec![l; count];
             } else {
-                let body = p.len().checked_sub(at + padding).ok_or_else(|| corrupt("padding overruns"))?;
+                let body = p
+                    .len()
+                    .checked_sub(at + padding)
+                    .ok_or_else(|| corrupt("padding overruns"))?;
                 if body % count != 0 {
                     return Err(corrupt("CBR frames do not divide the packet"));
                 }
@@ -159,7 +191,9 @@ pub fn parse_packet(p: &[u8], self_delimited: bool) -> Result<(Toc, Vec<&[u8]>, 
         if s > 1275 {
             return Err(corrupt("frame longer than 1275 bytes"));
         }
-        let f = p.get(at..at + s).ok_or_else(|| corrupt("frame overruns the packet"))?;
+        let f = p
+            .get(at..at + s)
+            .ok_or_else(|| corrupt("frame overruns the packet"))?;
         frames.push(f);
         at += s;
     }
@@ -180,7 +214,10 @@ pub struct Head {
 
 pub fn parse_head(p: &[u8]) -> Result<Head> {
     if p.len() < 19 || &p[..8] != b"OpusHead" || p[8] >> 4 != 0 {
-        return Err(Error::new(ErrorCode::UnsupportedFormat, "not an OpusHead packet"));
+        return Err(Error::new(
+            ErrorCode::UnsupportedFormat,
+            "not an OpusHead packet",
+        ));
     }
     let channels = usize::from(p[9]);
     if channels == 0 {
@@ -189,7 +226,9 @@ pub fn parse_head(p: &[u8]) -> Result<Head> {
     let family = p[18];
     let (streams, coupled, mapping) = if family == 0 {
         if channels > 2 {
-            return Err(Error::corrupt("mapping family 0 allows only 1 or 2 channels"));
+            return Err(Error::corrupt(
+                "mapping family 0 allows only 1 or 2 channels",
+            ));
         }
         (1, channels - 1, (0..channels as u8).collect())
     } else {
@@ -203,7 +242,9 @@ pub fn parse_head(p: &[u8]) -> Result<Head> {
         }
         let map = p[21..21 + channels].to_vec();
         if map.iter().any(|&m| m != 255 && usize::from(m) >= s + c) {
-            return Err(Error::corrupt("Opus channel mapping points past the streams"));
+            return Err(Error::corrupt(
+                "Opus channel mapping points past the streams",
+            ));
         }
         if family != 1 && family != 255 {
             return Err(Error::new(
@@ -252,8 +293,17 @@ pub fn read(data: &[u8], limits: &Limits) -> Result<(Audio, Notes)> {
     }
     let s = streams
         .iter()
-        .find(|s| s.packets.first().is_some_and(|p| p.data.starts_with(b"OpusHead")))
-        .ok_or_else(|| Error::new(ErrorCode::UnsupportedFormat, "no Opus stream in this Ogg file"))?;
+        .find(|s| {
+            s.packets
+                .first()
+                .is_some_and(|p| p.data.starts_with(b"OpusHead"))
+        })
+        .ok_or_else(|| {
+            Error::new(
+                ErrorCode::UnsupportedFormat,
+                "no Opus stream in this Ogg file",
+            )
+        })?;
     let head = parse_head(&s.packets[0].data)?;
     let mut audio_tags = crate::Tags::default();
     let mut pictures = Vec::new();
@@ -287,7 +337,13 @@ pub fn read(data: &[u8], limits: &Limits) -> Result<(Audio, Notes)> {
             for f in frames {
                 match toc.mode {
                     Mode::Celt => {
-                        set.celts[si].decode(f, (toc.frame_size / 120).trailing_zeros() as usize, if toc.stereo { 2 } else { 1 }.min(chs).max(1), end_band(toc.bandwidth), out);
+                        set.celts[si].decode(
+                            f,
+                            (toc.frame_size / 120).trailing_zeros() as usize,
+                            if toc.stereo { 2 } else { 1 }.min(chs).max(1),
+                            end_band(toc.bandwidth),
+                            out,
+                        );
                     }
                     _ => {
                         skipped_unsupported = true;
@@ -298,7 +354,9 @@ pub fn read(data: &[u8], limits: &Limits) -> Result<(Audio, Notes)> {
             rest = rest.get(used..).unwrap_or(&[]);
             let n = out.len() / chs;
             if *frames_len.get_or_insert(n) != n {
-                return Err(Error::corrupt("Opus streams disagree on the packet duration"));
+                return Err(Error::corrupt(
+                    "Opus streams disagree on the packet duration",
+                ));
             }
         }
         let n = frames_len.unwrap_or(0);
@@ -329,8 +387,16 @@ pub fn read(data: &[u8], limits: &Limits) -> Result<(Audio, Notes)> {
     }
     let skip = (head.pre_skip * ch).min(pcm.len());
     pcm.drain(..skip);
-    if let Some(g) = s.packets.iter().rev().find(|p| p.granule >= 0).map(|p| p.granule) {
-        let want = (g.max(0) as usize).saturating_sub(head.pre_skip).saturating_mul(ch);
+    if let Some(g) = s
+        .packets
+        .iter()
+        .rev()
+        .find(|p| p.granule >= 0)
+        .map(|p| p.granule)
+    {
+        let want = (g.max(0) as usize)
+            .saturating_sub(head.pre_skip)
+            .saturating_mul(ch);
         if want < pcm.len() {
             pcm.truncate(want);
         }
@@ -374,7 +440,13 @@ pub fn final_ranges(data: &[u8]) -> Result<Vec<u32>> {
         let (toc, frames, _) = parse_packet(&pk.data, false)?;
         let mut last = 0;
         for f in frames {
-            celt.decode(f, (toc.frame_size / 120).trailing_zeros() as usize, if toc.stereo { 2 } else { 1 }, end_band(toc.bandwidth), &mut scratch);
+            celt.decode(
+                f,
+                (toc.frame_size / 120).trailing_zeros() as usize,
+                if toc.stereo { 2 } else { 1 },
+                end_band(toc.bandwidth),
+                &mut scratch,
+            );
             last = celt.final_range();
         }
         out.push(last);

@@ -7,9 +7,9 @@ use super::tables::*;
 pub const OVERLAP: usize = 120;
 const SHORT: usize = 120;
 const HISTORY: usize = 2048;
-const PREEMPH: f32 = 0.850_006_1;
+pub(super) const PREEMPH: f32 = 0.850_006_1;
 
-fn window() -> &'static [f32; OVERLAP] {
+pub(super) fn window() -> &'static [f32; OVERLAP] {
     use std::sync::OnceLock;
     static W: OnceLock<[f32; OVERLAP]> = OnceLock::new();
     W.get_or_init(|| {
@@ -22,14 +22,12 @@ fn window() -> &'static [f32; OVERLAP] {
     })
 }
 
-fn mdct_for(lm: usize, short: bool) -> &'static Mdct {
+pub(super) fn mdct_for(lm: usize, short: bool) -> &'static Mdct {
     use std::sync::OnceLock;
     static M: OnceLock<Vec<Mdct>> = OnceLock::new();
     let all = M.get_or_init(|| (0..4).map(|l| Mdct::new(SHORT << l)).collect());
     &all[if short { 0 } else { lm }]
 }
-
-/// Scale from the unit-gain inverse transform to the reference decoder's output.
 
 /// The reference decoder's polynomial `2^x` (matched so that output agrees to the last bits).
 fn exp2(x: f32) -> f32 {
@@ -38,7 +36,7 @@ fn exp2(x: f32) -> f32 {
         return 0.0;
     }
     let frac = x - integer;
-    let p = 0.999_925_2 + frac * (0.695_833_54 + frac * (0.226_067_16 + frac * 0.078_024_523));
+    let p = 0.999_925_2 + frac * (0.695_833_54 + frac * (0.226_067_16 + frac * 0.078_024_52));
     p * (integer).exp2()
 }
 
@@ -79,14 +77,26 @@ fn comb_filter(
     }
     let t0 = t0.max(15);
     let t1 = t1.max(15);
-    let (g00, g01, g02) = (g0 * COMB_GAINS[tap0][0], g0 * COMB_GAINS[tap0][1], g0 * COMB_GAINS[tap0][2]);
-    let (g10, g11, g12) = (g1 * COMB_GAINS[tap1][0], g1 * COMB_GAINS[tap1][1], g1 * COMB_GAINS[tap1][2]);
+    let (g00, g01, g02) = (
+        g0 * COMB_GAINS[tap0][0],
+        g0 * COMB_GAINS[tap0][1],
+        g0 * COMB_GAINS[tap0][2],
+    );
+    let (g10, g11, g12) = (
+        g1 * COMB_GAINS[tap1][0],
+        g1 * COMB_GAINS[tap1][1],
+        g1 * COMB_GAINS[tap1][2],
+    );
     let x = |b: &[f32], i: isize| b[(at as isize + i) as usize];
     let mut x1 = x(buf, 1 - t1 as isize);
     let mut x2 = x(buf, -(t1 as isize));
     let mut x3 = x(buf, -(t1 as isize) - 1);
     let mut x4 = x(buf, -(t1 as isize) - 2);
-    let overlap = if g0 == g1 && t0 == t1 && tap0 == tap1 { 0 } else { overlap };
+    let overlap = if g0 == g1 && t0 == t1 && tap0 == tap1 {
+        0
+    } else {
+        overlap
+    };
     let w = window();
     let mut i = 0usize;
     let (t0i, t1i) = (t0 as isize, t1 as isize);
@@ -127,11 +137,18 @@ fn comb_filter(
     }
 }
 
-fn tf_code(rc: &mut Rc<'_>, start: usize, end: usize, transient: bool, lm: usize, tf_in: &[i32; NB]) -> [i32; NB] {
+fn tf_code(
+    rc: &mut Rc<'_>,
+    start: usize,
+    end: usize,
+    transient: bool,
+    lm: usize,
+    tf_in: &[i32; NB],
+) -> [i32; NB] {
     let mut budget = rc.storage() as i32 * 8;
     let mut tell = rc.tell();
     let mut logp = if transient { 2 } else { 4 };
-    let sel_rsv = lm > 0 && tell + logp + 1 <= budget;
+    let sel_rsv = lm > 0 && tell + logp < budget;
     if sel_rsv {
         budget -= 1;
     }
@@ -194,6 +211,23 @@ impl Celt {
         }
     }
 
+    /// Encode one frame into `nbytes` bytes (the range coder pads to exactly that size).
+    pub fn encode(
+        &mut self,
+        input: &EncInput,
+        lm: usize,
+        stream_ch: usize,
+        end: usize,
+        nbytes: usize,
+    ) -> Vec<u8> {
+        let mut rc = Rc::Enc(Enc::new(nbytes));
+        self.frame(&mut rc, lm, stream_ch, end, Some(input));
+        match rc {
+            Rc::Enc(e) => e.finish().0,
+            Rc::Dec(_) => Vec::new(),
+        }
+    }
+
     pub fn final_range(&self) -> u32 {
         self.rng
     }
@@ -204,7 +238,14 @@ impl Celt {
 
     /// Decode one frame of `lm` (0..=3: 2.5, 5, 10, 20 ms) coding `stream_ch` channels, using
     /// bands below `end`. Appends `120 << lm` interleaved frames of `self.channels` channels.
-    pub fn decode(&mut self, data: &[u8], lm: usize, stream_ch: usize, end: usize, out: &mut Vec<f32>) {
+    pub fn decode(
+        &mut self,
+        data: &[u8],
+        lm: usize,
+        stream_ch: usize,
+        end: usize,
+        out: &mut Vec<f32>,
+    ) {
         let cc = self.channels;
         let n = SHORT << lm;
         if data.len() <= 1 {
@@ -294,7 +335,11 @@ impl Celt {
         // coarse energy
         let mut error = [0f32; 2 * NB];
         {
-            let (coef, beta) = if intra { (0.0, BETA_INTRA) } else { (PRED_COEF[lm], BETA_COEF[lm]) };
+            let (coef, beta) = if intra {
+                (0.0, BETA_INTRA)
+            } else {
+                (PRED_COEF[lm], BETA_COEF[lm])
+            };
             let model = &E_PROB_MODEL[(lm * 2 + usize::from(intra)) * 42..][..42];
             let budget = len as i32 * 8;
             let mut prev = [0f32; 2];
@@ -325,10 +370,18 @@ impl Celt {
                     }
                     if budget - tell >= 15 {
                         let pi = 2 * i.min(20);
-                        qi = rc.laplace(qi, u32::from(model[pi]) << 7, u32::from(model[pi + 1]) << 6);
+                        qi = rc.laplace(
+                            qi,
+                            u32::from(model[pi]) << 7,
+                            u32::from(model[pi + 1]) << 6,
+                        );
                     } else if budget - tell >= 2 {
                         qi = qi.clamp(-1, 1);
-                        let sym = rc.icdf((2 * qi ^ -i32::from(qi < 0)) as usize, &SMALL_ENERGY_ICDF, 2) as i32;
+                        let sym = rc.icdf(
+                            (2 * qi ^ -i32::from(qi < 0)) as usize,
+                            &SMALL_ENERGY_ICDF,
+                            2,
+                        ) as i32;
                         qi = (sym >> 1) ^ -(sym & 1);
                     } else if budget - tell >= 1 {
                         qi = -i32::from(rc.bit_logp(qi < 0, 1));
@@ -380,9 +433,15 @@ impl Celt {
             alloc_trim = rc.icdf(5, &TRIM_ICDF, 7) as i32;
         }
         let mut bits = ((len as i32 * 8) << BITRES) - rc.tell_frac() - 1;
-        let anti_collapse_rsv = if transient && lm >= 2 && bits >= ((lm as i32 + 2) << BITRES) { 1 << BITRES } else { 0 };
+        let anti_collapse_rsv = if transient && lm >= 2 && bits >= ((lm as i32 + 2) << BITRES) {
+            1 << BITRES
+        } else {
+            0
+        };
         bits -= anti_collapse_rsv;
-        let al = bands::compute_allocation(rc, start, end, &offsets, &cap, alloc_trim, end, true, bits, c, lm);
+        let al = bands::compute_allocation(
+            rc, start, end, &offsets, &cap, alloc_trim, end, true, bits, c, lm,
+        );
         // fine energy
         for i in start..end {
             if al.ebits[i] <= 0 {
@@ -393,7 +452,8 @@ impl Celt {
                 let mut q2 = ((error[ch * NB + i] + 0.5) * frac as f32).floor() as i32;
                 q2 = q2.clamp(0, frac - 1);
                 let q2 = rc.bits(q2 as u32, al.ebits[i] as u32) as i32;
-                let off = (q2 as f32 + 0.5) * (1 << (14 - al.ebits[i])) as f32 * (1.0 / 16384.0) - 0.5;
+                let off =
+                    (q2 as f32 + 0.5) * (1 << (14 - al.ebits[i])) as f32 * (1.0 / 16384.0) - 0.5;
                 self.old_band_e[ch * NB + i] += off;
                 error[ch * NB + i] -= off;
             }
@@ -442,7 +502,9 @@ impl Celt {
                     }
                     for ch in 0..c {
                         let q2 = rc.bits(u32::from(error[ch * NB + i] >= 0.0), 1) as i32;
-                        let off = (q2 as f32 - 0.5) * (1 << (14 - al.ebits[i] - 1)) as f32 * (1.0 / 16384.0);
+                        let off = (q2 as f32 - 0.5)
+                            * (1 << (14 - al.ebits[i] - 1)) as f32
+                            * (1.0 / 16384.0);
                         self.old_band_e[ch * NB + i] += off;
                         error[ch * NB + i] -= off;
                         bits_left -= 1;
@@ -470,7 +532,11 @@ impl Celt {
                 *v = 0.0;
             }
         }
-        let (blocks, nb) = if transient { (m, SHORT) } else { (1, SHORT << lm) };
+        let (blocks, nb) = if transient {
+            (m, SHORT)
+        } else {
+            (1, SHORT << lm)
+        };
         let denorm = |xs: &[f32], e: &[f32], freq: &mut [f32]| {
             if silence {
                 for v in freq.iter_mut() {
@@ -511,15 +577,41 @@ impl Celt {
             synth(self, 0, &freq);
         } else {
             for ch in 0..cc {
-                denorm(&x[ch * n..(ch + 1) * n], &self.old_band_e[ch * NB..(ch + 1) * NB], &mut freq);
+                denorm(
+                    &x[ch * n..(ch + 1) * n],
+                    &self.old_band_e[ch * NB..(ch + 1) * NB],
+                    &mut freq,
+                );
                 synth(self, ch, &freq);
             }
         }
         // post-filter
         for ch in 0..cc {
-            comb_filter(&mut self.mem[ch], o, self.pf_period_old, self.pf_period, SHORT, self.pf_gain_old, self.pf_gain, self.pf_tapset_old, self.pf_tapset, OVERLAP);
+            comb_filter(
+                &mut self.mem[ch],
+                o,
+                self.pf_period_old,
+                self.pf_period,
+                SHORT,
+                self.pf_gain_old,
+                self.pf_gain,
+                self.pf_tapset_old,
+                self.pf_tapset,
+                OVERLAP,
+            );
             if lm != 0 {
-                comb_filter(&mut self.mem[ch], o + SHORT, self.pf_period, pf_pitch, n - SHORT, self.pf_gain, pf_gain, self.pf_tapset, pf_tapset, OVERLAP);
+                comb_filter(
+                    &mut self.mem[ch],
+                    o + SHORT,
+                    self.pf_period,
+                    pf_pitch,
+                    n - SHORT,
+                    self.pf_gain,
+                    pf_gain,
+                    self.pf_tapset,
+                    pf_tapset,
+                    OVERLAP,
+                );
             }
         }
         self.pf_period_old = self.pf_period;
@@ -554,7 +646,18 @@ impl Celt {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn anti_collapse(&self, x: &mut [f32], masks: &[u8], lm: usize, c: usize, size: usize, start: usize, end: usize, pulses: &[i32; NB], mut seed: u32) {
+    fn anti_collapse(
+        &self,
+        x: &mut [f32],
+        masks: &[u8],
+        lm: usize,
+        c: usize,
+        size: usize,
+        start: usize,
+        end: usize,
+        pulses: &[i32; NB],
+        mut seed: u32,
+    ) {
         for i in start..end {
             let n0 = eb(i + 1) - eb(i);
             let depth = ((1 + pulses[i]) / n0 as i32) >> lm;

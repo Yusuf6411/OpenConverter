@@ -105,7 +105,12 @@ pub fn compute_allocation(
     for j in start..end {
         let w = (eb(j + 1) - eb(j)) as i32;
         thresh[j] = (ci << BITRES).max((3 * w << lm << BITRES) >> 4);
-        trim_offset[j] = ci * w * (alloc_trim - 5 - lm as i32) * (end - j - 1) as i32 * (1 << (lm as i32 + BITRES)) >> 6;
+        trim_offset[j] = ci
+            * w
+            * (alloc_trim - 5 - lm as i32)
+            * (end - j - 1) as i32
+            * (1 << (lm as i32 + BITRES))
+            >> 6;
         if (w << lm) == 1 {
             trim_offset[j] -= ci << BITRES;
         }
@@ -146,7 +151,11 @@ pub fn compute_allocation(
     for j in start..end {
         let n = (eb(j + 1) - eb(j)) as i32;
         let mut b1 = ci * n * i32::from(BAND_ALLOC[lo * NB + j]) << lm >> 2;
-        let mut b2 = if hi >= 11 { cap[j] } else { ci * n * i32::from(BAND_ALLOC[hi * NB + j]) << lm >> 2 };
+        let mut b2 = if hi >= 11 {
+            cap[j]
+        } else {
+            ci * n * i32::from(BAND_ALLOC[hi * NB + j]) << lm >> 2
+        };
         if b1 > 0 {
             b1 = (b1 + trim_offset[j]).max(0);
         }
@@ -356,7 +365,7 @@ fn exp_rotation1(x: &mut [f32], len: usize, stride: usize, c: f32, s: f32) {
         x[i + stride] = c * x2 + s * x1;
         x[i] = c * x1 + ms * x2;
     }
-    if len >= 2 * stride + 1 {
+    if len > 2 * stride {
         for i in (0..=len - 2 * stride - 1).rev() {
             let x1 = x[i];
             let x2 = x[i + stride];
@@ -572,7 +581,8 @@ impl Quant<'_, '_> {
                     e2 += y[j] * y[j];
                 }
             }
-            let t = (0.5 + 16384.0 * 0.636_62 * e2.sqrt().atan2(e1.sqrt())).floor() as i32;
+            let t = (0.5 + 16384.0 * std::f32::consts::FRAC_2_PI * e2.sqrt().atan2(e1.sqrt()))
+                .floor() as i32;
             itheta = t;
         }
         let tell = self.rc.tell_frac();
@@ -588,7 +598,11 @@ impl Quant<'_, '_> {
                 let mut xv = itheta;
                 let fs = self.rc.decode(ft as u32) as i32;
                 if !self.encode {
-                    xv = if fs < (x0 + 1) * p0 { fs / p0 } else { x0 + 1 + (fs - (x0 + 1) * p0) };
+                    xv = if fs < (x0 + 1) * p0 {
+                        fs / p0
+                    } else {
+                        x0 + 1 + (fs - (x0 + 1) * p0)
+                    };
                 }
                 let (fl, fh) = if xv <= x0 {
                     (p0 * xv, p0 * (xv + 1))
@@ -619,12 +633,14 @@ impl Quant<'_, '_> {
                         fs = itheta + 1;
                         fl = itheta * (itheta + 1) >> 1;
                     } else {
-                        itheta = (2 * (qn + 1) - isqrt32((8 * (ft - fm - 1) + 1) as u32) as i32) >> 1;
+                        itheta =
+                            (2 * (qn + 1) - isqrt32((8 * (ft - fm - 1) + 1) as u32) as i32) >> 1;
                         fs = qn + 1 - itheta;
                         fl = ft - ((qn + 1 - itheta) * (qn + 2 - itheta) >> 1);
                     }
                 }
-                self.rc.update_or_encode(fl as u32, (fl + fs) as u32, ft as u32);
+                self.rc
+                    .update_or_encode(fl as u32, (fl + fs) as u32, ft as u32);
             }
             itheta = itheta * 16384 / qn;
         } else if stereo {
@@ -652,10 +668,22 @@ impl Quant<'_, '_> {
             iside = bitexact_cos(16384 - itheta);
             delta = frac_mul16((n as i32 - 1) << 7, bitexact_log2tan(iside, imid));
         }
-        Split { inv, imid, iside, delta, itheta, qalloc }
+        Split {
+            inv,
+            imid,
+            iside,
+            delta,
+            itheta,
+            qalloc,
+        }
     }
 
-    fn band_n1(&mut self, x: &mut [f32], y: Option<&mut [f32]>, lowband_out: Option<&mut [f32]>) -> u32 {
+    fn band_n1(
+        &mut self,
+        x: &mut [f32],
+        y: Option<&mut [f32]>,
+        lowband_out: Option<&mut [f32]>,
+    ) -> u32 {
         let mut chans: Vec<&mut [f32]> = vec![x];
         if let Some(y) = y {
             chans.push(y);
@@ -701,7 +729,10 @@ impl Quant<'_, '_> {
         if tf_change > 0 {
             recombine = tf_change as usize;
         }
-        if scratch.is_some() && lowband.is_some() && (recombine > 0 || ((n_b & 1) == 0 && tf_change < 0) || b0_in > 1) {
+        if scratch.is_some()
+            && lowband.is_some()
+            && (recombine > 0 || ((n_b & 1) == 0 && tf_change < 0) || b0_in > 1)
+        {
             if let (Some(s), Some(l)) = (scratch.take(), lowband.take()) {
                 s[..n].copy_from_slice(&l[..n]);
                 lowband = Some(&mut s[..n]);
@@ -714,7 +745,8 @@ impl Quant<'_, '_> {
             if let Some(l) = lowband.as_deref_mut() {
                 haar1(l, n >> k, 1 << k);
             }
-            fill = u32::from(BIT_INTERLEAVE[(fill & 0xF) as usize]) | u32::from(BIT_INTERLEAVE[(fill >> 4) as usize]) << 2;
+            fill = u32::from(BIT_INTERLEAVE[(fill & 0xF) as usize])
+                | u32::from(BIT_INTERLEAVE[(fill >> 4) as usize]) << 2;
         }
         bk >>= recombine;
         n_b <<= recombine;
@@ -773,7 +805,17 @@ impl Quant<'_, '_> {
 
     /// The recursive part of a band: split in two while the budget allows, else PVQ.
     #[allow(clippy::too_many_arguments)]
-    fn partition(&mut self, x: &mut [f32], n: usize, mut b: i32, mut bk: usize, lowband: Option<&[f32]>, mut lm: i32, gain: f32, mut fill: u32) -> u32 {
+    fn partition(
+        &mut self,
+        x: &mut [f32],
+        n: usize,
+        mut b: i32,
+        mut bk: usize,
+        lowband: Option<&[f32]>,
+        mut lm: i32,
+        gain: f32,
+        mut fill: u32,
+    ) -> u32 {
         let b0 = bk;
         let mut n_cur = n;
         let c = cache(lm, self.i);
@@ -787,7 +829,8 @@ impl Quant<'_, '_> {
             bk = bk.div_ceil(2);
             let (xa, xb) = x.split_at_mut(n_cur);
             let sp = self.compute_theta(xa, xb, n_cur, &mut b, bk, b0, lm, false, &mut fill);
-            let (imid, iside, mut delta, itheta, qalloc) = (sp.imid, sp.iside, sp.delta, sp.itheta, sp.qalloc);
+            let (imid, iside, mut delta, itheta, qalloc) =
+                (sp.imid, sp.iside, sp.delta, sp.itheta, sp.qalloc);
             let mid = imid as f32 / 32768.0;
             let side = iside as f32 / 32768.0;
             if b0 > 1 && (itheta & 0x3fff) != 0 {
@@ -811,9 +854,11 @@ impl Quant<'_, '_> {
                 if rebalance > 3 << BITRES && itheta != 0 {
                     sbits += rebalance - (3 << BITRES);
                 }
-                cm |= self.partition(xb, n_cur, sbits, bk, lb_side, lm, gain * side, fill >> bk) << (b0 >> 1);
+                cm |= self.partition(xb, n_cur, sbits, bk, lb_side, lm, gain * side, fill >> bk)
+                    << (b0 >> 1);
             } else {
-                cm = self.partition(xb, n_cur, sbits, bk, lb_side, lm, gain * side, fill >> bk) << (b0 >> 1);
+                cm = self.partition(xb, n_cur, sbits, bk, lb_side, lm, gain * side, fill >> bk)
+                    << (b0 >> 1);
                 rebalance = sbits - (rebalance - self.remaining_bits);
                 if rebalance > 3 << BITRES && itheta != 16384 {
                     mbits += rebalance - (3 << BITRES);
@@ -845,7 +890,11 @@ impl Quant<'_, '_> {
                     if let Some(lb) = lowband {
                         for j in 0..n_cur {
                             self.seed = lcg(self.seed);
-                            let tmp = if self.seed & 0x8000 != 0 { 1.0 / 256.0 } else { -1.0 / 256.0 };
+                            let tmp = if self.seed & 0x8000 != 0 {
+                                1.0 / 256.0
+                            } else {
+                                -1.0 / 256.0
+                            };
                             x[j] = lb[j] + tmp;
                         }
                         cm = fill;
@@ -902,7 +951,8 @@ impl Quant<'_, '_> {
             return self.band_n1(x, Some(y), lowband_out);
         }
         let sp = self.compute_theta(x, y, n, &mut b, bk, bk, lm, true, &mut fill);
-        let (imid, iside, delta, itheta, qalloc, inv) = (sp.imid, sp.iside, sp.delta, sp.itheta, sp.qalloc, sp.inv);
+        let (imid, iside, delta, itheta, qalloc, inv) =
+            (sp.imid, sp.iside, sp.delta, sp.itheta, sp.qalloc, sp.inv);
         let mid = imid as f32 / 32768.0;
         let side = iside as f32 / 32768.0;
         let mut cm;
@@ -920,8 +970,23 @@ impl Quant<'_, '_> {
                 sign = self.rc.bits(0, 1);
             }
             let sg = 1.0 - 2.0 * sign as f32;
-            let (x2, y2) = if c { (&mut *y, &mut *x) } else { (&mut *x, &mut *y) };
-            cm = self.band(x2, n, mbits, bk, lowband, lm, lowband_out, 1.0, scratch, orig_fill);
+            let (x2, y2) = if c {
+                (&mut *y, &mut *x)
+            } else {
+                (&mut *x, &mut *y)
+            };
+            cm = self.band(
+                x2,
+                n,
+                mbits,
+                bk,
+                lowband,
+                lm,
+                lowband_out,
+                1.0,
+                scratch,
+                orig_fill,
+            );
             y2[0] = -sg * x2[1];
             y2[1] = sg * x2[0];
             if !self.encode {
@@ -938,7 +1003,18 @@ impl Quant<'_, '_> {
             self.remaining_bits -= qalloc;
             let mut rebalance = self.remaining_bits;
             if mbits >= sbits {
-                cm = self.band(x, n, mbits, bk, lowband, lm, lowband_out, 1.0, scratch, fill);
+                cm = self.band(
+                    x,
+                    n,
+                    mbits,
+                    bk,
+                    lowband,
+                    lm,
+                    lowband_out,
+                    1.0,
+                    scratch,
+                    fill,
+                );
                 rebalance = mbits - (rebalance - self.remaining_bits);
                 if rebalance > 3 << BITRES && itheta != 0 {
                     sbits += rebalance - (3 << BITRES);
@@ -950,7 +1026,18 @@ impl Quant<'_, '_> {
                 if rebalance > 3 << BITRES && itheta != 16384 {
                     mbits += rebalance - (3 << BITRES);
                 }
-                cm |= self.band(x, n, mbits, bk, lowband, lm, lowband_out, 1.0, scratch, fill);
+                cm |= self.band(
+                    x,
+                    n,
+                    mbits,
+                    bk,
+                    lowband,
+                    lm,
+                    lowband_out,
+                    1.0,
+                    scratch,
+                    fill,
+                );
             }
         }
         if n != 2 && !self.encode {
@@ -1018,7 +1105,16 @@ pub fn quant_all_bands(
     let mut scratch = vec![0f32; m * (eb(NB) - eb(NB - 1))];
     let encode = rc.encoding();
     let _ = n_total;
-    let mut q = Quant { rc, i: 0, intensity, spread, tf_change: 0, remaining_bits: 0, seed: *seed, encode };
+    let mut q = Quant {
+        rc,
+        i: 0,
+        intensity,
+        spread,
+        tf_change: 0,
+        remaining_bits: 0,
+        seed: *seed,
+        encode,
+    };
     let mut update_lowband = true;
     let mut lowband_offset = 0usize;
     let (xa, xb) = x.split_at_mut(nn);
@@ -1038,7 +1134,9 @@ pub fn quant_all_bands(
         } else {
             0
         };
-        if (m * eb(i) >= m * eb(start) + n || i == start + 1) && (update_lowband || lowband_offset == 0) {
+        if (m * eb(i) >= m * eb(start) + n || i == start + 1)
+            && (update_lowband || lowband_offset == 0)
+        {
             lowband_offset = i;
         }
         if i == start + 1 {
@@ -1058,7 +1156,7 @@ pub fn quant_all_bands(
         let mut effective_lowband: Option<usize> = None;
         let (mut x_cm, mut y_cm);
         if lowband_offset != 0 && (spread != SPREAD_AGGRESSIVE || bk > 1 || tf_res[i] < 0) {
-            let eff = (m * eb(lowband_offset) as usize).saturating_sub(norm_offset + n);
+            let eff = (m * eb(lowband_offset)).saturating_sub(norm_offset + n);
             effective_lowband = Some(eff);
             let mut fold_start = lowband_offset;
             loop {
@@ -1096,19 +1194,63 @@ pub fn quant_all_bands(
             let (lo, hi) = norm.split_at_mut(out_pos);
             let lb = effective_lowband.map(|e| &mut lo[e..]);
             let out = if last { None } else { Some(&mut hi[..n]) };
-            x_cm = q.band(&mut xa[band_x.clone()], n, b / 2, bk, lb, lm as i32, out, 1.0, Some(&mut scratch), x_cm);
+            x_cm = q.band(
+                &mut xa[band_x.clone()],
+                n,
+                b / 2,
+                bk,
+                lb,
+                lm as i32,
+                out,
+                1.0,
+                Some(&mut scratch),
+                x_cm,
+            );
             let (lo2, hi2) = norm2.split_at_mut(out_pos);
             let lb2 = effective_lowband.map(|e| &mut lo2[e..]);
             let out2 = if last { None } else { Some(&mut hi2[..n]) };
-            y_cm = q.band(&mut xb[band_x], n, b / 2, bk, lb2, lm as i32, out2, 1.0, Some(&mut scratch), y_cm);
+            y_cm = q.band(
+                &mut xb[band_x],
+                n,
+                b / 2,
+                bk,
+                lb2,
+                lm as i32,
+                out2,
+                1.0,
+                Some(&mut scratch),
+                y_cm,
+            );
         } else {
             let (lo, hi) = norm.split_at_mut(out_pos);
             let lb = effective_lowband.map(|e| &mut lo[e..]);
             let out = if last { None } else { Some(&mut hi[..n]) };
             if c == 2 {
-                x_cm = q.band_stereo(&mut xa[band_x.clone()], &mut xb[band_x], n, b, bk, lb, lm as i32, out, Some(&mut scratch), x_cm | y_cm);
+                x_cm = q.band_stereo(
+                    &mut xa[band_x.clone()],
+                    &mut xb[band_x],
+                    n,
+                    b,
+                    bk,
+                    lb,
+                    lm as i32,
+                    out,
+                    Some(&mut scratch),
+                    x_cm | y_cm,
+                );
             } else {
-                x_cm = q.band(&mut xa[band_x], n, b, bk, lb, lm as i32, out, 1.0, Some(&mut scratch), x_cm | y_cm);
+                x_cm = q.band(
+                    &mut xa[band_x],
+                    n,
+                    b,
+                    bk,
+                    lb,
+                    lm as i32,
+                    out,
+                    1.0,
+                    Some(&mut scratch),
+                    x_cm | y_cm,
+                );
             }
             y_cm = x_cm;
         }

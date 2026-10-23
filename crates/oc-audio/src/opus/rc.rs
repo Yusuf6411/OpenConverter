@@ -90,7 +90,11 @@ impl<'a> Dec<'a> {
     pub fn update(&mut self, fl: u32, fh: u32, ft: u32) {
         let s = self.ext * (ft - fh);
         self.val = self.val.wrapping_sub(s);
-        self.rng = if fl > 0 { self.ext * (fh - fl) } else { self.rng - s };
+        self.rng = if fl > 0 {
+            self.ext * (fh - fl)
+        } else {
+            self.rng - s
+        };
         self.normalize();
     }
     pub fn bit_logp(&mut self, logp: u32) -> bool {
@@ -153,7 +157,11 @@ impl<'a> Dec<'a> {
                 }
             }
         }
-        let ret = if n >= 32 { window } else { window & ((1u32 << n) - 1) };
+        let ret = if n >= 32 {
+            window
+        } else {
+            window & ((1u32 << n) - 1)
+        };
         window = if n >= 32 { 0 } else { window >> n };
         avail -= n;
         self.end_window = window;

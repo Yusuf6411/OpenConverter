@@ -594,6 +594,8 @@ impl Engine {
             // MP3 has no real magic number: its candidates must also parse as frames.
             .filter(|(_, id)| *id != audio::MP3 || oc_audio::mp3::sniff(data))
             .filter(|(_, id)| *id != audio::M4A || oc_audio::m4a::sniff(data))
+            .filter(|(_, id)| *id != audio::OPUS || oc_audio::opus::sniff(data))
+            .filter(|(_, id)| *id != audio::OGG || !oc_audio::opus::sniff(data))
             .max_by_key(|(c, _)| *c)
             .map(|(_, id)| id)
             .or_else(|| oc_audio::mp3::sniff(data).then_some(audio::MP3))
@@ -1108,6 +1110,69 @@ mod tests {
             decode_rgba(&out),
             std::fs::read(png_fixture("rgb8.rgba")).unwrap()
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn audio_converts_through_opus_and_alac() {
+        let dir = tmpdir("audio-formats");
+        // One second of a 440 Hz tone with a little noise at 44.1 kHz, as WAV.
+        let mut pcm = Vec::new();
+        let mut seed = 7u32;
+        for i in 0..44100u32 {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let n = ((seed >> 16) as f32 / 65536.0 - 0.5) * 0.02;
+            let v =
+                ((i as f32 * 440.0 * std::f32::consts::TAU / 44100.0).sin() * 0.5 + n) * 32767.0;
+            let s = v as i16;
+            pcm.extend_from_slice(&s.to_le_bytes());
+            pcm.extend_from_slice(&s.to_le_bytes());
+        }
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + pcm.len() as u32).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&44100u32.to_le_bytes());
+        wav.extend_from_slice(&(44100u32 * 4).to_le_bytes());
+        wav.extend_from_slice(&4u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
+        wav.extend_from_slice(&pcm);
+        let src = dir.join("in.wav");
+        std::fs::write(&src, &wav).unwrap();
+
+        // Opus: always 48 kHz, so the resampling is reported; the content sniffs as Opus.
+        let opus = dir.join("out.opus");
+        let rep = run(&src, &opus, &[("bitrate", "96"), ("rate_mode", "cbr")]).unwrap();
+        assert_eq!(rep.output_format, audio::OPUS);
+        assert!(rep.notes.iter().any(|n| n.code == "opus.resampled"));
+        let back = dir.join("back.wav");
+        let rep = run(&opus, &back, &[]).unwrap();
+        assert_eq!(rep.input_format, audio::OPUS);
+        let (a, _) =
+            oc_audio::wav::read(&std::fs::read(&back).unwrap(), &Limits::default()).unwrap();
+        assert_eq!(a.sample_rate, 48000);
+        assert!((a.duration_secs() - 1.0).abs() < 0.01);
+
+        // The Ogg extension holds Vorbis, and a renamed Opus file is still recognised.
+        let renamed = dir.join("renamed.ogg");
+        std::fs::copy(&opus, &renamed).unwrap();
+        let rep = run(&renamed, &dir.join("again.wav"), &[]).unwrap();
+        assert_eq!(rep.input_format, audio::OPUS);
+
+        // ALAC in M4A is lossless.
+        let m4a = dir.join("out.m4a");
+        run(&src, &m4a, &[]).unwrap();
+        let back2 = dir.join("back2.wav");
+        run(&m4a, &back2, &[]).unwrap();
+        let (b, _) =
+            oc_audio::wav::read(&std::fs::read(&back2).unwrap(), &Limits::default()).unwrap();
+        let (c, _) = oc_audio::wav::read(&wav, &Limits::default()).unwrap();
+        assert_eq!(b.samples, c.samples);
         let _ = std::fs::remove_dir_all(dir);
     }
 
