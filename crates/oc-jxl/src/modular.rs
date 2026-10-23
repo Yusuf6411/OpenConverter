@@ -19,7 +19,13 @@ pub struct Chan {
 
 impl Chan {
     pub fn info(w: usize, h: usize, hs: i32, vs: i32) -> Self {
-        Self { w, h, hs, vs, d: Vec::new() }
+        Self {
+            w,
+            h,
+            hs,
+            vs,
+            d: Vec::new(),
+        }
     }
 
     pub fn alloc(&mut self) {
@@ -45,7 +51,12 @@ pub struct WpHeader {
 impl WpHeader {
     fn parse(br: &mut Br) -> Result<Self> {
         if br.bool()? {
-            return Ok(Self { p1: 16, p2: 10, p3: [7, 7, 7, 0, 0], w: [13, 12, 12, 12] });
+            return Ok(Self {
+                p1: 16,
+                p2: 10,
+                p3: [7, 7, 7, 0, 0],
+                w: [13, 12, 12, 12],
+            });
         }
         let p1 = i64::from(br.read(5)?);
         let p2 = i64::from(br.read(5)?);
@@ -71,8 +82,17 @@ struct SqueezeParam {
 
 #[derive(Clone, Debug)]
 enum Transform {
-    Rct { begin: usize, ty: u32 },
-    Palette { begin: usize, num_c: usize, nb_colours: usize, nb_deltas: i32, d_pred: u32 },
+    Rct {
+        begin: usize,
+        ty: u32,
+    },
+    Palette {
+        begin: usize,
+        num_c: usize,
+        nb_colours: usize,
+        nb_deltas: i32,
+        d_pred: u32,
+    },
     Squeeze(Vec<SqueezeParam>),
 }
 
@@ -98,7 +118,13 @@ impl Transform {
                 if d_pred > 13 {
                     return Err(bad("invalid palette predictor"));
                 }
-                Ok(Self::Palette { begin, num_c, nb_colours, nb_deltas, d_pred })
+                Ok(Self::Palette {
+                    begin,
+                    num_c,
+                    nb_colours,
+                    nb_deltas,
+                    d_pred,
+                })
             }
             2 => {
                 let n = br.u32([(0, 0), (1, 4), (9, 6), (41, 8)])? as usize;
@@ -108,7 +134,12 @@ impl Transform {
                     let in_place = br.bool()?;
                     let begin = br.u32(CHAN_BEGIN)? as usize;
                     let num = br.u32([(1, 0), (2, 0), (3, 0), (4, 4)])? as usize;
-                    sp.push(SqueezeParam { horizontal, in_place, begin, num });
+                    sp.push(SqueezeParam {
+                        horizontal,
+                        in_place,
+                        begin,
+                        num,
+                    });
                 }
                 Ok(Self::Squeeze(sp))
             }
@@ -124,11 +155,19 @@ impl Transform {
                 if end > ch.len() {
                     return Err(bad("RCT channels out of range"));
                 }
-                if ch[*begin + 1..end].iter().any(|c| c.w != ch[*begin].w || c.h != ch[*begin].h) {
+                if ch[*begin + 1..end]
+                    .iter()
+                    .any(|c| c.w != ch[*begin].w || c.h != ch[*begin].h)
+                {
                     return Err(bad("RCT channels differ in size"));
                 }
             }
-            Self::Palette { begin, num_c, nb_colours, .. } => {
+            Self::Palette {
+                begin,
+                num_c,
+                nb_colours,
+                ..
+            } => {
                 let end = *begin + *num_c;
                 if end > ch.len() {
                     return Err(bad("palette channels out of range"));
@@ -141,7 +180,10 @@ impl Transform {
                 } else {
                     *nb_meta += 1;
                 }
-                if ch[*begin + 1..end].iter().any(|c| c.w != ch[*begin].w || c.h != ch[*begin].h) {
+                if ch[*begin + 1..end]
+                    .iter()
+                    .any(|c| c.w != ch[*begin].w || c.h != ch[*begin].h)
+                {
                     return Err(bad("palette channels differ in size"));
                 }
                 ch.drain(*begin + 1..end);
@@ -198,9 +240,22 @@ impl Transform {
     fn inverse(&self, ch: &mut Vec<Chan>, bit_depth: u32, wp: &WpHeader) -> Result<()> {
         match self {
             Self::Rct { begin, ty } => inverse_rct(ch, *begin, *ty),
-            Self::Palette { begin, num_c, nb_colours, nb_deltas, d_pred } => {
-                inverse_palette(ch, *begin, *num_c, *nb_colours, *nb_deltas, *d_pred, bit_depth, wp)
-            }
+            Self::Palette {
+                begin,
+                num_c,
+                nb_colours,
+                nb_deltas,
+                d_pred,
+            } => inverse_palette(
+                ch,
+                *begin,
+                *num_c,
+                *nb_colours,
+                *nb_deltas,
+                *d_pred,
+                bit_depth,
+                wp,
+            ),
             Self::Squeeze(sp) => {
                 for p in sp.iter().rev() {
                     let end = p.begin + p.num;
@@ -228,18 +283,34 @@ fn default_squeeze(ch: &[Chan], nb_meta: usize) -> Vec<SqueezeParam> {
     let first = nb_meta;
     let (mut w, mut h) = (ch[first].w, ch[first].h);
     if ch.len() - first >= 3 && ch[first + 1].w == w && ch[first + 1].h == h {
-        let base = SqueezeParam { horizontal: false, in_place: false, begin: first + 1, num: 2 };
-        sp.push(SqueezeParam { horizontal: true, ..base });
+        let base = SqueezeParam {
+            horizontal: false,
+            in_place: false,
+            begin: first + 1,
+            num: 2,
+        };
+        sp.push(SqueezeParam {
+            horizontal: true,
+            ..base
+        });
         sp.push(base);
     }
-    let base = SqueezeParam { horizontal: false, in_place: true, begin: first, num: ch.len() - first };
+    let base = SqueezeParam {
+        horizontal: false,
+        in_place: true,
+        begin: first,
+        num: ch.len() - first,
+    };
     if h >= w && h > 8 {
         sp.push(base);
         h = h.div_ceil(2);
     }
     while w > 8 || h > 8 {
         if w > 8 {
-            sp.push(SqueezeParam { horizontal: true, ..base });
+            sp.push(SqueezeParam {
+                horizontal: true,
+                ..base
+            });
             w = w.div_ceil(2);
         }
         if h > 8 {
@@ -332,7 +403,11 @@ fn tendency(a: i32, b: i32, c: i32) -> i32 {
 /// Undo one squeeze step: `c` holds the averages and `r` the residuals.
 fn inverse_squeeze(c: &mut Chan, r: &Chan, horizontal: bool) {
     let (aw, ah) = (c.w, c.h);
-    let (w, h) = if horizontal { (aw + r.w, ah) } else { (aw, ah + r.h) };
+    let (w, h) = if horizontal {
+        (aw + r.w, ah)
+    } else {
+        (aw, ah + r.h)
+    };
     let mut out = vec![0i32; w * h];
     if horizontal {
         for y in 0..h {
@@ -512,11 +587,27 @@ fn neighbours(d: &[i32], width: usize, x: usize, y: usize) -> Nb {
         0
     };
     let nw = if x > 0 && y > 0 { d[i - width - 1] } else { w };
-    let ne = if y > 0 && x + 1 < width { d[i - width + 1] } else { n };
+    let ne = if y > 0 && x + 1 < width {
+        d[i - width + 1]
+    } else {
+        n
+    };
     let nn = if y > 1 { d[i - 2 * width] } else { n };
     let ww = if x > 1 { d[i - 2] } else { w };
-    let nee = if y > 0 && x + 2 < width { d[i - width + 2] } else { ne };
-    Nb { n, w, nw, ne, nn, ww, nee }
+    let nee = if y > 0 && x + 2 < width {
+        d[i - width + 2]
+    } else {
+        ne
+    };
+    Nb {
+        n,
+        w,
+        nw,
+        ne,
+        nn,
+        ww,
+        nee,
+    }
 }
 
 fn grad_clamped(n: i32, w: i32, nw: i32) -> i32 {
@@ -548,7 +639,12 @@ fn predict(p: u32, nb: &Nb, sc: i64) -> i32 {
         11 => ((n + nw) / 2) as i32,
         12 => ((n + i64::from(nb.ne)) / 2) as i32,
         _ => {
-            let (nn, ww, nee, ne) = (i64::from(nb.nn), i64::from(nb.ww), i64::from(nb.nee), i64::from(nb.ne));
+            let (nn, ww, nee, ne) = (
+                i64::from(nb.nn),
+                i64::from(nb.ww),
+                i64::from(nb.nee),
+                i64::from(nb.ne),
+            );
             ((6 * n - 2 * nn + 7 * w + ww + nee + 3 * ne + 8) / 16) as i32
         }
     }
@@ -623,14 +719,21 @@ impl Wp {
             w3 + ne3 - n3,
             n3 - (((tw + tn + tne) * wp.p1) >> 5),
             w3 - (((tw + tn + tnw) * wp.p2) >> 5),
-            n3 - ((tnw * wp.p3[0] + tn * wp.p3[1] + tne * wp.p3[2] + (nn3 - n3) * wp.p3[3] + (nw3 - w3) * wp.p3[4])
+            n3 - ((tnw * wp.p3[0]
+                + tn * wp.p3[1]
+                + tne * wp.p3[2]
+                + (nn3 - n3) * wp.p3[3]
+                + (nw3 - w3) * wp.p3[4])
                 >> 5),
         ];
         let mut weight = [0u32; 4];
         for i in 0..4 {
-            let err_sum = self.sub_nw_ww[i].wrapping_add(self.sub_n_w[i]).wrapping_add(self.sub_ne[i]);
+            let err_sum = self.sub_nw_ww[i]
+                .wrapping_add(self.sub_n_w[i])
+                .wrapping_add(self.sub_ne[i]);
             let shift = ((u64::from(err_sum) + 1) >> 5).checked_ilog2().unwrap_or(0);
-            weight[i] = 4 + ((wp.w[i] * DIV_LOOKUP[((err_sum >> shift) as usize + 1).min(64)]) >> shift);
+            weight[i] =
+                4 + ((wp.w[i] * DIV_LOOKUP[((err_sum >> shift) as usize + 1).min(64)]) >> shift);
         }
         let sum: u32 = weight.iter().sum();
         let log_weight = (u64::from(sum) >> 4).ilog2();
@@ -652,7 +755,11 @@ impl Wp {
                 max_error = e;
             }
         }
-        WpResult { prediction, max_error: max_error as i32, subpred }
+        WpResult {
+            prediction,
+            max_error: max_error as i32,
+            subpred,
+        }
     }
 
     fn record(&mut self, pred: WpResult, sample: i32) {
@@ -706,8 +813,18 @@ impl Wp {
 
 #[derive(Clone, Debug)]
 enum Node {
-    Decision { prop: u32, value: i32, first: u32, second: u32 },
-    Leaf { cluster: u8, predictor: u32, offset: i32, multiplier: i32 },
+    Decision {
+        prop: u32,
+        value: i32,
+        first: u32,
+        second: u32,
+    },
+    Leaf {
+        cluster: u8,
+        predictor: u32,
+        offset: i32,
+        multiplier: i32,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -732,7 +849,12 @@ impl MaTree {
             let prop = tree.read(br, 1)?;
             if prop > 0 {
                 let value = unpack_signed(tree.read(br, 0)?);
-                raw.push(Node::Decision { prop: prop - 1, value, first: planned as u32, second: planned as u32 + 1 });
+                raw.push(Node::Decision {
+                    prop: prop - 1,
+                    value,
+                    first: planned as u32,
+                    second: planned as u32 + 1,
+                });
                 planned += 2;
             } else {
                 let predictor = tree.read(br, 2)?;
@@ -764,7 +886,9 @@ impl MaTree {
         let mut li = 0;
         for n in &mut raw {
             match n {
-                Node::Leaf { cluster, predictor, .. } => {
+                Node::Leaf {
+                    cluster, predictor, ..
+                } => {
                     *cluster = decoder.clusters()[leaf_ctx[li] as usize];
                     li += 1;
                     need_wp |= *predictor == 6;
@@ -772,7 +896,11 @@ impl MaTree {
                 Node::Decision { prop, .. } => need_wp |= *prop == 15,
             }
         }
-        Ok(Self { nodes: raw, decoder, need_wp })
+        Ok(Self {
+            nodes: raw,
+            decoder,
+            need_wp,
+        })
     }
 }
 
@@ -790,7 +918,10 @@ pub struct Stream {
 }
 
 fn tree_of<'a>(local: &'a Option<MaTree>, global: Option<&'a MaTree>) -> Result<&'a MaTree> {
-    local.as_ref().or(global).ok_or_else(|| bad("the global meta-adaptive tree is missing"))
+    local
+        .as_ref()
+        .or(global)
+        .ok_or_else(|| bad("the global meta-adaptive tree is missing"))
 }
 
 impl Stream {
@@ -798,7 +929,12 @@ impl Stream {
     pub fn empty() -> Self {
         Self {
             transforms: Vec::new(),
-            wp: WpHeader { p1: 16, p2: 10, p3: [7, 7, 7, 0, 0], w: [13, 12, 12, 12] },
+            wp: WpHeader {
+                p1: 16,
+                p2: 10,
+                p3: [7, 7, 7, 0, 0],
+                w: [13, 12, 12, 12],
+            },
             local_tree: None,
             chans: Vec::new(),
             nb_meta: 0,
@@ -807,13 +943,15 @@ impl Stream {
 
     /// Read the header (and the local tree, if there is one) for a stream whose channels, before
     /// transforms, are `input`.
-    pub fn parse(br: &mut Br, global: Option<&MaTree>, input: Vec<Chan>, max_samples: u64) -> Result<Self> {
+    pub fn parse(
+        br: &mut Br,
+        global: Option<&MaTree>,
+        input: Vec<Chan>,
+        max_samples: u64,
+    ) -> Result<Self> {
         let use_global = br.bool()?;
         let wp = WpHeader::parse(br)?;
         let n = br.u32([(0, 0), (1, 0), (2, 4), (18, 8)])? as usize;
-        if std::env::var_os("JXL_DEBUG").is_some() {
-            eprintln!("modular stream: use_global {use_global} transforms {n} at bit {}", br.bits_read());
-        }
         if n > 512 {
             return Err(bad("too many transforms"));
         }
@@ -831,7 +969,10 @@ impl Stream {
         }
         let samples: u64 = chans.iter().map(|c| c.w as u64 * c.h as u64).sum();
         if samples > max_samples {
-            return Err(Error::limit("pixels", "JPEG XL: modular image is too large"));
+            return Err(Error::limit(
+                "pixels",
+                "JPEG XL: modular image is too large",
+            ));
         }
         let local_tree = if use_global {
             if global.is_none() {
@@ -844,7 +985,13 @@ impl Stream {
         for c in &mut chans {
             c.alloc();
         }
-        Ok(Self { transforms, wp, local_tree, chans, nb_meta })
+        Ok(Self {
+            transforms,
+            wp,
+            local_tree,
+            chans,
+            nb_meta,
+        })
     }
 
     /// How many leading channels belong to the global section: the meta channels and those that
@@ -858,7 +1005,13 @@ impl Stream {
     }
 
     /// Decode the first `count` channels.
-    pub fn decode(&mut self, br: &mut Br, global: Option<&MaTree>, count: usize, stream_idx: u32) -> Result<()> {
+    pub fn decode(
+        &mut self,
+        br: &mut Br,
+        global: Option<&MaTree>,
+        count: usize,
+        stream_idx: u32,
+    ) -> Result<()> {
         let tree = tree_of(&self.local_tree, global)?;
         let mut dec = tree.decoder.clone();
         dec.begin(br)?;
@@ -875,7 +1028,9 @@ impl Stream {
                 .rev()
                 .filter(|p| p.w == cur.w && p.h == cur.h && p.hs == cur.hs && p.vs == cur.vs)
                 .collect();
-            decode_channel(br, &mut dec, tree, &self.wp, &prev, cur, ci as u32, stream_idx, dist_mult)?;
+            decode_channel(
+                br, &mut dec, tree, &self.wp, &prev, cur, ci as u32, stream_idx, dist_mult,
+            )?;
         }
         dec.finalize()
     }
@@ -958,16 +1113,30 @@ fn decode_channel(
             let mut at = 0usize;
             let (cluster, predictor, offset, multiplier) = loop {
                 match &tree.nodes[at] {
-                    Node::Decision { prop: p, value, first, second } => {
-                        at = if prop(*p) > *value { *first as usize } else { *second as usize };
+                    Node::Decision {
+                        prop: p,
+                        value,
+                        first,
+                        second,
+                    } => {
+                        at = if prop(*p) > *value {
+                            *first as usize
+                        } else {
+                            *second as usize
+                        };
                     }
-                    Node::Leaf { cluster, predictor, offset, multiplier } => {
-                        break (*cluster, *predictor, *offset, *multiplier)
-                    }
+                    Node::Leaf {
+                        cluster,
+                        predictor,
+                        offset,
+                        multiplier,
+                    } => break (*cluster, *predictor, *offset, *multiplier),
                 }
             };
             let token = dec.read_clustered(br, cluster, dist_mult)?;
-            let diff = unpack_signed(token).wrapping_mul(multiplier).wrapping_add(offset);
+            let diff = unpack_signed(token)
+                .wrapping_mul(multiplier)
+                .wrapping_add(offset);
             let sc = wp_res.as_ref().map_or(0, |r| r.prediction);
             let value = diff.wrapping_add(predict(predictor, &nb, sc));
             cur.d[y * width + x] = value;

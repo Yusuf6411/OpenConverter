@@ -3,6 +3,7 @@
 //! The format structure follows the specification; `jxl-oxide` (MIT/Apache-2.0) was used as a
 //! reference for details the text leaves open. See `docs/formats/jxl.md` for what is covered.
 #![forbid(unsafe_code)]
+#![allow(clippy::indexing_slicing)] // every index is derived from dimensions validated against the limits
 
 mod bits;
 mod colour;
@@ -23,7 +24,9 @@ use oc_core::{Error, ErrorCode, Limits, Note, Notes, Result, Severity};
 pub use render::Picture;
 
 const BARE: [u8; 2] = [0xff, 0x0a];
-const BOX_SIGNATURE: [u8; 12] = [0, 0, 0, 0x0c, b'J', b'X', b'L', b' ', 0x0d, 0x0a, 0x87, 0x0a];
+const BOX_SIGNATURE: [u8; 12] = [
+    0, 0, 0, 0x0c, b'J', b'X', b'L', b' ', 0x0d, 0x0a, 0x87, 0x0a,
+];
 
 pub fn sniff(data: &[u8]) -> bool {
     data.starts_with(&BARE) || data.starts_with(&BOX_SIGNATURE)
@@ -46,12 +49,17 @@ fn codestream(data: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>> {
                 if pos + 16 > data.len() {
                     break;
                 }
-                (16, u64::from_be_bytes(data[pos + 8..pos + 16].try_into().unwrap()) as usize)
+                (
+                    16,
+                    u64::from_be_bytes(data[pos + 8..pos + 16].try_into().unwrap()) as usize,
+                )
             }
             n => (8, n),
         };
         if len < header || pos.checked_add(len).map_or(true, |e| e > data.len()) {
-            return Err(Error::truncated("JPEG XL box extends past the end of the file"));
+            return Err(Error::truncated(
+                "JPEG XL box extends past the end of the file",
+            ));
         }
         let body = &data[pos + header..pos + len];
         match kind {
@@ -61,16 +69,12 @@ fn codestream(data: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>> {
             }
             b"jxlp" => {
                 if body.len() < 4 {
-                    return Err(Error::corrupt("JPEG XL partial codestream box is too short"));
+                    return Err(Error::corrupt(
+                        "JPEG XL partial codestream box is too short",
+                    ));
                 }
                 out.extend_from_slice(&body[4..]);
                 found = true;
-            }
-            b"jbrd" => {
-                return Err(Error::new(
-                    ErrorCode::UnsupportedVariant,
-                    "JPEG XL: JPEG reconstruction data is not supported",
-                ));
             }
             _ => {}
         }
@@ -107,12 +111,18 @@ pub fn decode(data: &[u8], limits: &Limits) -> Result<(Picture, Notes)> {
         pos += len;
     }
     if img.animation.is_some() {
-        notes.push(Note::new(Severity::Loss, "animation_flattened", "only the first frame of the animation is decoded"));
+        notes.push(Note::new(
+            Severity::Loss,
+            "animation_flattened",
+            "only the first frame of the animation is decoded",
+        ));
     }
     let mut slots: [Option<std::rc::Rc<render::Planes>>; 4] = Default::default();
     loop {
         if pos >= cs.len() {
-            return Err(Error::truncated("JPEG XL codestream ends before the first frame"));
+            return Err(Error::truncated(
+                "JPEG XL codestream ends before the first frame",
+            ));
         }
         let mut dec = frame::decode_frame(&cs[pos..], &img, limits)?;
         pos += dec.consumed;

@@ -16,7 +16,8 @@ pub fn gabor(plane: &mut [f32], width: usize, height: usize, w: [f32; 2]) {
         for x in 0..width {
             let (xi, yi) = (x as isize, y as isize);
             let side = at(xi - 1, yi) + at(xi + 1, yi) + at(xi, yi - 1) + at(xi, yi + 1);
-            let diag = at(xi - 1, yi - 1) + at(xi + 1, yi - 1) + at(xi - 1, yi + 1) + at(xi + 1, yi + 1);
+            let diag =
+                at(xi - 1, yi - 1) + at(xi + 1, yi - 1) + at(xi - 1, yi + 1) + at(xi + 1, yi + 1);
             plane[y * width + x] = (src[y * width + x] + side * w0 + diag * w1) * norm;
         }
     }
@@ -35,8 +36,20 @@ fn mirror(mut i: isize, len: usize) -> usize {
 }
 
 const KERNEL_1: [(isize, isize); 4] = [(0, -1), (0, 1), (-1, 0), (1, 0)];
-const KERNEL_2: [(isize, isize); 12] =
-    [(0, -2), (-1, -1), (0, -1), (1, -1), (-2, 0), (-1, 0), (1, 0), (2, 0), (-1, 1), (0, 1), (1, 1), (0, 2)];
+const KERNEL_2: [(isize, isize); 12] = [
+    (0, -2),
+    (-1, -1),
+    (0, -1),
+    (1, -1),
+    (-2, 0),
+    (-1, 0),
+    (1, 0),
+    (2, 0),
+    (-1, 1),
+    (0, 1),
+    (1, 1),
+    (0, 2),
+];
 const DIST_0: [(isize, isize); 5] = [(0, -1), (1, 0), (0, 0), (-1, 0), (0, 1)];
 const DIST_1: [(isize, isize); 5] = [(0, -1), (0, 0), (0, 1), (-1, 0), (1, 0)];
 const DIST_2: [(isize, isize); 1] = [(0, 0)];
@@ -102,7 +115,9 @@ fn step(
                     let mut acc = 0f32;
                     for &(ix, iy) in dist_offsets {
                         let off = iy * pw as isize + ix;
-                        acc += (padded[c][(k + off) as usize] - padded[c][(at as isize + off) as usize]).abs();
+                        acc += (padded[c][(k + off) as usize]
+                            - padded[c][(at as isize + off) as usize])
+                            .abs();
                     }
                     d += e.channel_scale[c] * acc;
                 }
@@ -120,7 +135,14 @@ fn step(
 }
 
 /// Run the EPF passes the frame header asks for.
-pub fn epf(planes: &mut [Vec<f32>; 3], width: usize, height: usize, sigma: &[f32], sigma_stride: usize, e: &Epf) {
+pub fn epf(
+    planes: &mut [Vec<f32>; 3],
+    width: usize,
+    height: usize,
+    sigma: &[f32],
+    sigma_stride: usize,
+    e: &Epf,
+) {
     let steps: &[usize] = match e.iters {
         1 => &[1],
         2 => &[1, 2],

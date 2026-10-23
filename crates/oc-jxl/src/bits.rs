@@ -106,7 +106,9 @@ impl<'a> Br<'a> {
             let val = (1.0 / 16384.0) * (mantissa as f32 / 1024.0);
             return Ok(if neg != 0 { -val } else { val });
         }
-        Ok(f32::from_bits((mantissa << 13) | ((exponent + 112) << 23) | neg))
+        Ok(f32::from_bits(
+            (mantissa << 13) | ((exponent + 112) << 23) | neg,
+        ))
     }
 
     /// An enumeration value: `U32(0, 1, 2 + u(4), 18 + u(6))`.

@@ -17,7 +17,8 @@ fn mul(a: &Mat, b: &Mat) -> Mat {
 }
 
 fn inv(m: &Mat) -> Mat {
-    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
     let d = 1.0 / det;
     [
@@ -65,7 +66,11 @@ fn xy_to_xyz(xy: [f64; 2]) -> [f64; 3] {
 fn rgb_to_xyz(prim: Prim, white: White) -> Mat {
     let p = prim_xy(prim);
     let cols: Vec<[f64; 3]> = p.iter().map(|&xy| xy_to_xyz(xy)).collect();
-    let m: Mat = [[cols[0][0], cols[1][0], cols[2][0]], [cols[0][1], cols[1][1], cols[2][1]], [cols[0][2], cols[1][2], cols[2][2]]];
+    let m: Mat = [
+        [cols[0][0], cols[1][0], cols[2][0]],
+        [cols[0][1], cols[1][1], cols[2][1]],
+        [cols[0][2], cols[1][2], cols[2][2]],
+    ];
     let w = xy_to_xyz(white_xy(white));
     let mi = inv(&m);
     let s: [f64; 3] = std::array::from_fn(|i| (0..3).map(|k| mi[i][k] * w[k]).sum());
@@ -78,11 +83,19 @@ fn rgb_to_xyz(prim: Prim, white: White) -> Mat {
 
 /// Bradford adaptation from one white point to another.
 fn adapt(from: [f64; 2], to: [f64; 2]) -> Mat {
-    const BRADFORD: Mat = [[0.8951, 0.2664, -0.1614], [-0.7502, 1.7135, 0.0367], [0.0389, -0.0685, 1.0296]];
+    const BRADFORD: Mat = [
+        [0.8951, 0.2664, -0.1614],
+        [-0.7502, 1.7135, 0.0367],
+        [0.0389, -0.0685, 1.0296],
+    ];
     let (a, b) = (xy_to_xyz(from), xy_to_xyz(to));
     let ca: [f64; 3] = std::array::from_fn(|i| (0..3).map(|k| BRADFORD[i][k] * a[k]).sum());
     let cb: [f64; 3] = std::array::from_fn(|i| (0..3).map(|k| BRADFORD[i][k] * b[k]).sum());
-    let scale: Mat = [[cb[0] / ca[0], 0.0, 0.0], [0.0, cb[1] / ca[1], 0.0], [0.0, 0.0, cb[2] / ca[2]]];
+    let scale: Mat = [
+        [cb[0] / ca[0], 0.0, 0.0],
+        [0.0, cb[1] / ca[1], 0.0],
+        [0.0, 0.0, cb[2] / ca[2]],
+    ];
     mul(&inv(&BRADFORD), &mul(&scale, &BRADFORD))
 }
 
@@ -102,22 +115,42 @@ fn is_srgb_like(c: &Colour) -> bool {
 
 fn srgb_decode(v: f64) -> f64 {
     let a = v.abs();
-    (if a <= 0.04045 { a / 12.92 } else { ((a + 0.055) / 1.055).powf(2.4) }).copysign(v)
+    (if a <= 0.04045 {
+        a / 12.92
+    } else {
+        ((a + 0.055) / 1.055).powf(2.4)
+    })
+    .copysign(v)
 }
 
 fn srgb_encode(v: f64) -> f64 {
     let a = v.abs();
-    (if a <= 0.003_130_8 { a * 12.92 } else { 1.055 * a.powf(1.0 / 2.4) - 0.055 }).copysign(v)
+    (if a <= 0.003_130_8 {
+        a * 12.92
+    } else {
+        1.055 * a.powf(1.0 / 2.4) - 0.055
+    })
+    .copysign(v)
 }
 
 fn bt709_decode(v: f64) -> f64 {
     let a = v.abs();
-    (if a < 0.081 { a / 4.5 } else { ((a + 0.099) / 1.099).powf(1.0 / 0.45) }).copysign(v)
+    (if a < 0.081 {
+        a / 4.5
+    } else {
+        ((a + 0.099) / 1.099).powf(1.0 / 0.45)
+    })
+    .copysign(v)
 }
 
 fn bt709_encode(v: f64) -> f64 {
     let a = v.abs();
-    (if a < 0.018 { a * 4.5 } else { 1.099 * a.powf(0.45) - 0.099 }).copysign(v)
+    (if a < 0.018 {
+        a * 4.5
+    } else {
+        1.099 * a.powf(0.45) - 0.099
+    })
+    .copysign(v)
 }
 
 const PQ_M1: f64 = 2610.0 / 16384.0;
@@ -145,7 +178,12 @@ fn hlg_decode(v: f64) -> f64 {
     const B: f64 = 0.284_668_92;
     const C: f64 = 0.559_910_73;
     let v = v.max(0.0);
-    (if v <= 0.5 { v * v / 3.0 } else { (((v - C) / A).exp() + B) / 12.0 }) * 12.0 / 3.77
+    (if v <= 0.5 {
+        v * v / 3.0
+    } else {
+        (((v - C) / A).exp() + B) / 12.0
+    }) * 12.0
+        / 3.77
 }
 
 fn hlg_encode(l: f64) -> f64 {
@@ -279,7 +317,15 @@ mod tests {
 
     #[test]
     fn transfer_functions_round_trip() {
-        for tf in [Tf::Srgb, Tf::Bt709, Tf::Gamma(2.2), Tf::Dci, Tf::Pq, Tf::Hlg, Tf::Linear] {
+        for tf in [
+            Tf::Srgb,
+            Tf::Bt709,
+            Tf::Gamma(2.2),
+            Tf::Dci,
+            Tf::Pq,
+            Tf::Hlg,
+            Tf::Linear,
+        ] {
             for i in 1..=20 {
                 let v = f64::from(i) / 20.0;
                 let back = decode(tf, encode(tf, v));
@@ -290,7 +336,13 @@ mod tests {
 
     #[test]
     fn display_p3_white_stays_white() {
-        let c = Colour { want_icc: false, space: Space::Rgb, white: White::D65, prim: Prim::P3, tf: Tf::Srgb };
+        let c = Colour {
+            want_icc: false,
+            space: Space::Rgb,
+            white: White::D65,
+            prim: Prim::P3,
+            tf: Tf::Srgb,
+        };
         let mut planes = vec![vec![1.0f32], vec![1.0], vec![1.0]];
         native_to_srgb(&c, &mut planes);
         for p in &planes {
@@ -300,7 +352,13 @@ mod tests {
 
     #[test]
     fn srgb_is_untouched() {
-        let c = Colour { want_icc: false, space: Space::Rgb, white: White::D65, prim: Prim::Srgb, tf: Tf::Srgb };
+        let c = Colour {
+            want_icc: false,
+            space: Space::Rgb,
+            white: White::D65,
+            prim: Prim::Srgb,
+            tf: Tf::Srgb,
+        };
         let mut planes = vec![vec![0.3f32], vec![0.5], vec![0.7]];
         native_to_srgb(&c, &mut planes);
         assert_eq!(planes[0][0], 0.3);

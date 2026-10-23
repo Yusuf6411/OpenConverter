@@ -24,5 +24,8 @@ pub fn decode(data: &[u8], limits: &Limits) -> Result<(Image, Notes)> {
             bytes.push(v as u8);
         }
     }
-    Ok((Image::new(pic.width, pic.height, layout, depth, bytes)?, notes))
+    Ok((
+        Image::new(pic.width, pic.height, layout, depth, bytes)?,
+        notes,
+    ))
 }

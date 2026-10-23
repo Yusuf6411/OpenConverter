@@ -6,7 +6,10 @@ fn main() {
     let data = std::fs::read(&args[1]).expect("read input");
     match oc_jxl::decode(&data, &oc_core::Limits::default()) {
         Ok((pic, notes)) => {
-            eprintln!("{}x{} ch={} sixteen={}", pic.width, pic.height, pic.channels, pic.sixteen);
+            eprintln!(
+                "{}x{} ch={} sixteen={}",
+                pic.width, pic.height, pic.channels, pic.sixteen
+            );
             for n in notes.iter() {
                 eprintln!("note: {} {}", n.code, n.message);
             }
@@ -18,7 +21,10 @@ fn main() {
                     out.push(s as u8);
                 }
             }
-            std::fs::File::create(&args[2]).unwrap().write_all(&out).unwrap();
+            std::fs::File::create(&args[2])
+                .unwrap()
+                .write_all(&out)
+                .unwrap();
         }
         Err(e) => {
             eprintln!("error: {e:?}");

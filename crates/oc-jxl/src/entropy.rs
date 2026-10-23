@@ -36,7 +36,12 @@ impl IntConfig {
         if lsb + msb > split_exponent {
             return Err(bad("invalid hybrid integer configuration"));
         }
-        Ok(Self { split_exponent, split: 1 << split_exponent, msb_in_token: msb, lsb_in_token: lsb })
+        Ok(Self {
+            split_exponent,
+            split: 1 << split_exponent,
+            msb_in_token: msb,
+            lsb_in_token: lsb,
+        })
     }
 
     fn read_uint(&self, br: &mut Br, token: u32) -> Result<u32> {
@@ -100,11 +105,23 @@ impl Prefix {
         if kraft != 1 << 15 {
             return Err(bad("prefix code is not complete"));
         }
-        Ok(Self { count, first, offset, symbols, single: None })
+        Ok(Self {
+            count,
+            first,
+            offset,
+            symbols,
+            single: None,
+        })
     }
 
     fn single(sym: u16) -> Self {
-        Self { count: [0; 16], first: [0; 16], offset: [0; 16], symbols: Vec::new(), single: Some(sym) }
+        Self {
+            count: [0; 16],
+            first: [0; 16],
+            offset: [0; 16],
+            symbols: Vec::new(),
+            single: Some(sym),
+        }
     }
 
     fn parse(br: &mut Br, alphabet_size: u32) -> Result<Self> {
@@ -150,7 +167,11 @@ impl Prefix {
                 for s in &mut syms {
                     *s = br.read(abits)? as usize;
                 }
-                lens = if br.bool()? { [1, 2, 3, 3] } else { [2, 2, 2, 2] };
+                lens = if br.bool()? {
+                    [1, 2, 3, 3]
+                } else {
+                    [2, 2, 2, 2]
+                };
             }
         }
         let mut code_lengths = vec![0u8; alphabet_size as usize];
@@ -160,7 +181,9 @@ impl Prefix {
             _ => 4,
         };
         for i in 4 - used..4 {
-            let out = code_lengths.get_mut(syms[i]).ok_or_else(|| bad("prefix symbol out of range"))?;
+            let out = code_lengths
+                .get_mut(syms[i])
+                .ok_or_else(|| bad("prefix symbol out of range"))?;
             *out = lens[i];
         }
         Self::from_lengths(&code_lengths)
@@ -457,7 +480,8 @@ impl Ans {
                 if *code > 1 {
                     let zeros = i32::from(*code) - 1;
                     let bitcount = (shift - ((12 - zeros) >> 1)).clamp(0, zeros);
-                    *code = (1u16 << zeros) + ((br.read(bitcount as u32)? as u16) << (zeros - bitcount));
+                    *code = (1u16 << zeros)
+                        + ((br.read(bitcount as u32)? as u16) << (zeros - bitcount));
                 }
                 prev = *code;
                 acc += u32::from(*code);
@@ -479,7 +503,11 @@ impl Ans {
                     alias_dist: 1 << 12,
                 })
                 .collect();
-            return Ok(Self { buckets, log_bucket_size, single: Some(single as u32) });
+            return Ok(Self {
+                buckets,
+                log_bucket_size,
+                single: Some(single as u32),
+            });
         }
         // Alias table construction.
         struct Work {
@@ -523,7 +551,13 @@ impl Ans {
             .enumerate()
             .map(|(i, w)| {
                 if w.alias_cutoff == bucket_size {
-                    Bucket { alias_symbol: i as u16, alias_cutoff: bucket_size, dist: w.dist, alias_offset: 0, alias_dist: w.dist }
+                    Bucket {
+                        alias_symbol: i as u16,
+                        alias_cutoff: bucket_size,
+                        dist: w.dist,
+                        alias_offset: 0,
+                        alias_dist: w.dist,
+                    }
                 } else {
                     Bucket {
                         alias_symbol: w.alias_symbol,
@@ -535,7 +569,11 @@ impl Ans {
                 }
             })
             .collect();
-        Ok(Self { buckets, log_bucket_size, single: None })
+        Ok(Self {
+            buckets,
+            log_bucket_size,
+            single: None,
+        })
     }
 
     fn read(&self, br: &mut Br, state: &mut u32) -> Result<u32> {
@@ -545,7 +583,11 @@ impl Ans {
         let b = &self.buckets[i];
         let (symbol, offset, dist) = if self.single.is_some() {
             // Every position maps to the one symbol and the state does not change.
-            (u32::from(b.alias_symbol), (u32::from(b.alias_offset)).wrapping_add(pos), 1u32 << 12)
+            (
+                u32::from(b.alias_symbol),
+                (u32::from(b.alias_offset)).wrapping_add(pos),
+                1u32 << 12,
+            )
         } else if pos >= u32::from(b.alias_cutoff) {
             (
                 u32::from(b.alias_symbol),
@@ -571,7 +613,11 @@ impl Ans {
 #[derive(Clone, Debug)]
 enum Code {
     Prefix(Vec<Prefix>),
-    Ans { dist: Vec<Ans>, state: u32, initial: bool },
+    Ans {
+        dist: Vec<Ans>,
+        state: u32,
+        initial: bool,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -594,18 +640,126 @@ pub struct Decoder {
 }
 
 const SPECIAL_DISTANCES: [[i8; 2]; 120] = [
-    [0, 1], [1, 0], [1, 1], [-1, 1], [0, 2], [2, 0], [1, 2], [-1, 2], [2, 1], [-2, 1],
-    [2, 2], [-2, 2], [0, 3], [3, 0], [1, 3], [-1, 3], [3, 1], [-3, 1], [2, 3], [-2, 3],
-    [3, 2], [-3, 2], [0, 4], [4, 0], [1, 4], [-1, 4], [4, 1], [-4, 1], [3, 3], [-3, 3],
-    [2, 4], [-2, 4], [4, 2], [-4, 2], [0, 5], [3, 4], [-3, 4], [4, 3], [-4, 3], [5, 0],
-    [1, 5], [-1, 5], [5, 1], [-5, 1], [2, 5], [-2, 5], [5, 2], [-5, 2], [4, 4], [-4, 4],
-    [3, 5], [-3, 5], [5, 3], [-5, 3], [0, 6], [6, 0], [1, 6], [-1, 6], [6, 1], [-6, 1],
-    [2, 6], [-2, 6], [6, 2], [-6, 2], [4, 5], [-4, 5], [5, 4], [-5, 4], [3, 6], [-3, 6],
-    [6, 3], [-6, 3], [0, 7], [7, 0], [1, 7], [-1, 7], [5, 5], [-5, 5], [7, 1], [-7, 1],
-    [4, 6], [-4, 6], [6, 4], [-6, 4], [2, 7], [-2, 7], [7, 2], [-7, 2], [3, 7], [-3, 7],
-    [7, 3], [-7, 3], [5, 6], [-5, 6], [6, 5], [-6, 5], [8, 0], [4, 7], [-4, 7], [7, 4],
-    [-7, 4], [8, 1], [8, 2], [6, 6], [-6, 6], [8, 3], [5, 7], [-5, 7], [7, 5], [-7, 5],
-    [8, 4], [6, 7], [-6, 7], [7, 6], [-7, 6], [8, 5], [7, 7], [-7, 7], [8, 6], [8, 7],
+    [0, 1],
+    [1, 0],
+    [1, 1],
+    [-1, 1],
+    [0, 2],
+    [2, 0],
+    [1, 2],
+    [-1, 2],
+    [2, 1],
+    [-2, 1],
+    [2, 2],
+    [-2, 2],
+    [0, 3],
+    [3, 0],
+    [1, 3],
+    [-1, 3],
+    [3, 1],
+    [-3, 1],
+    [2, 3],
+    [-2, 3],
+    [3, 2],
+    [-3, 2],
+    [0, 4],
+    [4, 0],
+    [1, 4],
+    [-1, 4],
+    [4, 1],
+    [-4, 1],
+    [3, 3],
+    [-3, 3],
+    [2, 4],
+    [-2, 4],
+    [4, 2],
+    [-4, 2],
+    [0, 5],
+    [3, 4],
+    [-3, 4],
+    [4, 3],
+    [-4, 3],
+    [5, 0],
+    [1, 5],
+    [-1, 5],
+    [5, 1],
+    [-5, 1],
+    [2, 5],
+    [-2, 5],
+    [5, 2],
+    [-5, 2],
+    [4, 4],
+    [-4, 4],
+    [3, 5],
+    [-3, 5],
+    [5, 3],
+    [-5, 3],
+    [0, 6],
+    [6, 0],
+    [1, 6],
+    [-1, 6],
+    [6, 1],
+    [-6, 1],
+    [2, 6],
+    [-2, 6],
+    [6, 2],
+    [-6, 2],
+    [4, 5],
+    [-4, 5],
+    [5, 4],
+    [-5, 4],
+    [3, 6],
+    [-3, 6],
+    [6, 3],
+    [-6, 3],
+    [0, 7],
+    [7, 0],
+    [1, 7],
+    [-1, 7],
+    [5, 5],
+    [-5, 5],
+    [7, 1],
+    [-7, 1],
+    [4, 6],
+    [-4, 6],
+    [6, 4],
+    [-6, 4],
+    [2, 7],
+    [-2, 7],
+    [7, 2],
+    [-7, 2],
+    [3, 7],
+    [-3, 7],
+    [7, 3],
+    [-7, 3],
+    [5, 6],
+    [-5, 6],
+    [6, 5],
+    [-6, 5],
+    [8, 0],
+    [4, 7],
+    [-4, 7],
+    [7, 4],
+    [-7, 4],
+    [8, 1],
+    [8, 2],
+    [6, 6],
+    [-6, 6],
+    [8, 3],
+    [5, 7],
+    [-5, 7],
+    [7, 5],
+    [-7, 5],
+    [8, 4],
+    [6, 7],
+    [-6, 7],
+    [7, 6],
+    [-7, 6],
+    [8, 5],
+    [7, 7],
+    [-7, 7],
+    [8, 6],
+    [8, 7],
 ];
 
 impl Decoder {
@@ -615,11 +769,23 @@ impl Decoder {
             let min_symbol = br.u32([(224, 0), (512, 0), (4096, 0), (8, 15)])?;
             let min_length = br.u32([(3, 0), (4, 0), (5, 2), (9, 8)])?;
             let len_conf = IntConfig::parse(br, 8)?;
-            Some(Lz77 { min_symbol, min_length, len_conf, window: Vec::new(), num_to_copy: 0, copy_pos: 0, num_decoded: 0 })
+            Some(Lz77 {
+                min_symbol,
+                min_length,
+                len_conf,
+                window: Vec::new(),
+                num_to_copy: 0,
+                copy_pos: 0,
+                num_decoded: 0,
+            })
         } else {
             None
         };
-        let num_dist = if lz77.is_some() { num_dist + 1 } else { num_dist };
+        let num_dist = if lz77.is_some() {
+            num_dist + 1
+        } else {
+            num_dist
+        };
         Self::parse_inner(br, num_dist, lz77)
     }
 
@@ -652,13 +818,27 @@ impl Decoder {
                     Ok(count)
                 })
                 .collect::<Result<Vec<_>>>()?;
-            let dist = counts.into_iter().map(|c| Prefix::parse(br, c)).collect::<Result<Vec<_>>>()?;
+            let dist = counts
+                .into_iter()
+                .map(|c| Prefix::parse(br, c))
+                .collect::<Result<Vec<_>>>()?;
             Code::Prefix(dist)
         } else {
-            let dist = (0..num_clusters).map(|_| Ans::parse(br, log_alphabet_size)).collect::<Result<Vec<_>>>()?;
-            Code::Ans { dist, state: 0, initial: true }
+            let dist = (0..num_clusters)
+                .map(|_| Ans::parse(br, log_alphabet_size))
+                .collect::<Result<Vec<_>>>()?;
+            Code::Ans {
+                dist,
+                state: 0,
+                initial: true,
+            }
         };
-        Ok(Self { lz77, clusters, configs, code })
+        Ok(Self {
+            lz77,
+            clusters,
+            configs,
+            code,
+        })
     }
 
     /// Start reading an entropy-coded stream (reads the initial rANS state).
@@ -687,7 +867,11 @@ impl Decoder {
     fn symbol(&mut self, br: &mut Br, cluster: u8) -> Result<u32> {
         match &mut self.code {
             Code::Prefix(d) => d[usize::from(cluster)].read(br),
-            Code::Ans { dist, state, initial } => {
+            Code::Ans {
+                dist,
+                state,
+                initial,
+            } => {
                 if *initial {
                     *state = br.read(32)?;
                     *initial = false;
@@ -715,11 +899,19 @@ impl Decoder {
     /// Read an integer in context `ctx`; `dist_multiplier` is the LZ77 distance multiplier (the
     /// image width for modular channels, 0 elsewhere).
     pub fn read_mult(&mut self, br: &mut Br, ctx: u32, dist_multiplier: u32) -> Result<u32> {
-        let cluster = *self.clusters.get(ctx as usize).ok_or_else(|| bad("context out of range"))?;
+        let cluster = *self
+            .clusters
+            .get(ctx as usize)
+            .ok_or_else(|| bad("context out of range"))?;
         self.read_clustered(br, cluster, dist_multiplier)
     }
 
-    pub fn read_clustered(&mut self, br: &mut Br, cluster: u8, dist_multiplier: u32) -> Result<u32> {
+    pub fn read_clustered(
+        &mut self,
+        br: &mut Br,
+        cluster: u8,
+        dist_multiplier: u32,
+    ) -> Result<u32> {
         let Some(mut lz) = self.lz77.take() else {
             let token = self.symbol(br, cluster)?;
             return self.configs[usize::from(cluster)].read_uint(br, token);
@@ -729,7 +921,13 @@ impl Decoder {
         r
     }
 
-    fn read_lz77(&mut self, br: &mut Br, cluster: u8, dist_multiplier: u32, st: &mut Lz77) -> Result<u32> {
+    fn read_lz77(
+        &mut self,
+        br: &mut Br,
+        cluster: u8,
+        dist_multiplier: u32,
+        st: &mut Lz77,
+    ) -> Result<u32> {
         let r;
         if st.num_to_copy > 0 {
             r = st.window[(st.copy_pos & 0xf_ffff) as usize];
@@ -743,7 +941,9 @@ impl Decoder {
                 }
                 let lz_cluster = *self.clusters.last().ok_or_else(|| bad("no clusters"))?;
                 let n = st.len_conf.read_uint(br, token - st.min_symbol)?;
-                st.num_to_copy = n.checked_add(st.min_length).ok_or_else(|| bad("LZ77 length overflow"))?;
+                st.num_to_copy = n
+                    .checked_add(st.min_length)
+                    .ok_or_else(|| bad("LZ77 length overflow"))?;
                 let token = self.symbol(br, lz_cluster)?;
                 let distance = self.configs[usize::from(lz_cluster)].read_uint(br, token)?;
                 let distance = if dist_multiplier == 0 {
@@ -782,10 +982,16 @@ pub fn read_clusters(br: &mut Br, num_dist: u32) -> Result<(u32, Vec<u8>)> {
     }
     let cluster = if br.bool()? {
         let nbits = br.read(2)?;
-        (0..num_dist).map(|_| br.read(nbits).map(|b| b as u8)).collect::<Result<Vec<_>>>()?
+        (0..num_dist)
+            .map(|_| br.read(nbits).map(|b| b as u8))
+            .collect::<Result<Vec<_>>>()?
     } else {
         let use_mtf = br.bool()?;
-        let mut dec = if num_dist <= 2 { Decoder::parse_no_lz77(br, 1)? } else { Decoder::parse(br, 1)? };
+        let mut dec = if num_dist <= 2 {
+            Decoder::parse_no_lz77(br, 1)?
+        } else {
+            Decoder::parse(br, 1)?
+        };
         dec.begin(br)?;
         let mut ret = (0..num_dist)
             .map(|_| -> Result<u8> {
@@ -820,7 +1026,12 @@ pub fn read_clusters(br: &mut Br, num_dist: u32) -> Result<(u32, Vec<u8>)> {
 }
 
 /// Read a permutation of `size` entries, the first `skip` fixed.
-pub fn read_permutation(br: &mut Br, dec: &mut Decoder, size: u32, skip: u32) -> Result<Vec<usize>> {
+pub fn read_permutation(
+    br: &mut Br,
+    dec: &mut Decoder,
+    size: u32,
+    skip: u32,
+) -> Result<Vec<usize>> {
     let ctx = |x: u32| add_log2_ceil(x).min(7);
     let end = dec.read(br, ctx(size))?;
     if end > size - skip {

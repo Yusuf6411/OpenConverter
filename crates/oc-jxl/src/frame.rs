@@ -5,12 +5,6 @@ use crate::modular::{Chan, MaTree, Stream};
 use crate::vardct;
 use oc_core::{Error, ErrorCode, Limits, Result};
 
-fn dbg_pos(br: &Br, what: &str) {
-    if std::env::var_os("JXL_DEBUG").is_some() {
-        eprintln!("{what}: bit {}", br.bits_read());
-    }
-}
-
 pub fn unsupported(msg: &str) -> Error {
     Error::new(ErrorCode::UnsupportedVariant, format!("JPEG XL: {msg}"))
 }
@@ -25,7 +19,11 @@ pub struct Sections<'a> {
 
 impl<'a> Sections<'a> {
     pub fn new(toc: &Toc, data: &'a [u8]) -> Result<Self> {
-        let mut s = Self { toc: toc.sections.clone(), data: &data[toc.data_start.min(data.len())..], single: None };
+        let mut s = Self {
+            toc: toc.sections.clone(),
+            data: &data[toc.data_start.min(data.len())..],
+            single: None,
+        };
         for &(off, size) in &s.toc {
             if off.checked_add(size).map_or(true, |end| end > s.data.len()) {
                 return Err(crate::bits::eof());
@@ -85,7 +83,14 @@ struct Tile {
     h: usize,
 }
 
-pub(crate) fn tiles(chans: &[Chan], first: usize, fh: &FrameHeader, lf: bool, group: usize, pass: Option<u32>) -> Vec<Tile> {
+pub(crate) fn tiles(
+    chans: &[Chan],
+    first: usize,
+    fh: &FrameHeader,
+    lf: bool,
+    group: usize,
+    pass: Option<u32>,
+) -> Vec<Tile> {
     let gd = fh.group_dim() as usize;
     let shifts = fh.pass_shifts();
     let (ow, oh) = (fh.color_w() as usize, fh.color_h() as usize);
@@ -100,7 +105,10 @@ pub(crate) fn tiles(chans: &[Chan], first: usize, fh: &FrameHeader, lf: bool, gr
         }
         if small {
             let s = c.hs.min(c.vs);
-            let p = shifts.iter().find(|(_, (lo, hi))| (*lo..*hi).contains(&s)).map(|x| x.0);
+            let p = shifts
+                .iter()
+                .find(|(_, (lo, hi))| (*lo..*hi).contains(&s))
+                .map(|x| x.0);
             if p != pass {
                 continue;
             }
@@ -119,7 +127,13 @@ pub(crate) fn tiles(chans: &[Chan], first: usize, fh: &FrameHeader, lf: bool, gr
         if x0 >= c.w || y0 >= c.h {
             continue;
         }
-        out.push(Tile { ci, x0, y0, w: tw.min(c.w - x0), h: th.min(c.h - y0) });
+        out.push(Tile {
+            ci,
+            x0,
+            y0,
+            w: tw.min(c.w - x0),
+            h: th.min(c.h - y0),
+        });
     }
     out
 }
@@ -136,7 +150,10 @@ pub(crate) fn decode_group(
     if list.is_empty() {
         return Ok(());
     }
-    let input = list.iter().map(|t| Chan::info(t.w, t.h, chans[t.ci].hs, chans[t.ci].vs)).collect();
+    let input = list
+        .iter()
+        .map(|t| Chan::info(t.w, t.h, chans[t.ci].hs, chans[t.ci].vs))
+        .collect();
     let mut s = Stream::parse(br, tree, input, max_samples)?;
     let n = s.chans.len();
     s.decode(br, tree, n, stream_idx)?;
@@ -162,9 +179,6 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
     let mut br = Br::new(data);
     let fh = FrameHeader::parse(&mut br, img)?;
     let toc = Toc::parse(&mut br, &fh)?;
-    if std::env::var_os("JXL_DEBUG").is_some() {
-        eprintln!("{fh:?}\nsections {:?}", toc.sections);
-    }
     let header_len = toc.data_start;
     let mut secs = Sections::new(&toc, data)?;
     let consumed = header_len + secs.total();
@@ -173,7 +187,8 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
     if pixels > limits.max_pixels {
         return Err(Error::limit("max_pixels", "JPEG XL: frame is too large"));
     }
-    let max_samples = (pixels * (fh.encoded_color_channels + img.ec.len()) as u64 + (1 << 16)).min(limits.max_alloc / 4);
+    let max_samples = (pixels * (fh.encoded_color_channels + img.ec.len()) as u64 + (1 << 16))
+        .min(limits.max_alloc / 4);
 
     if fh.flags & FLAG_SPLINES != 0 {
         return Err(unsupported("splines are not supported"));
@@ -184,25 +199,28 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
     if fh.upsampling != 1 || fh.ec_upsampling.iter().any(|&u| u != 1) {
         return Err(unsupported("upsampled frames are not supported"));
     }
-    if fh.do_ycbcr {
-        return Err(unsupported("YCbCr (JPEG reconstruction) frames are not supported"));
+    if fh.do_ycbcr && (fh.modular || img.xyb_encoded || fh.encoded_color_channels != 3) {
+        return Err(unsupported("unsupported YCbCr frame"));
     }
     let vard = !fh.modular;
     if vard {
-        if fh.jpeg_upsampling != [0; 3] {
-            return Err(unsupported("chroma-subsampled VarDCT frames are not supported"));
-        }
         if fh.use_lf_frame() || fh.lf_level != 0 {
             return Err(unsupported("progressive LF frames are not supported"));
         }
-        if !img.xyb_encoded {
-            return Err(unsupported("VarDCT frames that are not XYB-encoded are not supported"));
+        if !img.xyb_encoded && !fh.do_ycbcr {
+            return Err(unsupported(
+                "VarDCT frames that are not XYB-encoded are not supported",
+            ));
         }
     }
 
     // LfGlobal
     let mut br = secs.open(0)?;
-    let patches = if fh.flags & FLAG_PATCHES != 0 { Some(crate::features::Patches::parse(&mut br, img, &fh)?) } else { None };
+    let patches = if fh.flags & FLAG_PATCHES != 0 {
+        Some(crate::features::Patches::parse(&mut br, img, &fh)?)
+    } else {
+        None
+    };
     let mut lf_dequant = [1.0 / 32.0, 1.0 / 4.0, 1.0 / 2.0];
     if !br.bool()? {
         for v in &mut lf_dequant {
@@ -215,13 +233,19 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
             return Err(bad("LF dequantisation weight is too small"));
         }
     }
-    let global = if vard { Some(vardct::Global::parse(&mut br)?) } else { None };
-    dbg_pos(&br, "after vardct global");
+    let global = if vard {
+        Some(vardct::Global::parse(&mut br)?)
+    } else {
+        None
+    };
     let nch = (fh.encoded_color_channels + img.ec.len()) as u64;
     let node_limit = (1024 + pixels * nch / 16).min(1 << 22) as usize;
-    let tree = if br.bool()? { Some(MaTree::parse(&mut br, node_limit)?) } else { None };
+    let tree = if br.bool()? {
+        Some(MaTree::parse(&mut br, node_limit)?)
+    } else {
+        None
+    };
 
-    dbg_pos(&br, &format!("after tree {}", tree.is_some()));
     let (cw, ch) = (fh.color_w() as usize, fh.color_h() as usize);
     let mut infos = Vec::new();
     if !vard {
@@ -231,11 +255,20 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
     }
     for e in &img.ec {
         let shift = e.dim_shift as i32;
-        infos.push(Chan::info(cw.div_ceil(1 << shift), ch.div_ceil(1 << shift), shift, shift));
+        infos.push(Chan::info(
+            cw.div_ceil(1 << shift),
+            ch.div_ceil(1 << shift),
+            shift,
+            shift,
+        ));
     }
     let gd = fh.group_dim() as usize;
     let bit_depth = img.bit_depth.bits;
-    let mut stream = if infos.is_empty() { Stream::empty() } else { Stream::parse(&mut br, tree.as_ref(), infos, max_samples)? };
+    let mut stream = if infos.is_empty() {
+        Stream::empty()
+    } else {
+        Stream::parse(&mut br, tree.as_ref(), infos, max_samples)?
+    };
     let gcount = stream.global_count(gd);
     if gcount > 0 {
         stream.decode(&mut br, tree.as_ref(), gcount, 0)?;
@@ -253,17 +286,29 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
     for g in 0..num_lf {
         let mut br = secs.open(1 + g)?;
         if let (Some(vd), Some(gl)) = (vd.as_mut(), global.as_ref()) {
-            dbg_pos(&br, "lf group start");
-            vd.read_lf_coeff(&mut br, &fh, gl, lf_raw, tree.as_ref(), g, bit_depth, max_samples)?;
+            vd.read_lf_coeff(
+                &mut br,
+                &fh,
+                gl,
+                lf_raw,
+                tree.as_ref(),
+                g,
+                bit_depth,
+                max_samples,
+            )?;
         }
-        dbg_pos(&br, "after lf coeff");
         let list = tiles(&stream.chans, gcount, &fh, true, g, None);
-        decode_group(&mut br, &mut stream.chans, &list, tree.as_ref(), (1 + num_lf + g) as u32, bit_depth, max_samples)?;
+        decode_group(
+            &mut br,
+            &mut stream.chans,
+            &list,
+            tree.as_ref(),
+            (1 + num_lf + g) as u32,
+            bit_depth,
+            max_samples,
+        )?;
         if let (Some(vd), Some(gl)) = (vd.as_mut(), global.as_ref()) {
             vd.read_hf_meta(&mut br, &fh, gl, tree.as_ref(), g, bit_depth, max_samples)?;
-        }
-        if std::env::var_os("JXL_DEBUG").is_some() {
-            eprintln!("after LF group {g}: bit {}", br.bits_read());
         }
         secs.close(br);
     }
@@ -272,7 +317,8 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
     let hf = match &global {
         Some(gl) => {
             let mut br = secs.open(1 + num_lf)?;
-            let r = vardct::read_hf_global(&mut br, &fh, gl, tree.as_ref(), bit_depth, max_samples)?;
+            let r =
+                vardct::read_hf_global(&mut br, &fh, gl, tree.as_ref(), bit_depth, max_samples)?;
             secs.close(br);
             Some(r)
         }
@@ -287,12 +333,22 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
                 continue;
             }
             let mut br = secs.open(idx)?;
-            if let (Some(vd), Some(gl), Some((_, presets, passes))) = (vd.as_mut(), global.as_ref(), hf.as_ref()) {
+            if let (Some(vd), Some(gl), Some((_, presets, passes))) =
+                (vd.as_mut(), global.as_ref(), hf.as_ref())
+            {
                 let shift = fh.passes.shift.get(pass as usize).copied().unwrap_or(0);
                 vd.read_hf_coeffs(&mut br, &fh, gl, &passes[pass as usize], *presets, g, shift)?;
             }
             let sid = (1 + 3 * num_lf + 17 + pass as usize * num_groups + g) as u32;
-            decode_group(&mut br, &mut stream.chans, &list, tree.as_ref(), sid, bit_depth, max_samples)?;
+            decode_group(
+                &mut br,
+                &mut stream.chans,
+                &list,
+                tree.as_ref(),
+                sid,
+                bit_depth,
+                max_samples,
+            )?;
             secs.close(br);
         }
     }
@@ -313,7 +369,14 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
         }
         xyb = Some(planes);
     }
-    Ok(Decoded { header: fh, chans, lf_dequant, xyb, patches, consumed })
+    Ok(Decoded {
+        header: fh,
+        chans,
+        lf_dequant,
+        xyb,
+        patches,
+        consumed,
+    })
 }
 
 /// Parse a frame's header and table of contents and report how many bytes it occupies.
@@ -322,7 +385,10 @@ pub fn frame_extent(data: &[u8], img: &ImageHeader) -> Result<(FrameHeader, usiz
     let fh = FrameHeader::parse(&mut br, img)?;
     let toc = Toc::parse(&mut br, &fh)?;
     let total: usize = toc.sections.iter().map(|s| s.1).sum();
-    let end = toc.data_start.checked_add(total).ok_or_else(|| bad("frame size overflow"))?;
+    let end = toc
+        .data_start
+        .checked_add(total)
+        .ok_or_else(|| bad("frame size overflow"))?;
     if end > data.len() {
         return Err(crate::bits::eof());
     }

@@ -67,7 +67,13 @@ pub struct Colour {
 
 impl Colour {
     fn default_srgb() -> Self {
-        Self { want_icc: false, space: Space::Rgb, white: White::D65, prim: Prim::Srgb, tf: Tf::Srgb }
+        Self {
+            want_icc: false,
+            space: Space::Rgb,
+            white: White::D65,
+            prim: Prim::Srgb,
+            tf: Tf::Srgb,
+        }
     }
 
     fn parse(br: &mut Br) -> Result<Self> {
@@ -82,7 +88,11 @@ impl Colour {
             _ => Space::Unknown,
         };
         if want_icc {
-            return Ok(Self { want_icc, space, ..Self::default_srgb() });
+            return Ok(Self {
+                want_icc,
+                space,
+                ..Self::default_srgb()
+            });
         }
         fn xy(br: &mut Br) -> Result<[f64; 2]> {
             let mut c = [0f64; 2];
@@ -126,7 +136,13 @@ impl Colour {
             }
         };
         enum_checked(br, &[0, 1, 2, 3], "rendering intent")?;
-        Ok(Self { want_icc, space, white, prim, tf })
+        Ok(Self {
+            want_icc,
+            space,
+            white,
+            prim,
+            tf,
+        })
     }
 }
 
@@ -149,13 +165,19 @@ impl BitDepth {
             if !(2..=23).contains(&mantissa) {
                 return Err(bad("invalid mantissa bits"));
             }
-            Ok(Self { bits, exp_bits: Some(exp_bits) })
+            Ok(Self {
+                bits,
+                exp_bits: Some(exp_bits),
+            })
         } else {
             let bits = br.u32([(8, 0), (10, 0), (12, 0), (1, 6)])?;
             if bits > 31 {
                 return Err(bad("invalid bit depth"));
             }
-            Ok(Self { bits, exp_bits: None })
+            Ok(Self {
+                bits,
+                exp_bits: None,
+            })
         }
     }
 }
@@ -184,7 +206,10 @@ impl ExtraChannel {
         if br.bool()? {
             return Ok(Self {
                 ty: EcType::Alpha { associated: false },
-                bit_depth: BitDepth { bits: 8, exp_bits: None },
+                bit_depth: BitDepth {
+                    bits: 8,
+                    exp_bits: None,
+                },
                 dim_shift: 0,
             });
         }
@@ -193,7 +218,9 @@ impl ExtraChannel {
         let dim_shift = br.u32([(0, 0), (3, 0), (4, 0), (1, 3)])?;
         read_name(br)?;
         let ty = match id {
-            0 => EcType::Alpha { associated: br.bool()? },
+            0 => EcType::Alpha {
+                associated: br.bool()?,
+            },
             1 => EcType::Depth,
             2 => {
                 for _ in 0..4 {
@@ -210,7 +237,11 @@ impl ExtraChannel {
             6 => EcType::Thermal,
             _ => EcType::Other,
         };
-        Ok(Self { ty, bit_depth, dim_shift })
+        Ok(Self {
+            ty,
+            bit_depth,
+            dim_shift,
+        })
     }
 }
 
@@ -288,7 +319,11 @@ fn size_header(br: &mut Br) -> Result<(u32, u32)> {
     let big = [(1, 9), (1, 13), (1, 18), (1, 30)];
     let height = if div8 { 8 * h_div8 } else { br.u32(big)? };
     let ratio = br.read(3)?;
-    let w_div8 = if div8 && ratio == 0 { br.read(5)? + 1 } else { 0 };
+    let w_div8 = if div8 && ratio == 0 {
+        br.read(5)? + 1
+    } else {
+        0
+    };
     let width = if !div8 && ratio == 0 {
         br.u32(big)?
     } else {
@@ -347,7 +382,10 @@ impl ImageHeader {
         let mut orientation = 1;
         let mut preview = None;
         let mut animation = None;
-        let mut bit_depth = BitDepth { bits: 8, exp_bits: None };
+        let mut bit_depth = BitDepth {
+            bits: 8,
+            exp_bits: None,
+        };
         let mut ec = Vec::new();
         let mut xyb_encoded = true;
         let mut intensity_target = 255.0f32;
@@ -427,7 +465,20 @@ impl ImageHeader {
                 }
             }
         }
-        Ok(Self { width, height, orientation, preview, animation, bit_depth, ec, xyb_encoded, colour, intensity_target, opsin, custom_up_weights })
+        Ok(Self {
+            width,
+            height,
+            orientation,
+            preview,
+            animation,
+            bit_depth,
+            ec,
+            xyb_encoded,
+            colour,
+            intensity_target,
+            opsin,
+            custom_up_weights,
+        })
     }
 
     pub fn is_grey(&self) -> bool {
@@ -570,7 +621,12 @@ pub const FLAG_SPLINES: u64 = 0x10;
 pub const FLAG_USE_LF_FRAME: u64 = 0x20;
 pub const FLAG_SKIP_ADAPTIVE_LF: u64 = 0x80;
 
-fn blend_info(br: &mut Br, has_ec: bool, canvas_full: impl Fn(Blend) -> bool, prev_mode: Option<Blend>) -> Result<BlendInfo> {
+fn blend_info(
+    br: &mut Br,
+    has_ec: bool,
+    canvas_full: impl Fn(Blend) -> bool,
+    prev_mode: Option<Blend>,
+) -> Result<BlendInfo> {
     let mode = match br.u32([(0, 0), (1, 0), (2, 0), (3, 2)])? {
         0 => Blend::Replace,
         1 => Blend::Add,
@@ -580,10 +636,27 @@ fn blend_info(br: &mut Br, has_ec: bool, canvas_full: impl Fn(Blend) -> bool, pr
         _ => return Err(bad("invalid blend mode")),
     };
     let uses_alpha = has_ec && matches!(mode, Blend::Blend | Blend::MulAdd);
-    let alpha_channel = if uses_alpha { br.u32([(0, 0), (1, 0), (2, 0), (3, 3)])? } else { 0 };
-    let clamp = if uses_alpha || mode == Blend::Mul { br.bool()? } else { false };
-    let source = if !canvas_full(prev_mode.unwrap_or(mode)) { br.read(2)? } else { 0 };
-    Ok(BlendInfo { mode, alpha_channel, clamp, source })
+    let alpha_channel = if uses_alpha {
+        br.u32([(0, 0), (1, 0), (2, 0), (3, 3)])?
+    } else {
+        0
+    };
+    let clamp = if uses_alpha || mode == Blend::Mul {
+        br.bool()?
+    } else {
+        false
+    };
+    let source = if !canvas_full(prev_mode.unwrap_or(mode)) {
+        br.read(2)?
+    } else {
+        0
+    };
+    Ok(BlendInfo {
+        mode,
+        alpha_channel,
+        clamp,
+        source,
+    })
 }
 
 impl FrameHeader {
@@ -601,14 +674,32 @@ impl FrameHeader {
             group_size_shift: 1,
             x_qm_scale: 3,
             b_qm_scale: 2,
-            passes: Passes { num_passes: 1, shift: Vec::new(), downsample: Vec::new(), last_pass: Vec::new() },
+            passes: Passes {
+                num_passes: 1,
+                shift: Vec::new(),
+                downsample: Vec::new(),
+                last_pass: Vec::new(),
+            },
             lf_level: 0,
             x0: 0,
             y0: 0,
             width: img.width,
             height: img.height,
-            blending: BlendInfo { mode: Blend::Replace, alpha_channel: 0, clamp: false, source: 0 },
-            ec_blending: vec![BlendInfo { mode: Blend::Replace, alpha_channel: 0, clamp: false, source: 0 }; img.ec.len()],
+            blending: BlendInfo {
+                mode: Blend::Replace,
+                alpha_channel: 0,
+                clamp: false,
+                source: 0,
+            },
+            ec_blending: vec![
+                BlendInfo {
+                    mode: Blend::Replace,
+                    alpha_channel: 0,
+                    clamp: false,
+                    source: 0
+                };
+                img.ec.len()
+            ],
             duration: 0,
             is_last: true,
             save_as_reference: 0,
@@ -616,7 +707,16 @@ impl FrameHeader {
             gab: Some([[0.115_169_525, 0.061_248_592]; 3]),
             epf: Some(Epf {
                 iters: 2,
-                sharp_lut: [0.0, 1.0 / 7.0, 2.0 / 7.0, 3.0 / 7.0, 4.0 / 7.0, 5.0 / 7.0, 6.0 / 7.0, 1.0],
+                sharp_lut: [
+                    0.0,
+                    1.0 / 7.0,
+                    2.0 / 7.0,
+                    3.0 / 7.0,
+                    4.0 / 7.0,
+                    5.0 / 7.0,
+                    6.0 / 7.0,
+                    1.0,
+                ],
                 channel_scale: [40.0, 5.0, 3.5],
                 quant_mul: 0.46,
                 pass0_sigma_scale: 0.9,
@@ -639,7 +739,12 @@ impl FrameHeader {
         if !img.xyb_encoded {
             h.do_ycbcr = br.bool()?;
         }
-        h.encoded_color_channels = if h.modular && !h.do_ycbcr && !img.xyb_encoded && img.is_grey() { 1 } else { 3 };
+        h.encoded_color_channels = if h.modular && !h.do_ycbcr && !img.xyb_encoded && img.is_grey()
+        {
+            1
+        } else {
+            3
+        };
         let use_lf_frame = h.flags & FLAG_USE_LF_FRAME != 0;
         if h.do_ycbcr && !use_lf_frame {
             for v in &mut h.jpeg_upsampling {
@@ -662,7 +767,12 @@ impl FrameHeader {
         }
         if h.frame_type != FrameType::ReferenceOnly {
             let num_passes = br.u32([(1, 0), (2, 0), (3, 0), (4, 3)])?;
-            let mut p = Passes { num_passes, shift: Vec::new(), downsample: Vec::new(), last_pass: Vec::new() };
+            let mut p = Passes {
+                num_passes,
+                shift: Vec::new(),
+                downsample: Vec::new(),
+                last_pass: Vec::new(),
+            };
             if num_passes != 1 {
                 let num_ds = br.u32([(0, 0), (1, 0), (2, 0), (3, 1)])?;
                 if num_ds >= num_passes {
@@ -711,7 +821,8 @@ impl FrameHeader {
             h.blending = blend_info(br, has_ec, |m| full_canvas(&snapshot, m), None)?;
             let first_mode = h.blending.mode;
             for i in 0..img.ec.len() {
-                h.ec_blending[i] = blend_info(br, has_ec, |m| full_canvas(&snapshot, m), Some(first_mode))?;
+                h.ec_blending[i] =
+                    blend_info(br, has_ec, |m| full_canvas(&snapshot, m), Some(first_mode))?;
             }
             resets_canvas = full_canvas(&snapshot, first_mode);
             if img.animation.is_some() {
@@ -808,7 +919,9 @@ impl FrameHeader {
 
     /// Whether the frame is stored in a reference slot for later frames.
     pub fn can_reference(&self) -> bool {
-        !self.is_last && (self.duration == 0 || self.save_as_reference != 0) && self.frame_type != FrameType::Lf
+        !self.is_last
+            && (self.duration == 0 || self.save_as_reference != 0)
+            && self.frame_type != FrameType::Lf
     }
 
     pub fn use_lf_frame(&self) -> bool {
@@ -928,6 +1041,9 @@ impl Toc {
             Some(p) => p.iter().map(|&i| (offsets[i], sizes[i])).collect(),
             None => offsets.into_iter().zip(sizes).collect(),
         };
-        Ok(Self { sections, data_start: br.bits_read() / 8 })
+        Ok(Self {
+            sections,
+            data_start: br.bits_read() / 8,
+        })
     }
 }

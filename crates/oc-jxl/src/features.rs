@@ -51,8 +51,13 @@ pub struct Patches {
 impl Patches {
     pub fn parse(br: &mut Br, img: &ImageHeader, fh: &FrameHeader) -> Result<Self> {
         let num_extra = img.ec.len();
-        let alphas: Vec<usize> =
-            img.ec.iter().enumerate().filter(|(_, e)| matches!(e.ty, EcType::Alpha { .. })).map(|(i, _)| i).collect();
+        let alphas: Vec<usize> = img
+            .ec
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| matches!(e.ty, EcType::Alpha { .. }))
+            .map(|(i, _)| i)
+            .collect();
         let mut dec = Decoder::parse(br, 10)?;
         dec.begin(br)?;
         let max_refs = (1u64 << 24).min(u64::from(fh.width) * u64::from(fh.height) / 16) as u32;
@@ -85,8 +90,10 @@ impl Patches {
                         let dx = unpack_signed(dec.read(br, 6)?);
                         let dy = unpack_signed(dec.read(br, 6)?);
                         (
-                            dx.checked_add(px).ok_or_else(|| bad("patch position overflow"))?,
-                            dy.checked_add(py).ok_or_else(|| bad("patch position overflow"))?,
+                            dx.checked_add(px)
+                                .ok_or_else(|| bad("patch position overflow"))?,
+                            dy.checked_add(py)
+                                .ok_or_else(|| bad("patch position overflow"))?,
                         )
                     }
                     None => (dec.read(br, 4)? as i32, dec.read(br, 4)? as i32),
@@ -106,28 +113,54 @@ impl Patches {
                         7 => PatchMode::MulAddBelow,
                         _ => return Err(bad("invalid patch blend mode")),
                     };
-                    let alpha_channel =
-                        if raw >= 4 && alphas.len() >= 2 { dec.read(br, 8)? as usize } else { alphas.first().copied().unwrap_or(0) };
-                    let clamp = if raw >= 3 { dec.read(br, 9)? != 0 } else { false };
+                    let alpha_channel = if raw >= 4 && alphas.len() >= 2 {
+                        dec.read(br, 8)? as usize
+                    } else {
+                        alphas.first().copied().unwrap_or(0)
+                    };
+                    let clamp = if raw >= 3 {
+                        dec.read(br, 9)? != 0
+                    } else {
+                        false
+                    };
                     let uses_alpha = matches!(
                         mode,
-                        PatchMode::BlendAbove | PatchMode::BlendBelow | PatchMode::MulAddAbove | PatchMode::MulAddBelow
+                        PatchMode::BlendAbove
+                            | PatchMode::BlendBelow
+                            | PatchMode::MulAddAbove
+                            | PatchMode::MulAddBelow
                     );
                     if uses_alpha && alpha_channel >= num_extra {
                         return Err(bad("patch alpha channel out of range"));
                     }
-                    blending.push(PatchBlend { mode, alpha_channel, clamp });
+                    blending.push(PatchBlend {
+                        mode,
+                        alpha_channel,
+                        clamp,
+                    });
                 }
                 targets.push(Target { x, y, blending });
             }
-            refs.push(PatchRef { ref_idx, x0, y0, width, height, targets });
+            refs.push(PatchRef {
+                ref_idx,
+                x0,
+                y0,
+                width,
+                height,
+                targets,
+            });
         }
         dec.finalize()?;
         Ok(Self { refs })
     }
 
     /// Add the patches to `base` (a frame-sized set of planes) from the reference slots.
-    pub fn apply(&self, base: &mut Planes, slots: &[Option<Rc<Planes>>; 4], img: &ImageHeader) -> Result<()> {
+    pub fn apply(
+        &self,
+        base: &mut Planes,
+        slots: &[Option<Rc<Planes>>; 4],
+        img: &ImageHeader,
+    ) -> Result<()> {
         let colour = base.colour;
         let (bw, bh) = (base.w as i64, base.h as i64);
         for p in &self.refs {
@@ -153,12 +186,27 @@ impl Patches {
                 if w <= 0 || h <= 0 {
                     continue;
                 }
-                let rect = Rect { bx: bx0 as usize, by: by0 as usize, nx: nx0 as usize, ny: ny0 as usize, w: w as usize, h: h as usize };
+                let rect = Rect {
+                    bx: bx0 as usize,
+                    by: by0 as usize,
+                    nx: nx0 as usize,
+                    ny: ny0 as usize,
+                    w: w as usize,
+                    h: h as usize,
+                };
                 for idx in 0..base.ch.len() {
-                    let info = if idx < colour { &t.blending[0] } else { &t.blending[1 + idx - colour] };
+                    let info = if idx < colour {
+                        &t.blending[0]
+                    } else {
+                        &t.blending[1 + idx - colour]
+                    };
                     let alpha_idx = info.alpha_channel + colour;
                     let is_alpha = idx == alpha_idx;
-                    let premultiplied = info.alpha_channel < img.ec.len() && matches!(img.ec[info.alpha_channel].ty, EcType::Alpha { associated: true });
+                    let premultiplied = info.alpha_channel < img.ec.len()
+                        && matches!(
+                            img.ec[info.alpha_channel].ty,
+                            EcType::Alpha { associated: true }
+                        );
                     let mode = match info.mode {
                         PatchMode::None => continue,
                         PatchMode::Replace => Mode::Replace,
@@ -167,9 +215,16 @@ impl Patches {
                         PatchMode::BlendAbove | PatchMode::BlendBelow => {
                             let swapped = info.mode == PatchMode::BlendBelow;
                             if is_alpha {
-                                Mode::MixAlpha { clamp: info.clamp, swapped }
+                                Mode::MixAlpha {
+                                    clamp: info.clamp,
+                                    swapped,
+                                }
                             } else {
-                                Mode::Blend { clamp: info.clamp, swapped, premultiplied }
+                                Mode::Blend {
+                                    clamp: info.clamp,
+                                    swapped,
+                                    premultiplied,
+                                }
                             }
                         }
                         PatchMode::MulAddAbove | PatchMode::MulAddBelow => {
@@ -181,17 +236,37 @@ impl Patches {
                                     Mode::Skip
                                 }
                             } else {
-                                Mode::MulAdd { clamp: info.clamp, swapped }
+                                Mode::MulAdd {
+                                    clamp: info.clamp,
+                                    swapped,
+                                }
                             }
                         }
                     };
-                    let new = View { data: &src.ch[idx], stride: src.w };
+                    let new = View {
+                        data: &src.ch[idx],
+                        stride: src.w,
+                    };
                     let uses_alpha = matches!(mode, Mode::Blend { .. } | Mode::MulAdd { .. });
                     if uses_alpha && alpha_idx < base.ch.len() && !is_alpha {
-                        let new_alpha = View { data: &src.ch[alpha_idx], stride: src.w };
+                        let new_alpha = View {
+                            data: &src.ch[alpha_idx],
+                            stride: src.w,
+                        };
                         let (target, alpha) = split_pair(&mut base.ch, idx, alpha_idx);
-                        let base_alpha = View { data: alpha, stride: base.w };
-                        blend(target, base.w, &new, rect, mode, Some(&base_alpha), Some(&new_alpha));
+                        let base_alpha = View {
+                            data: alpha,
+                            stride: base.w,
+                        };
+                        blend(
+                            target,
+                            base.w,
+                            &new,
+                            rect,
+                            mode,
+                            Some(&base_alpha),
+                            Some(&new_alpha),
+                        );
                     } else {
                         blend(&mut base.ch[idx], base.w, &new, rect, mode, None, None);
                     }

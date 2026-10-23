@@ -109,7 +109,12 @@ pub fn dct2d(buf: &mut [f32], stride: usize, w: usize, h: usize, inverse: bool, 
     }
     let mut scratch = vec![0f32; w.max(h)];
     for y in 0..h {
-        dct(&mut buf[y * stride..y * stride + w], &mut scratch[..w], inverse, t);
+        dct(
+            &mut buf[y * stride..y * stride + w],
+            &mut scratch[..w],
+            inverse,
+            t,
+        );
     }
     if h > 1 {
         let mut col = vec![0f32; h];
@@ -130,11 +135,37 @@ pub fn dct2d(buf: &mut [f32], stride: usize, w: usize, h: usize, inverse: bool, 
 pub fn scale_f(c: usize, log_blocks: u32) -> f32 {
     #[allow(clippy::excessive_precision)]
     const SCALE_F: [f32; 32] = [
-        1.0, 0.999_604_7, 0.998_419_5, 0.996_445_8, 0.993_686_6, 0.990_145_6, 0.985_827_8,
-        0.980_739_2, 0.974_886_8, 0.968_278_8, 0.960_924_4, 0.952_833_8, 0.944_018_1,
-        0.934_489_6, 0.924_261_6, 0.913_348_1, 0.901_764_2, 0.889_525_9, 0.876_650_1,
-        0.863_154_4, 0.849_057_5, 0.834_378_6, 0.819_137_9, 0.803_356_1, 0.787_054_9,
-        0.770_256_4, 0.752_983_4, 0.735_259_3, 0.717_108_1, 0.698_554_3, 0.679_622_9,
+        1.0,
+        0.999_604_7,
+        0.998_419_5,
+        0.996_445_8,
+        0.993_686_6,
+        0.990_145_6,
+        0.985_827_8,
+        0.980_739_2,
+        0.974_886_8,
+        0.968_278_8,
+        0.960_924_4,
+        0.952_833_8,
+        0.944_018_1,
+        0.934_489_6,
+        0.924_261_6,
+        0.913_348_1,
+        0.901_764_2,
+        0.889_525_9,
+        0.876_650_1,
+        0.863_154_4,
+        0.849_057_5,
+        0.834_378_6,
+        0.819_137_9,
+        0.803_356_1,
+        0.787_054_9,
+        0.770_256_4,
+        0.752_983_4,
+        0.735_259_3,
+        0.717_108_1,
+        0.698_554_3,
+        0.679_622_9,
         0.660_339_1,
     ];
     SCALE_F[c << (5 - log_blocks)]
@@ -340,10 +371,16 @@ mod tests {
             .map(|k| {
                 let mut s = 0f64;
                 for (i, &v) in x.iter().enumerate() {
-                    s += f64::from(v) * (k as f64 * (2 * i + 1) as f64 * std::f64::consts::PI / (2 * n) as f64).cos();
+                    s += f64::from(v)
+                        * (k as f64 * (2 * i + 1) as f64 * std::f64::consts::PI / (2 * n) as f64)
+                            .cos();
                 }
                 let s = s / n as f64;
-                (if k == 0 { s } else { s * std::f64::consts::SQRT_2 }) as f32
+                (if k == 0 {
+                    s
+                } else {
+                    s * std::f64::consts::SQRT_2
+                }) as f32
             })
             .collect()
     }
@@ -356,7 +393,8 @@ mod tests {
                 for (k, &v) in x.iter().enumerate().skip(1) {
                     s += f64::from(v)
                         * std::f64::consts::SQRT_2
-                        * (k as f64 * (2 * i + 1) as f64 * std::f64::consts::PI / (2 * n) as f64).cos();
+                        * (k as f64 * (2 * i + 1) as f64 * std::f64::consts::PI / (2 * n) as f64)
+                            .cos();
                 }
                 s as f32
             })
