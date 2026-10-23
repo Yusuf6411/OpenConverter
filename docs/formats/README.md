@@ -6,6 +6,8 @@ Subtitles: [subtitles](subtitles.md).
 
 Fonts: [fonts](fonts.md).
 
+Vector pictures: [svg](svg.md).
+
 Video: [containers](containers.md), [VP8](vp8.md).
 
 Audio: [wav-aiff-caf](wav-aiff-caf.md), [flac](flac.md), [mp3](mp3.md), [vorbis](vorbis.md), [opus](opus.md), [alac](alac.md), [matroska](matroska.md), [tags](tags.md).

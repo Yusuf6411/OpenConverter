@@ -130,10 +130,12 @@ impl Canvas {
         clip: &Clip,
     ) {
         let Some(b) = bounds_of(polys) else { return };
-        let area = clip
-            .rect
-            .intersect(&b)
-            .intersect(&IRect::new(0, 0, self.width as i32, self.height as i32));
+        let area = clip.rect.intersect(&b).intersect(&IRect::new(
+            0,
+            0,
+            self.width as i32,
+            self.height as i32,
+        ));
         if area.is_empty() || alpha <= 0.0 {
             return;
         }
@@ -250,12 +252,7 @@ impl Canvas {
             } else if p[3] <= 0.0 {
                 out.extend_from_slice(&[0, 0, 0, 0]);
             } else {
-                out.extend_from_slice(&[
-                    q(p[0] / p[3]),
-                    q(p[1] / p[3]),
-                    q(p[2] / p[3]),
-                    q(p[3]),
-                ]);
+                out.extend_from_slice(&[q(p[0] / p[3]), q(p[1] / p[3]), q(p[2] / p[3]), q(p[3])]);
             }
         }
         out
@@ -346,7 +343,7 @@ pub fn stroke_polys(path: &Path, ctm: &Transform, st: &Stroke) -> Vec<Poly> {
     let user = path.flatten(tol);
     let mut st = st.clone();
     // A hairline is one device pixel wide.
-    if st.width * scale < 1.0 {
+    if st.hairline && st.width * scale < 1.0 {
         st.width = 1.0 / scale;
     }
     let mut polys = stroke(&user, &st, tol);

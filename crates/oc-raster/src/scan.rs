@@ -82,12 +82,7 @@ pub fn bounds_of(polys: &[Poly]) -> Option<IRect> {
 
 /// Call `row(y, x_start, coverage)` for each pixel row of `clip` that the polygons touch.
 /// Coverage values are in `0.0..=1.0`.
-pub fn scan(
-    polys: &[Poly],
-    rule: FillRule,
-    clip: IRect,
-    mut row: impl FnMut(i32, i32, &[f32]),
-) {
+pub fn scan(polys: &[Poly], rule: FillRule, clip: IRect, mut row: impl FnMut(i32, i32, &[f32])) {
     if clip.is_empty() {
         return;
     }
@@ -237,7 +232,12 @@ mod tests {
 
     #[test]
     fn circle_area_is_close() {
-        let a = area(&Path::ellipse(10.0, 10.0, 6.0, 6.0), FillRule::NonZero, 20, 20);
+        let a = area(
+            &Path::ellipse(10.0, 10.0, 6.0, 6.0),
+            FillRule::NonZero,
+            20,
+            20,
+        );
         let want = std::f64::consts::PI * 36.0;
         assert!((a - want).abs() / want < 0.005, "{a} vs {want}");
     }

@@ -65,23 +65,29 @@ impl Font {
 
     fn parse_at(data: &[u8], base: usize) -> Result<Font> {
         let r = R::new(data);
-        let ver = r
-            .tag(base)
-            .ok_or_else(|| Error::truncated("font header"))?;
+        let ver = r.tag(base).ok_or_else(|| Error::truncated("font header"))?;
         let is_cff = &ver == b"OTTO";
         if !(ver == [0, 1, 0, 0] || is_cff || &ver == b"true" || &ver == b"typ1") {
             return Err(Error::corrupt("not an sfnt font"));
         }
-        let n = r.u16(base + 4).ok_or_else(|| Error::truncated("font header"))? as usize;
+        let n = r
+            .u16(base + 4)
+            .ok_or_else(|| Error::truncated("font header"))? as usize;
         if n > 4096 {
             return Err(Error::corrupt("too many font tables"));
         }
         let mut tables = Vec::with_capacity(n);
         for i in 0..n {
             let e = base + 12 + i * 16;
-            let tag = r.tag(e).ok_or_else(|| Error::truncated("table directory"))?;
-            let offset = r.u32(e + 8).ok_or_else(|| Error::truncated("table directory"))? as usize;
-            let length = r.u32(e + 12).ok_or_else(|| Error::truncated("table directory"))? as usize;
+            let tag = r
+                .tag(e)
+                .ok_or_else(|| Error::truncated("table directory"))?;
+            let offset =
+                r.u32(e + 8)
+                    .ok_or_else(|| Error::truncated("table directory"))? as usize;
+            let length =
+                r.u32(e + 12)
+                    .ok_or_else(|| Error::truncated("table directory"))? as usize;
             // A table running past the end is clipped rather than refused; some fonts in the
             // wild have a wrong length on the last one.
             let length = length.min(data.len().saturating_sub(offset));
@@ -199,7 +205,10 @@ impl Font {
                         .chunks_exact(2)
                         .map(|c| u16::from_be_bytes([c[0], c[1]]))
                         .collect();
-                    (if pid == 3 && lang == 0x409 { 3 } else { 2 }, String::from_utf16_lossy(&u))
+                    (
+                        if pid == 3 && lang == 0x409 { 3 } else { 2 },
+                        String::from_utf16_lossy(&u),
+                    )
                 }
                 (1, 0) => (1, raw.iter().map(|b| char::from(*b)).collect()),
                 _ => continue,
@@ -240,7 +249,11 @@ impl Font {
         // Prefer full Unicode (3,10 / 0,4+), then BMP Unicode (3,1 / 0,*), then symbol (3,0).
         let mut best: Option<(u8, usize)> = None;
         for i in 0..n.min(64) {
-            let (pid, eid, off) = (r.u16(4 + i * 8)?, r.u16(6 + i * 8)?, r.u32(8 + i * 8)? as usize);
+            let (pid, eid, off) = (
+                r.u16(4 + i * 8)?,
+                r.u16(6 + i * 8)?,
+                r.u32(8 + i * 8)? as usize,
+            );
             let rank = match (pid, eid) {
                 (3, 10) | (0, 4) | (0, 6) => 4,
                 (3, 1) | (0, 3) | (0, 2) | (0, 1) | (0, 0) => 3,
@@ -282,9 +295,8 @@ impl Font {
         };
         let r = R::new(t);
         let n = r.u16(2).unwrap_or(0) as usize;
-        (0..n.min(64)).any(|i| {
-            r.u16(4 + i * 8) == Some(platform) && r.u16(6 + i * 8) == Some(encoding)
-        })
+        (0..n.min(64))
+            .any(|i| r.u16(4 + i * 8) == Some(platform) && r.u16(6 + i * 8) == Some(encoding))
     }
 
     /// Every (code, glyph) pair of the best Unicode map, for subsetting and listings.
@@ -334,7 +346,9 @@ impl Font {
 pub fn cmap_lookup(sub: &[u8], code: u32) -> Option<u16> {
     let r = R::new(sub);
     match r.u16(0)? {
-        0 => (code < 256).then(|| r.u8(6 + code as usize).map(u16::from)).flatten(),
+        0 => (code < 256)
+            .then(|| r.u8(6 + code as usize).map(u16::from))
+            .flatten(),
         4 => {
             if code > 0xFFFF {
                 return None;
@@ -419,8 +433,7 @@ fn cmap_enumerate(sub: &[u8], out: &mut Vec<(u32, u16)>) {
             let Some(segx2) = r.u16(6) else { return };
             let segx2 = segx2 as usize;
             for s in 0..segx2 / 2 {
-                let (Some(end), Some(start)) =
-                    (r.u16(14 + s * 2), r.u16(16 + segx2 + s * 2))
+                let (Some(end), Some(start)) = (r.u16(14 + s * 2), r.u16(16 + segx2 + s * 2))
                 else {
                     break;
                 };

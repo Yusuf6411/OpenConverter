@@ -23,6 +23,8 @@ pub struct Stroke {
     pub miter_limit: f64,
     pub dash: Vec<f64>,
     pub dash_phase: f64,
+    /// Widen strokes thinner than one device pixel to one pixel (PDF behaviour).
+    pub hairline: bool,
 }
 
 impl Default for Stroke {
@@ -34,6 +36,7 @@ impl Default for Stroke {
             miter_limit: 4.0,
             dash: Vec::new(),
             dash_phase: 0.0,
+            hairline: true,
         }
     }
 }
@@ -150,12 +153,7 @@ pub fn stroke(polys: &[Poly], st: &Stroke, tol: f64) -> Vec<Poly> {
             let b = pts[(i + 1) % n];
             let d = dir(i);
             let nrm = Pt::new(-d.y * hw, d.x * hw);
-            out.push(orient(vec![
-                a.add(nrm),
-                b.add(nrm),
-                b.sub(nrm),
-                a.sub(nrm),
-            ]));
+            out.push(orient(vec![a.add(nrm), b.add(nrm), b.sub(nrm), a.sub(nrm)]));
         }
         // Joins at the interior vertices (and at every vertex of a closed path).
         let joins: Vec<usize> = if closed {
@@ -184,10 +182,7 @@ pub fn stroke(polys: &[Poly], st: &Stroke, tol: f64) -> Vec<Poly> {
                     let cos_half = ((1.0 + dot) / 2.0).max(0.0).sqrt();
                     // Turn angle alpha: cos(alpha/2) = sqrt((1+dot)/2); ratio = 1/cos(alpha/2).
                     if cos_half > 1e-9 && 1.0 / cos_half <= st.miter_limit.max(1.0) {
-                        let m = Pt::new(
-                            (n0.x + n1.x) / (1.0 + dot),
-                            (n0.y + n1.y) / (1.0 + dot),
-                        );
+                        let m = Pt::new((n0.x + n1.x) / (1.0 + dot), (n0.y + n1.y) / (1.0 + dot));
                         poly_pts.push(c.add(m));
                     }
                 }
@@ -332,9 +327,14 @@ mod tests {
 
     fn area(polys: &[Poly]) -> f64 {
         let mut t = 0.0f64;
-        scan(polys, FillRule::NonZero, IRect::new(0, 0, 100, 100), |_, _, c| {
-            t += c.iter().map(|v| f64::from(*v)).sum::<f64>();
-        });
+        scan(
+            polys,
+            FillRule::NonZero,
+            IRect::new(0, 0, 100, 100),
+            |_, _, c| {
+                t += c.iter().map(|v| f64::from(*v)).sum::<f64>();
+            },
+        );
         t
     }
 
@@ -343,7 +343,14 @@ mod tests {
         let mut p = Path::new();
         p.move_to(10.0, 10.0);
         p.line_to(30.0, 10.0);
-        let s = stroke(&p.flatten(0.1), &Stroke { width: 4.0, ..Stroke::default() }, 0.1);
+        let s = stroke(
+            &p.flatten(0.1),
+            &Stroke {
+                width: 4.0,
+                ..Stroke::default()
+            },
+            0.1,
+        );
         assert!((area(&s) - 80.0).abs() < 0.01);
     }
 
@@ -353,7 +360,11 @@ mod tests {
         p.move_to(10.0, 10.0);
         p.line_to(30.0, 10.0);
         p.line_to(30.0, 30.0);
-        let st = Stroke { width: 4.0, cap: Cap::Square, ..Stroke::default() };
+        let st = Stroke {
+            width: 4.0,
+            cap: Cap::Square,
+            ..Stroke::default()
+        };
         let a = area(&stroke(&p.flatten(0.1), &st, 0.1));
         // Legs 80+80, minus their 4 overlap, plus the 4 of the mitred corner and two 2x4 caps.
         assert!((a - 176.0).abs() < 0.05, "{a}");
@@ -364,7 +375,11 @@ mod tests {
         let mut p = Path::new();
         p.move_to(0.0, 5.0);
         p.line_to(40.0, 5.0);
-        let st = Stroke { width: 2.0, dash: vec![5.0, 5.0], ..Stroke::default() };
+        let st = Stroke {
+            width: 2.0,
+            dash: vec![5.0, 5.0],
+            ..Stroke::default()
+        };
         let a = area(&stroke(&p.flatten(0.1), &st, 0.1));
         assert!((a - 40.0).abs() < 0.05, "{a}");
     }
@@ -374,7 +389,11 @@ mod tests {
         let mut p = Path::new();
         p.move_to(10.0, 10.0);
         p.line_to(10.0, 10.0);
-        let st = Stroke { width: 6.0, cap: Cap::Round, ..Stroke::default() };
+        let st = Stroke {
+            width: 6.0,
+            cap: Cap::Round,
+            ..Stroke::default()
+        };
         let a = area(&stroke(&p.flatten(0.1), &st, 0.05));
         assert!((a - std::f64::consts::PI * 9.0).abs() < 0.8, "{a}");
     }

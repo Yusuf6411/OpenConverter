@@ -100,7 +100,12 @@ fn encode_glyph(contours: &[Contour]) -> (Vec<u8>, [i32; 4], usize) {
     let mut npts = 0usize;
     for c in contours {
         for &(x, y, _) in &c.pts {
-            bbox = [bbox[0].min(x), bbox[1].min(y), bbox[2].max(x), bbox[3].max(y)];
+            bbox = [
+                bbox[0].min(x),
+                bbox[1].min(y),
+                bbox[2].max(x),
+                bbox[3].max(y),
+            ];
             npts += 1;
         }
     }
@@ -159,7 +164,10 @@ pub fn cff_to_truetype(font: &Font, tolerance: f64) -> Result<Vec<u8>> {
     put_u32(&mut loca, glyf.len() as u32);
     let mut tables: Vec<(Tag, Vec<u8>)> = Vec::new();
     for t in &font.tables {
-        if matches!(&t.tag, b"CFF " | b"CFF2" | b"VORG" | b"post" | b"maxp" | b"head") {
+        if matches!(
+            &t.tag,
+            b"CFF " | b"CFF2" | b"VORG" | b"post" | b"maxp" | b"head"
+        ) {
             continue;
         }
         if let Some(d) = font.data.get(t.offset..t.offset + t.length) {
@@ -246,7 +254,10 @@ fn charstring(path: &Path, width: i32) -> Vec<u8> {
                 last = p;
             }
             Seg::Quad(q, p) => {
-                let c1 = Pt::new(last.x + 2.0 / 3.0 * (q.x - last.x), last.y + 2.0 / 3.0 * (q.y - last.y));
+                let c1 = Pt::new(
+                    last.x + 2.0 / 3.0 * (q.x - last.x),
+                    last.y + 2.0 / 3.0 * (q.y - last.y),
+                );
                 let c2 = Pt::new(p.x + 2.0 / 3.0 * (q.x - p.x), p.y + 2.0 / 3.0 * (q.y - p.y));
                 let pts = [(r(c1.x), r(c1.y)), (r(c2.x), r(c2.y)), (r(p.x), r(p.y))];
                 for (x, y) in pts {
@@ -377,7 +388,8 @@ pub fn truetype_to_cff(font: &Font) -> Result<Vec<u8>> {
         d
     };
     let top_probe = cff_index(&[mk_top(0, 0, 0)]);
-    let base = header.len() + name_index.len() + top_probe.len() + string_index.len() + gsubr_index.len();
+    let base =
+        header.len() + name_index.len() + top_probe.len() + string_index.len() + gsubr_index.len();
     let charset_off = base;
     let cs_off = charset_off + charset.len();
     let priv_off = cs_off + cs_index.len();
@@ -395,7 +407,24 @@ pub fn truetype_to_cff(font: &Font) -> Result<Vec<u8>> {
     for t in &font.tables {
         if matches!(
             &t.tag,
-            b"glyf" | b"loca" | b"maxp" | b"post" | b"cvt " | b"fpgm" | b"prep" | b"gasp" | b"hdmx" | b"LTSH" | b"VDMX" | b"gvar" | b"fvar" | b"avar" | b"cvar" | b"STAT" | b"HVAR" | b"MVAR"
+            b"glyf"
+                | b"loca"
+                | b"maxp"
+                | b"post"
+                | b"cvt "
+                | b"fpgm"
+                | b"prep"
+                | b"gasp"
+                | b"hdmx"
+                | b"LTSH"
+                | b"VDMX"
+                | b"gvar"
+                | b"fvar"
+                | b"avar"
+                | b"cvar"
+                | b"STAT"
+                | b"HVAR"
+                | b"MVAR"
         ) {
             continue;
         }

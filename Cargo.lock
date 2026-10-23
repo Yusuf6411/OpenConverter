@@ -2215,6 +2215,7 @@ version = "2.3.0"
 dependencies = [
  "oc-archive",
  "oc-audio",
+ "oc-compress",
  "oc-container",
  "oc-core",
  "oc-font",
@@ -2222,6 +2223,7 @@ dependencies = [
  "oc-raster",
  "oc-sheet",
  "oc-subtitle",
+ "oc-svg",
  "oc-text",
  "oc-video",
 ]
@@ -2308,6 +2310,14 @@ dependencies = [
 [[package]]
 name = "oc-svg"
 version = "2.3.0"
+dependencies = [
+ "oc-core",
+ "oc-font",
+ "oc-image",
+ "oc-raster",
+ "oc-text",
+ "oc-xml",
+]
 
 [[package]]
 name = "oc-text"

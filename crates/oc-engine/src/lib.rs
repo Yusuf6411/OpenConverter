@@ -11,6 +11,7 @@ pub mod font;
 pub mod image;
 pub mod isolated;
 pub mod subtitle;
+pub mod svg;
 pub mod table;
 pub mod video;
 
@@ -141,6 +142,7 @@ impl Engine {
         table::register(&mut registry);
         video::register(&mut registry);
         font::register(&mut registry);
+        svg::register(&mut registry);
         let packable: Vec<FormatId> = std::iter::once(TXT)
             .chain(image::FORMATS)
             .chain(audio::FORMATS)
@@ -148,6 +150,7 @@ impl Engine {
             .chain(table::FORMATS)
             .chain(video::FORMATS)
             .chain(font::FORMATS)
+            .chain(svg::FORMATS)
             .collect();
         archive::register(&mut registry, &packable);
         Self {
@@ -342,6 +345,7 @@ impl Engine {
             .chain(video::FORMATS)
             .chain([video::FRAMES])
             .chain(font::FORMATS)
+            .chain(svg::FORMATS)
             .chain(archive::FORMATS)
             .filter_map(|id| self.registry.format(id))
     }
@@ -668,6 +672,24 @@ impl Engine {
                 out,
                 format!("Read {} streams -> Write {}", name(from), name(to)),
             )
+        } else if svg::is_svg(from) && image::is_image(to) {
+            let (img, n) = svg::render(data, &opts, &self.limits)?;
+            notes.extend(n);
+            let out_ext = req
+                .output
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            // The size was applied while drawing; resizing again would blur the result.
+            let mut after = opts.clone();
+            after.set("width", oc_core::options::OptionValue::Int(0));
+            after.set("height", oc_core::options::OptionValue::Int(0));
+            let (img, n) = image::transform(img, &after, &self.limits)?;
+            notes.extend(n);
+            let (out, n) = image::encode(to, &img, &opts, &out_ext)?;
+            notes.extend(n);
+            (out, "Draw SVG -> Encode picture".to_string())
         } else if font::is_font(from) && image::is_image(to) {
             let (img, n) = font::specimen(from, data, &opts, &self.limits)?;
             notes.extend(n);
@@ -684,7 +706,11 @@ impl Engine {
             let name = |id| self.registry.format(id).map_or("font", |f| f.name);
             (
                 out,
-                format!("Read {} -> Draw specimen -> Encode {}", name(from), name(to)),
+                format!(
+                    "Read {} -> Draw specimen -> Encode {}",
+                    name(from),
+                    name(to)
+                ),
             )
         } else if font::is_font(from) && font::is_font(to) {
             let (out, n) = font::convert(from, to, data, &opts, &self.limits)?;

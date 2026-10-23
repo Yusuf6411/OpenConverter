@@ -78,7 +78,15 @@ pub fn draw_text(
             continue;
         };
         let ctm = Transform::new(scale, 0.0, 0.0, -scale, x + gx * scale, y);
-        canvas.fill_path(&path, &ctm, FillRule::NonZero, &paint, Blend::Normal, 1.0, &clip);
+        canvas.fill_path(
+            &path,
+            &ctm,
+            FillRule::NonZero,
+            &paint,
+            Blend::Normal,
+            1.0,
+            &clip,
+        );
     }
 }
 
@@ -107,7 +115,10 @@ pub fn specimen(font: &Font, width: usize) -> Option<Canvas> {
         let mut map = font.unicode_map();
         map.sort();
         for chunk in map.chunks(24).take(8) {
-            let s: String = chunk.iter().filter_map(|(c, _)| char::from_u32(*c)).collect();
+            let s: String = chunk
+                .iter()
+                .filter_map(|(c, _)| char::from_u32(*c))
+                .collect();
             lines.push((s, 36.0));
         }
     }
@@ -121,10 +132,22 @@ pub fn specimen(font: &Font, width: usize) -> Option<Canvas> {
         // Shrink a line that would run off the sheet.
         let w = text_width(font, &text, size, &kerns);
         let avail = width as f64 - pad * 2.0;
-        let s = if w > avail && w > 0.0 { size * avail / w } else { size };
-        draw_text(&mut canvas, font, &text, pad, y, s, [0.0, 0.0, 0.0, 1.0], &kerns);
+        let s = if w > avail && w > 0.0 {
+            size * avail / w
+        } else {
+            size
+        };
+        draw_text(
+            &mut canvas,
+            font,
+            &text,
+            pad,
+            y,
+            s,
+            [0.0, 0.0, 0.0, 1.0],
+            &kerns,
+        );
         y += size * 0.25;
     }
     Some(canvas)
 }
-

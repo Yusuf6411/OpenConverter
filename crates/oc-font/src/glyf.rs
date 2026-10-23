@@ -29,7 +29,14 @@ pub fn glyph_range(font: &Font, gid: u16) -> Option<(usize, usize)> {
 /// Outline of `gid` in font units (y up).
 pub fn outline(font: &Font, gid: u16) -> Option<Path> {
     let mut path = Path::new();
-    add_glyph(font, gid, [1.0, 0.0, 0.0, 1.0, 0.0, 0.0], 0, &mut path, &mut 0)?;
+    add_glyph(
+        font,
+        gid,
+        [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        0,
+        &mut path,
+        &mut 0,
+    )?;
     Some(path)
 }
 

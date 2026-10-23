@@ -212,7 +212,11 @@ pub fn detect(data: &[u8]) -> Option<FormatId> {
     if !sfnt::is_sfnt(data) {
         return None;
     }
-    Some(if data.get(..4) == Some(b"OTTO") { OTF } else { TTF })
+    Some(if data.get(..4) == Some(b"OTTO") {
+        OTF
+    } else {
+        TTF
+    })
 }
 
 /// The sfnt bytes of a font file, unpacking WOFF and picking one font of a collection.

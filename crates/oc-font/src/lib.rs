@@ -11,6 +11,7 @@
 pub mod build;
 pub mod cff;
 pub mod convert;
+pub mod db;
 pub mod glyf;
 pub mod post;
 pub mod reader;
@@ -43,7 +44,13 @@ mod tests {
     fn tiny_font() -> Vec<u8> {
         let mut glyf = Vec::new();
         // glyph 1: contour of 5 points: (0,0) (600,0) (600,700) off(300,900) (0,700)
-        let pts: [(i16, i16, u8); 5] = [(0, 0, 1), (600, 0, 1), (600, 700, 1), (300, 900, 0), (0, 700, 1)];
+        let pts: [(i16, i16, u8); 5] = [
+            (0, 0, 1),
+            (600, 0, 1),
+            (600, 700, 1),
+            (300, 900, 0),
+            (0, 700, 1),
+        ];
         put_u16(&mut glyf, 1);
         for v in [0i16, 0, 600, 900] {
             put_u16(&mut glyf, v as u16);

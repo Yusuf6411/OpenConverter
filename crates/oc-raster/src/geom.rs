@@ -157,11 +157,8 @@ impl Path {
         self.segs.push(Seg::Quad(Pt::new(x1, y1), Pt::new(x, y)));
     }
     pub fn cubic_to(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, x: f64, y: f64) {
-        self.segs.push(Seg::Cubic(
-            Pt::new(x1, y1),
-            Pt::new(x2, y2),
-            Pt::new(x, y),
-        ));
+        self.segs
+            .push(Seg::Cubic(Pt::new(x1, y1), Pt::new(x2, y2), Pt::new(x, y)));
     }
     pub fn close(&mut self) {
         self.segs.push(Seg::Close);
@@ -200,7 +197,14 @@ impl Path {
         p.line_to(x + w - rx, y);
         p.cubic_to(x + w - rx + kx, y, x + w, y + ry - ky, x + w, y + ry);
         p.line_to(x + w, y + h - ry);
-        p.cubic_to(x + w, y + h - ry + ky, x + w - rx + kx, y + h, x + w - rx, y + h);
+        p.cubic_to(
+            x + w,
+            y + h - ry + ky,
+            x + w - rx + kx,
+            y + h,
+            x + w - rx,
+            y + h,
+        );
         p.line_to(x + rx, y + h);
         p.cubic_to(x + rx - kx, y + h, x, y + h - ry + ky, x, y + h - ry);
         p.line_to(x, y + ry);
@@ -246,7 +250,11 @@ impl Path {
         }
         let num = rx * rx * ry * ry - rx * rx * y1 * y1 - ry * ry * x1 * x1;
         let den = rx * rx * y1 * y1 + ry * ry * x1 * x1;
-        let mut co = if den == 0.0 { 0.0 } else { (num / den).max(0.0).sqrt() };
+        let mut co = if den == 0.0 {
+            0.0
+        } else {
+            (num / den).max(0.0).sqrt()
+        };
         if large == sweep {
             co = -co;
         }
@@ -351,7 +359,11 @@ impl Path {
 
     /// Turn curves into line segments no further than `tol` from the true curve.
     pub fn flatten(&self, tol: f64) -> Vec<Poly> {
-        let tol = if tol.is_finite() && tol > 1e-6 { tol } else { 0.1 };
+        let tol = if tol.is_finite() && tol > 1e-6 {
+            tol
+        } else {
+            0.1
+        };
         let mut out: Vec<Poly> = Vec::new();
         let mut cur: Vec<Pt> = Vec::new();
         let mut start = Pt::default();

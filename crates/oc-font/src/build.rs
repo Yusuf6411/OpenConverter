@@ -29,7 +29,10 @@ pub fn build_sfnt(flavor: [u8; 4], tables: &mut [(Tag, Vec<u8>)]) -> Vec<u8> {
     put_u16(&mut out, n as u16);
     put_u16(&mut out, search_range);
     put_u16(&mut out, entry_sel);
-    put_u16(&mut out, (n as u16).wrapping_mul(16).wrapping_sub(search_range));
+    put_u16(
+        &mut out,
+        (n as u16).wrapping_mul(16).wrapping_sub(search_range),
+    );
     let mut offset = 12 + 16 * n;
     let mut head_pos = None;
     for (tag, data) in tables.iter_mut() {
@@ -159,7 +162,12 @@ pub fn sfnt_to_woff(data: &[u8], level: u32) -> Result<Vec<u8>> {
             offset += 1;
         }
     }
-    let sfnt_size = 12 + 16 * n + tables.iter().map(|(_, d)| d.len().div_ceil(4) * 4).sum::<usize>();
+    let sfnt_size = 12
+        + 16 * n
+        + tables
+            .iter()
+            .map(|(_, d)| d.len().div_ceil(4) * 4)
+            .sum::<usize>();
     let mut out = Vec::new();
     out.extend_from_slice(b"wOFF");
     out.extend_from_slice(&flavor);

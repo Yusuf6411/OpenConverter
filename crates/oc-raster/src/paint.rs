@@ -124,7 +124,11 @@ fn color_at(stops: &[Stop], t: f32) -> [f32; 4] {
                     if let [a, b] = w {
                         if t >= a.offset && t <= b.offset {
                             let span = b.offset - a.offset;
-                            let u = if span <= 0.0 { 1.0 } else { (t - a.offset) / span };
+                            let u = if span <= 0.0 {
+                                1.0
+                            } else {
+                                (t - a.offset) / span
+                            };
                             c = [
                                 a.color[0] + (b.color[0] - a.color[0]) * u,
                                 a.color[1] + (b.color[1] - a.color[1]) * u,
