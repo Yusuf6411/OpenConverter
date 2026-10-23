@@ -77,7 +77,7 @@ Format notes: [formats/containers.md](formats/containers.md), [formats/vp8.md](f
 
 ## Phase 5b: VP9 and AV1
 - [ ] M5.9 VP9, M5.10 AV1 and AVIF: not done, see ADR-0011 (normative tables unavailable). Stream copy of VP9/AV1 between MP4 and WebM already works.
-- [ ] M5.11 subtitle burn-in: moved to Phase 6a.
+- [~] M5.11 subtitle burn-in: done in Phase 6a work. `burn_subtitles` on video outputs draws the first text subtitle track (white bold text, black outline, cue alignment 1-9, greedy wrapping) through the SVG renderer and installed fonts, then re-encodes. Not done: ASS styling, positioning and animation (only text and keypad alignment are used), overlapping cues (the first alive one is drawn), bitmap subtitles, choosing a track.
 - No v2.4.0 tag; the next release is v2.5.0.
 
 ## Known gaps

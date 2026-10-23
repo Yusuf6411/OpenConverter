@@ -7,6 +7,7 @@
 
 pub mod archive;
 pub mod audio;
+mod burn;
 pub mod font;
 pub mod image;
 pub mod isolated;

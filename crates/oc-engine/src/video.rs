@@ -208,6 +208,13 @@ fn options_for(id: FormatId) -> OptionSchema {
             "Leave out subtitle tracks",
             OptionKind::Bool { default: false },
         ),
+        spec(
+            "burn_subtitles",
+            "opt.video.burn_subtitles",
+            "Burn in subtitles",
+            "Draw the first text subtitle track onto the picture (re-encodes the video)",
+            OptionKind::Bool { default: false },
+        ),
     ];
     if id == MP4 {
         specs.push(spec(
@@ -533,6 +540,7 @@ struct Edit {
     fps: Option<(u32, u32)>,
     start_ns: i64,
     duration_ns: Option<i64>,
+    burn: bool,
 }
 
 impl Edit {
@@ -562,6 +570,7 @@ impl Edit {
                 .int("duration_ms")
                 .filter(|d| *d > 0)
                 .map(|d| d * 1_000_000),
+            burn: opts.bool("burn_subtitles").unwrap_or(false),
         }
     }
 
@@ -575,6 +584,7 @@ impl Edit {
         e.flip = "none".into();
         e.deinterlace = false;
         e.pad = false;
+        e.burn = false;
         e
     }
 
@@ -586,6 +596,7 @@ impl Edit {
             || self.rotate != 0
             || self.flip != "none"
             || self.deinterlace
+            || self.burn
             || self.fps.is_some()
     }
 
@@ -761,8 +772,33 @@ pub fn retarget(
                         format!("{target} cannot be stored in this container"),
                     ));
                 }
-                let (ns, packets) =
-                    transcode_video(&media, si, target, &ed, to, opts, limits, progress, notes)?;
+                let mut burner = None;
+                if ed.burn {
+                    let found = media
+                        .streams
+                        .iter()
+                        .position(|x| x.kind == Kind::Subtitle && subs::is_text(&x.codec));
+                    match found.and_then(|i| subs::to_track(&media, i)) {
+                        Some(t) => burner = Some(crate::burn::Burner::new(t, limits)),
+                        None => notes.push(Note::new(
+                            Severity::Warning,
+                            "burn_no_subtitles",
+                            "no text subtitle track was found, so nothing was burned in",
+                        )),
+                    }
+                }
+                let (ns, packets) = transcode_video(
+                    &media,
+                    si,
+                    target,
+                    &ed,
+                    to,
+                    opts,
+                    limits,
+                    progress,
+                    notes,
+                    burner.as_mut(),
+                )?;
                 let n = out.streams.len();
                 out.streams.push(ns);
                 for mut p in packets {
@@ -1036,6 +1072,7 @@ fn transcode_video(
     limits: &Limits,
     progress: &dyn Progress,
     notes: &mut Notes,
+    mut burner: Option<&mut crate::burn::Burner>,
 ) -> Result<(oc_video::Stream, Vec<Packet>)> {
     let src = media
         .streams
@@ -1089,6 +1126,16 @@ fn transcode_video(
         progress,
         total,
         &mut |pts, dur, pic| {
+            let burned;
+            let pic = match burner.as_mut() {
+                Some(b) => {
+                    let mut p = pic.clone();
+                    b.apply(&mut p, (pts + ed.start_ns) / 1_000_000, &mut Notes::new());
+                    burned = p;
+                    &burned
+                }
+                None => pic,
+            };
             if enc.is_none() {
                 let e = frames::Encoder::new(target, pic.w, pic.h, &params)?;
                 stream.width = pic.w as u32;
