@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, clippy::print_stdout, clippy::print_stderr)]
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::print_stdout, clippy::print_stderr)]
 //! Decodes an AV1 OBU stream to raw planar YUV on stdout (8-bit as bytes, deeper as 16-bit LE).
 use std::io::Write;
 
