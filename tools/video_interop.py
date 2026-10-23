@@ -193,5 +193,30 @@ for name, args in vp8_cases.items():
     if oc(T(f"vp8_{name}.webm"), T(f"vp8_{name}.y4m")):
         check(f"vp8 {name} decodes like ffmpeg", yuv_md5(T(f"vp8_{name}.y4m")) == yuv_md5(T(f"vp8_{name}.webm")))
 
+# VP8 encoding: ffmpeg's native decoder, libvpx and ours must all decode our streams alike.
+def md5_of(path, *pre):
+    r = subprocess.run(["ffmpeg", "-v", "error", *pre, "-i", path, "-f", "md5", "-pix_fmt", "yuv420p", "-"], capture_output=True, text=True)
+    return r.stdout.strip()
+
+enc_sources = {
+    "noise": ["-f", "lavfi", "-i", "nullsrc=size=203x117:rate=20,geq=random(1)*255:128:128", "-t", "2"],
+    "mandel": ["-f", "lavfi", "-i", "mandelbrot=size=256x192:rate=30", "-t", "2"],
+    "odd": ["-f", "lavfi", "-i", "testsrc2=size=177x145:rate=24", "-t", "2"],
+    "tiny": ["-f", "lavfi", "-i", "testsrc2=size=8x8:rate=24", "-t", "1"],
+}
+for name, args in enc_sources.items():
+    ff(*args, "-pix_fmt", "yuv420p", T(f"enc_{name}.y4m"))
+    for label, opts in (("default", []), ("fast", ["--set", "effort=0"]), ("rate", ["--set", "effort=5", "--set", "bitrate_kbps=150", "--set", "keyframe_interval=10"])):
+        out = T(f"enc_{name}_{label}.webm")
+        if oc(T(f"enc_{name}.y4m"), out, *opts):
+            a, b = md5_of(out), md5_of(out, "-c:v", "libvpx")
+            oc(out, T(f"enc_{name}_{label}.y4m"))
+            c = md5_of(T(f"enc_{name}_{label}.y4m"))
+            check(f"vp8 encode {name}/{label}: native == libvpx == ours", a == b == c, (a, b, c))
+r = sh("ffmpeg", "-v", "info", "-i", T("enc_mandel_default.webm"), "-i", T("enc_mandel.y4m"), "-lavfi", "psnr", "-f", "null", "-")
+import re
+m = re.search(r"average:([0-9.]+)", r.stderr)
+check("vp8 encode keeps quality", bool(m) and float(m.group(1)) > 30, r.stderr[-300:])
+
 print(f"{total - fails}/{total} checks passed")
 sys.exit(1 if fails else 0)

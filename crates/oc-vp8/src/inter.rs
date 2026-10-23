@@ -285,11 +285,6 @@ impl<'a> RefPlane<'a> {
             h: (p.mb_h * 8) as i32,
         }
     }
-    fn at(&self, x: i32, y: i32) -> i32 {
-        let x = x.clamp(0, self.w - 1) as usize;
-        let y = y.clamp(0, self.h - 1) as usize;
-        i32::from(self.data[(y + 1) * self.stride + x + 1])
-    }
 }
 
 fn clip(v: i32) -> u8 {
@@ -312,10 +307,29 @@ pub fn mc_block(
     let iy = y + (mv.row >> 3);
     let fx = (mv.col & 7) as usize;
     let fy = (mv.row & 7) as usize;
+    // The source samples the filters can touch: two before and three after in each direction.
+    const PW: usize = 21;
+    let (pw, ph) = (bw + 5, bh + 5);
+    let mut patch = [0u8; PW * PW];
+    let (x0, y0) = (ix - 2, iy - 2);
+    let x_inside = x0 >= 0 && x0 + pw as i32 <= r.w;
+    for j in 0..ph {
+        let yy = (y0 + j as i32).clamp(0, r.h - 1) as usize;
+        let row = &r.data[(yy + 1) * r.stride + 1..(yy + 1) * r.stride + 1 + r.w as usize];
+        let dst = &mut patch[j * PW..j * PW + pw];
+        if x_inside {
+            dst.copy_from_slice(&row[x0 as usize..x0 as usize + pw]);
+        } else {
+            for (i, d) in dst.iter_mut().enumerate() {
+                *d = row[(x0 + i as i32).clamp(0, r.w - 1) as usize];
+            }
+        }
+    }
+    let at = |i: usize, j: usize| i32::from(patch[j * PW + i]);
     if fx == 0 && fy == 0 {
         for j in 0..bh {
             for i in 0..bw {
-                out[j * out_stride + i] = r.at(ix + i as i32, iy + j as i32) as u8;
+                out[j * out_stride + i] = patch[(j + 2) * PW + i + 2];
             }
         }
         return;
@@ -326,9 +340,7 @@ pub fn mc_block(
         let mut mid = [0i32; 17 * 16];
         for j in 0..=bh {
             for i in 0..bw {
-                let a = r.at(ix + i as i32, iy + j as i32);
-                let b = r.at(ix + i as i32 + 1, iy + j as i32);
-                mid[j * 16 + i] = (a * hx0 + b * hx1 + 64) >> 7;
+                mid[j * 16 + i] = (at(i + 2, j + 2) * hx0 + at(i + 3, j + 2) * hx1 + 64) >> 7;
             }
         }
         for j in 0..bh {
@@ -344,15 +356,13 @@ pub fn mc_block(
     let vf = &SIXTAP[fy];
     let mut mid = [0u8; 21 * 16];
     for j in 0..bh + 5 {
-        let yy = iy + j as i32 - 2;
         for i in 0..bw {
-            let xx = ix + i as i32;
             mid[j * 16 + i] = if fx == 0 {
-                r.at(xx, yy) as u8
+                patch[j * PW + i + 2]
             } else {
                 let mut s = 64;
                 for k in 0..6 {
-                    s += hf[k] * r.at(xx + k as i32 - 2, yy);
+                    s += hf[k] * at(i + k, j);
                 }
                 clip(s >> 7)
             };

@@ -77,6 +77,9 @@ fn options_for(id: FormatId) -> OptionSchema {
             OptionKind::Enum { choices: video_codecs, default: "auto" },
         ),
         int("quality", "opt.video.quality", "Video quality", "1 (smallest) to 100 (best) for encoded video", 1, 100, 80),
+        int("bitrate_kbps", "opt.video.bitrate", "Bit rate (kbit/s)", "Aim for this bit rate; 0 codes at the constant quality set above", 0, 200_000, 0),
+        int("effort", "opt.video.effort", "Encoder effort", "0 (fastest) to 6 (smallest output) for VP8", 0, 6, 4),
+        int("threads", "opt.video.threads", "Encoder threads", "0 picks from the machine", 0, 64, 0),
         int("keyframe_interval", "opt.video.keyframe_interval", "Key frame every (frames)", "Seeking granularity of encoded video", 1, 1000, 120),
         int("width", "opt.video.width", "Width", "Scale to this width in pixels; 0 keeps the original (with only one of width and height set, the aspect ratio is kept)", 0, 16384, 0),
         int("height", "opt.video.height", "Height", "Scale to this height in pixels; 0 keeps the original", 0, 16384, 0),
@@ -837,7 +840,9 @@ fn transcode_video(
         quality: opts.int("quality").unwrap_or(80).clamp(1, 100) as u8,
         fps: out_fps,
         keyint: opts.int("keyframe_interval").unwrap_or(120).max(1) as u32,
-        bitrate_kbps: 0,
+        bitrate_kbps: opts.int("bitrate_kbps").unwrap_or(0).max(0) as u32,
+        effort: opts.int("effort").unwrap_or(4).clamp(0, 6) as u8,
+        threads: opts.int("threads").unwrap_or(0).max(0) as usize,
     };
     let keyint = params.keyint;
     let mut enc: Option<frames::Encoder> = None;
@@ -1272,7 +1277,9 @@ pub fn animation_to_video(
         quality: opts.int("quality").unwrap_or(80).clamp(1, 100) as u8,
         fps: out_fps,
         keyint: opts.int("keyframe_interval").unwrap_or(120).max(1) as u32,
-        bitrate_kbps: 0,
+        bitrate_kbps: opts.int("bitrate_kbps").unwrap_or(0).max(0) as u32,
+        effort: opts.int("effort").unwrap_or(4).clamp(0, 6) as u8,
+        threads: opts.int("threads").unwrap_or(0).max(0) as usize,
     };
     let mut enc: Option<frames::Encoder> = None;
     let mut stream = oc_video::Stream::new(Kind::Video, target);

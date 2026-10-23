@@ -36,16 +36,30 @@ impl Vp8Decoder {
 }
 
 pub struct Vp8Encoder {
-    params: oc_vp8::Params,
+    inner: oc_vp8::VideoEncoder,
+    pending_key: bool,
 }
 
 impl Vp8Encoder {
-    pub fn new(_w: usize, _h: usize, p: &EncodeParams) -> Self {
-        let params = oc_vp8::Params {
+    pub fn new(w: usize, h: usize, p: &EncodeParams) -> Res<Self> {
+        let params = oc_vp8::VideoParams {
             quality: f32::from(p.quality),
-            ..Default::default()
+            effort: p.effort,
+            bitrate_kbps: p.bitrate_kbps,
+            fps: p.fps.0 as f32 / p.fps.1.max(1) as f32,
+            keyint: p.keyint,
+            threads: p.threads,
+            partitions_log2: 0,
         };
-        Self { params }
+        Ok(Self {
+            inner: oc_vp8::VideoEncoder::new(w, h, params)?,
+            pending_key: false,
+        })
+    }
+
+    /// Makes the next picture a key frame.
+    pub fn request_key(&mut self) {
+        self.pending_key = true;
     }
 
     pub fn encode(&mut self, pic: &Picture) -> Res<(Vec<u8>, bool)> {
@@ -56,7 +70,7 @@ impl Vp8Encoder {
             u: pic.u.clone(),
             v: pic.v.clone(),
         };
-        let bytes = oc_vp8::encode(&frame, &self.params, &NoProgress)?;
-        Ok((bytes, true))
+        let force = std::mem::take(&mut self.pending_key);
+        self.inner.encode(&frame, force, &NoProgress)
     }
 }

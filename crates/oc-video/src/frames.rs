@@ -66,6 +66,10 @@ pub struct EncodeParams {
     pub keyint: u32,
     /// Target bit rate in kbit/s; 0 picks the rate from `quality`.
     pub bitrate_kbps: u32,
+    /// 0 (fastest) to 6 (smallest output) for encoders that have the choice.
+    pub effort: u8,
+    /// Worker threads; 0 picks from the machine.
+    pub threads: usize,
 }
 
 impl Default for EncodeParams {
@@ -75,6 +79,8 @@ impl Default for EncodeParams {
             fps: (30, 1),
             keyint: 120,
             bitrate_kbps: 0,
+            effort: 4,
+            threads: 0,
         }
     }
 }
@@ -82,7 +88,7 @@ impl Default for EncodeParams {
 pub enum Encoder {
     Mjpeg(u8),
     Raw,
-    Vp8(crate::vp8::Vp8Encoder),
+    Vp8(Box<crate::vp8::Vp8Encoder>),
 }
 
 impl Encoder {
@@ -90,7 +96,7 @@ impl Encoder {
         match c {
             codec::MJPEG => Ok(Self::Mjpeg(p.quality.clamp(1, 100))),
             codec::RAW => Ok(Self::Raw),
-            codec::VP8 => Ok(Self::Vp8(crate::vp8::Vp8Encoder::new(w, h, p))),
+            codec::VP8 => Ok(Self::Vp8(Box::new(crate::vp8::Vp8Encoder::new(w, h, p)?))),
             other => Err(Error::new(
                 ErrorCode::CodecNotInBuild,
                 format!("{other} video cannot be encoded in this build"),
