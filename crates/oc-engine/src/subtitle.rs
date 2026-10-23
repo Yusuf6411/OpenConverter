@@ -256,15 +256,16 @@ pub fn parse(from: FormatId, text: &str, notes: &mut Notes) -> Track {
     }
 }
 
-pub fn convert(
-    from: FormatId,
-    to: FormatId,
-    data: &[u8],
-    opts: &Options,
-) -> Result<(Vec<u8>, Notes)> {
+pub fn convert(from: FormatId, to: FormatId, data: &[u8], opts: &Options) -> Result<(Vec<u8>, Notes)> {
     let mut notes = Notes::new();
     let text = decode(data, opts, &mut notes)?;
-    let mut track = parse(from, &text, &mut notes);
+    let track = parse(from, &text, &mut notes);
+    let out = finish(track, from, to, opts, &mut notes)?;
+    Ok((out, notes))
+}
+
+/// Apply the timing options to `track` and write it as `to`.
+pub fn finish(mut track: Track, from: FormatId, to: FormatId, opts: &Options, notes: &mut Notes) -> Result<Vec<u8>> {
     let (ff, ft) = (
         opts.float("fps_from").unwrap_or(0.0),
         opts.float("fps_to").unwrap_or(0.0),
@@ -274,17 +275,17 @@ pub fn convert(
     }
     let shift = opts.int("shift_ms").unwrap_or(0);
     if shift != 0 {
-        track.shift(shift, &mut notes);
+        track.shift(shift, notes);
     }
     if opts.bool("strip_markup") == Some(true) {
         track.strip_markup();
     }
-    track.tidy(&mut notes);
+    track.tidy(notes);
     let mut out = match to {
-        t if t == VTT => vtt::write(&track, &mut notes),
-        t if t == ASS => ass::write(&track, &mut notes),
-        t if t == TTML => ttml::write(&track, &mut notes),
-        _ => srt::write(&track, &mut notes),
+        t if t == VTT => vtt::write(&track, notes),
+        t if t == ASS => ass::write(&track, notes),
+        t if t == TTML => ttml::write(&track, notes),
+        _ => srt::write(&track, notes),
     };
     if from == ASS && to != ASS && track.ass_header.is_some() {
         notes.push(Note::new(
@@ -312,5 +313,5 @@ pub fn convert(
     } else {
         out.into_bytes()
     };
-    Ok((bytes, notes))
+    Ok(bytes)
 }

@@ -343,6 +343,23 @@ impl Engine {
             }
         }
         let route = self.registry.plan(from, to, false)?;
+        // Pulling one track out of a video container: the rest of the conversion then runs on
+        // that track as if it had been a file of its own.
+        let extracted: Option<Vec<u8>>;
+        let mut sub_track: Option<(oc_subtitle::Track, FormatId)> = None;
+        let (data, from): (&[u8], FormatId) = if video::is_video(from) && audio::is_audio(to) {
+            extracted = Some(video::extract_audio(from, &data, &self.limits, &mut notes)?);
+            (extracted.as_deref().unwrap_or_default(), audio::MKA)
+        } else if video::is_video(from) && subtitle::is_subtitle(to) {
+            let (t, k) = video::extract_subtitle(from, &data, &self.limits, &mut notes)?;
+            sub_track = Some((t, k));
+            extracted = None;
+            (&data[..], from)
+        } else {
+            extracted = None;
+            (&data[..], from)
+        };
+        let _ = &extracted;
 
         let (out, route_text) = if archive::is_archive(to) {
             archive::convert(
@@ -387,6 +404,10 @@ impl Engine {
                 out,
                 format!("Decode {} -> Process -> Encode {}", name(from), name(to)),
             )
+        } else if let Some((track, kind)) = sub_track {
+            let out = subtitle::finish(track, kind, to, &opts, &mut notes)?;
+            let name = |id| self.registry.format(id).map_or("video", |f| f.name);
+            (out, format!("Extract subtitles from {} -> Write {}", name(from), name(to)))
         } else if video::is_video(from) {
             let out = video::convert(from, to, &data, &opts, &self.limits, &mut notes)?;
             let name = |id| self.registry.format(id).map_or("video", |f| f.name);

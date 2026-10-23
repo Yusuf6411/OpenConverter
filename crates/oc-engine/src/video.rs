@@ -9,15 +9,17 @@ use oc_core::{
     Capabilities, Category, Error, ErrorCode, FormatDescriptor, FormatId, Limits, Note, Notes,
     Ownership, Result, Severity, Sniffer,
 };
-use oc_video::{codec, mkv, mp4, Kind, Media};
+use oc_video::{avi, codec, mkv, mp4, subs, y4m, Kind, Media, Packet};
 
 pub const MP4: FormatId = FormatId("mp4");
 pub const MOV: FormatId = FormatId("mov");
 pub const MKV: FormatId = FormatId("mkv");
 pub const WEBM: FormatId = FormatId("webm");
+pub const AVI: FormatId = FormatId("avi");
+pub const Y4M: FormatId = FormatId("y4m");
 pub const MEDIA_IR: FormatId = FormatId("media-ir");
 
-pub const FORMATS: [FormatId; 4] = [MP4, MOV, MKV, WEBM];
+pub const FORMATS: [FormatId; 6] = [MP4, MOV, MKV, WEBM, AVI, Y4M];
 
 pub fn is_video(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -105,6 +107,22 @@ pub fn register(registry: &mut Registry) {
             "Matroska/EBML (RFC 8794, RFC 9559)",
         ),
         (
+            AVI,
+            "AVI",
+            &["avi"],
+            &["video/x-msvideo"],
+            vec![Sniffer { offset: 8, magic: b"AVI ", confidence: 100 }],
+            "Microsoft AVI (RIFF; Motion JPEG, MPEG-4 part 2, VP8; PCM, MP3, AC-3)",
+        ),
+        (
+            Y4M,
+            "YUV4MPEG2",
+            &["y4m", "yuv4mpeg"],
+            &["video/x-yuv4mpeg"],
+            vec![Sniffer { offset: 0, magic: b"YUV4MPEG2", confidence: 100 }],
+            "YUV4MPEG2 (8-bit 4:2:0, 4:2:2, 4:4:4 and mono)",
+        ),
+        (
             WEBM,
             "WebM",
             &["webm"],
@@ -139,6 +157,28 @@ pub fn register(registry: &mut Registry) {
             time: 2,
             description: "Read streams and packets",
         });
+        for sub in crate::subtitle::FORMATS {
+            registry.add_edge(Edge {
+                from: id,
+                to: sub,
+                kind: EdgeKind::Transcode,
+                loss: 1,
+                ownership: Ownership::Own,
+                time: 3,
+                description: "Extract the first text subtitle track",
+            });
+        }
+        for aud in crate::audio::FORMATS {
+            registry.add_edge(Edge {
+                from: id,
+                to: aud,
+                kind: EdgeKind::Transcode,
+                loss: 1,
+                ownership: Ownership::Own,
+                time: 5,
+                description: "Extract the first audio track",
+            });
+        }
         registry.add_edge(Edge {
             from: MEDIA_IR,
             to: id,
@@ -153,6 +193,12 @@ pub fn register(registry: &mut Registry) {
 
 /// Identify a video container by content.
 pub fn detect(data: &[u8]) -> Option<FormatId> {
+    if y4m::sniff(data) {
+        return Some(Y4M);
+    }
+    if avi::sniff(data) {
+        return Some(AVI);
+    }
     if mp4::sniff(data) {
         return Some(if data.get(8..12) == Some(b"qt  ") {
             MOV
@@ -168,7 +214,11 @@ pub fn detect(data: &[u8]) -> Option<FormatId> {
 }
 
 pub fn read(from: FormatId, data: &[u8], limits: &Limits) -> Result<Media> {
-    if from == MP4 || from == MOV {
+    if from == Y4M {
+        y4m::read(data, limits)
+    } else if from == AVI {
+        avi::read(data, limits)
+    } else if from == MP4 || from == MOV {
         mp4::read(data, limits)
     } else {
         mkv::read(data, limits)
@@ -177,7 +227,11 @@ pub fn read(from: FormatId, data: &[u8], limits: &Limits) -> Result<Media> {
 
 /// Whether container `to` can hold a stream of this codec as is.
 pub fn container_allows(to: FormatId, c: &str) -> bool {
-    if to == WEBM {
+    if to == Y4M {
+        c == codec::RAW
+    } else if to == AVI {
+        avi::allows(c)
+    } else if to == WEBM {
         mkv::webm_allows(c)
     } else if to == MKV {
         mkv::mkv_allows(c)
@@ -187,7 +241,11 @@ pub fn container_allows(to: FormatId, c: &str) -> bool {
 }
 
 pub fn write(to: FormatId, media: &Media, opts: &Options) -> Result<Vec<u8>> {
-    if to == MP4 || to == MOV {
+    if to == Y4M {
+        y4m::write(media)
+    } else if to == AVI {
+        avi::write(media)
+    } else if to == MP4 || to == MOV {
         mp4::write(
             media,
             &mp4::Options {
@@ -208,7 +266,9 @@ pub fn retarget(media: Media, to: FormatId, opts: &Options, notes: &mut Notes) -
         source: media.source.clone(),
         ..Media::default()
     };
-    for s in &media.streams {
+    // Text subtitle streams the container cannot hold are rewritten in a codec it can.
+    let mut rewritten: Vec<(usize, Vec<Packet>)> = Vec::new();
+    for (si, s) in media.streams.iter().enumerate() {
         let drop = (s.kind == Kind::Audio && opts.bool("drop_audio") == Some(true))
             || (s.kind == Kind::Subtitle && opts.bool("drop_subtitles") == Some(true));
         if drop {
@@ -218,25 +278,46 @@ pub fn retarget(media: Media, to: FormatId, opts: &Options, notes: &mut Notes) -
         if container_allows(to, &s.codec) {
             keep.push(Some(out.streams.len()));
             out.streams.push(s.clone());
-        } else {
-            keep.push(None);
+            continue;
+        }
+        let alt = [codec::SRT, codec::ASS]
+            .into_iter()
+            .find(|c| subs::is_text(&s.codec) && container_allows(to, c));
+        if let (Some(alt), Some(track)) = (alt, subs::to_track(&media, si)) {
+            let (mut ns, packets) = subs::from_track(&track, alt);
+            ns.name = s.name.clone();
+            ns.default = s.default;
+            ns.forced = s.forced;
             notes.push(
                 Note::new(
-                    Severity::Warning,
-                    "stream_dropped",
-                    format!(
-                        "a {} stream ({}) cannot be stored in this container and was left out",
-                        match s.kind {
-                            Kind::Video => "video",
-                            Kind::Audio => "audio",
-                            Kind::Subtitle => "subtitle",
-                        },
-                        s.codec
-                    ),
+                    Severity::Info,
+                    "subtitle_converted",
+                    format!("a {} subtitle track was rewritten as {alt}, which this container can hold", s.codec),
                 )
-                .with_detail(s.codec.clone()),
+                .with_detail(alt),
             );
+            keep.push(None);
+            rewritten.push((out.streams.len(), packets));
+            out.streams.push(ns);
+            continue;
         }
+        keep.push(None);
+        notes.push(
+            Note::new(
+                Severity::Warning,
+                "stream_dropped",
+                format!(
+                    "a {} stream ({}) cannot be stored in this container and was left out",
+                    match s.kind {
+                        Kind::Video => "video",
+                        Kind::Audio => "audio",
+                        Kind::Subtitle => "subtitle",
+                    },
+                    s.codec
+                ),
+            )
+            .with_detail(s.codec.clone()),
+        );
     }
     if out.streams.is_empty() {
         return Err(Error::new(
@@ -244,15 +325,93 @@ pub fn retarget(media: Media, to: FormatId, opts: &Options, notes: &mut Notes) -
             "none of the streams in this file can be stored in the chosen container",
         ));
     }
-    for p in media.packets {
+    for mut p in media.packets {
         if let Some(Some(n)) = keep.get(p.stream) {
-            let mut p = p;
             p.stream = *n;
             out.packets.push(p);
         }
     }
-    let _ = codec::H264;
+    for (n, packets) in rewritten {
+        for mut p in packets {
+            p.stream = n;
+            out.packets.push(p);
+        }
+    }
+    out.sort_by_dts();
     Ok(out)
+}
+
+/// The first subtitle stream of a video container as cues, with its text codec.
+pub fn extract_subtitle(
+    from: FormatId,
+    data: &[u8],
+    limits: &Limits,
+    notes: &mut Notes,
+) -> Result<(oc_subtitle::Track, FormatId)> {
+    let media = read(from, data, limits)?;
+    let found: Vec<usize> = media
+        .streams
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.kind == Kind::Subtitle && subs::is_text(&s.codec))
+        .map(|(i, _)| i)
+        .collect();
+    let Some(&si) = found.first() else {
+        return Err(Error::new(
+            ErrorCode::UnsupportedVariant,
+            "this file has no text subtitle track",
+        ));
+    };
+    if found.len() > 1 {
+        notes.push(Note::new(
+            Severity::Info,
+            "subtitle_track_chosen",
+            format!("the file has {} subtitle tracks; the first one was used", found.len()),
+        ));
+    }
+    let track = subs::to_track(&media, si)
+        .ok_or_else(|| Error::new(ErrorCode::InternalError, "subtitle stream vanished"))?;
+    let kind = if media.streams[si].codec == codec::ASS {
+        crate::subtitle::ASS
+    } else {
+        crate::subtitle::SRT
+    };
+    Ok((track, kind))
+}
+
+/// The first audio stream of a video container, re-wrapped as a Matroska audio file so the
+/// audio converters can read it like any other.
+pub fn extract_audio(from: FormatId, data: &[u8], limits: &Limits, notes: &mut Notes) -> Result<Vec<u8>> {
+    let media = read(from, data, limits)?;
+    let found: Vec<usize> = media
+        .streams
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.kind == Kind::Audio)
+        .map(|(i, _)| i)
+        .collect();
+    let Some(&si) = found.first() else {
+        return Err(Error::new(ErrorCode::UnsupportedVariant, "this file has no audio track"));
+    };
+    if found.len() > 1 {
+        notes.push(Note::new(
+            Severity::Info,
+            "audio_track_chosen",
+            format!("the file has {} audio tracks; the first one was used", found.len()),
+        ));
+    }
+    let mut only = Media {
+        streams: vec![media.streams[si].clone()],
+        title: media.title.clone(),
+        ..Media::default()
+    };
+    for mut p in media.packets {
+        if p.stream == si {
+            p.stream = 0;
+            only.packets.push(p);
+        }
+    }
+    mkv::write(&only, false, "OpenConverter")
 }
 
 pub fn convert(

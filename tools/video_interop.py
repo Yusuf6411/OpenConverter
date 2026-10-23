@@ -108,5 +108,58 @@ oc(T("mjpeg.mkv"), T("mjpeg.mov")); compare(T("mjpeg.mkv"), T("mjpeg.mov"), ("v"
 r = sh(OC, "convert", T("h264.mp4"), T("h264_x.webm"), "--overwrite")
 check("webm refuses h264+aac with codec_not_in_build", r.returncode == 12, r.stderr)
 
+# Subtitle tracks: SRT text in Matroska <-> tx3g in MP4, extraction to SRT, ASS in Matroska.
+open(T("s.srt"), "w").write("1\n00:00:00,500 --> 00:00:01,500\n<i>Hello</i> there\n\n2\n00:00:02,000 --> 00:00:02,800\nSecond & last\n")
+ff("-i", T("h264.mp4"), "-i", T("s.srt"), "-map", "0", "-map", "1", "-c", "copy", "-c:s", "srt", T("subs.mkv"))
+
+
+def cue_texts(path, idx="0:s:0"):
+    r = sh("ffmpeg", "-v", "error", "-i", path, "-map", idx, "-f", "srt", "-")
+    import re
+    blocks = [b for b in re.split(r"\n\n+", r.stdout.strip()) if b]
+    out = []
+    for b in blocks:
+        lines = b.split("\n")
+        out.append(re.sub(r"<font[^>]*>|</font>", "", "\n".join(lines[2:])))
+    return out
+
+
+oc(T("subs.mkv"), T("subs.mp4")); check("tx3g text", cue_texts(T("subs.mp4")) == cue_texts(T("subs.mkv")), cue_texts(T("subs.mp4")))
+oc(T("subs.mp4"), T("subs_b.mkv")); check("srt back in mkv", cue_texts(T("subs_b.mkv")) == cue_texts(T("subs.mkv")))
+oc(T("subs.mkv"), T("subs_x.srt"))
+open(T("ref.srt"), "w").write(sh("ffmpeg", "-v", "error", "-i", T("subs.mkv"), "-map", "0:s:0", "-f", "srt", "-").stdout)
+import re
+norm = lambda p: re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", open(p).read()))
+check("extracted srt text", norm(T("subs_x.srt")) == norm(T("ref.srt")), norm(T("subs_x.srt")))
+ff("-i", T("s.srt"), T("s.ass"))
+ff("-i", T("h264.mp4"), "-i", T("s.ass"), "-map", "0", "-map", "1", "-c", "copy", T("ass.mkv"))
+oc(T("ass.mkv"), T("ass_x.ass")); check("extracted ass parses in ffmpeg", sh("ffmpeg", "-v", "error", "-i", T("ass_x.ass"), "-f", "srt", "-").stdout.count("-->") == 2)
+oc(T("ass.mkv"), T("ass.mp4")); check("ass becomes tx3g text", cue_texts(T("ass.mp4")) == cue_texts(T("ass.mkv")), cue_texts(T("ass.mp4")))
+
+# Audio tracks pulled out of a video: lossless copy where the codec allows it.
+oc(T("vp9.webm"), T("a.opus"))
+d = float(probe(T("a.opus"))["format"]["duration"])
+check("opus extracted", abs(d - 2.0) < 0.05, d)
+oc(T("vp9.webm"), T("a.wav"))
+d = float(probe(T("a.wav"))["format"]["duration"])
+check("opus decoded to wav", abs(d - 2.0) < 0.05, d)
+r = sh(OC, "convert", T("h264.mp4"), T("a.flac"), "--overwrite")
+check("aac extraction refused as codec_not_in_build", r.returncode == 12, r.stderr)
+
+# AVI: Motion JPEG with PCM, MPEG-4 part 2 with MP3, VP8.
+ff("-f", "lavfi", "-i", "testsrc2=size=160x120:rate=24:duration=1", "-f", "lavfi", "-i", "sine=frequency=500:duration=1",
+   "-c:v", "mjpeg", "-q:v", "5", "-c:a", "pcm_s16le", T("mjpeg_pcm.mkv"))
+oc(T("mjpeg_pcm.mkv"), T("mjpeg_pcm.avi")); compare(T("mjpeg_pcm.mkv"), T("mjpeg_pcm.avi"))
+check("avi has two streams", len(probe(T("mjpeg_pcm.avi"))["streams"]) == 2)
+oc(T("mjpeg_pcm.avi"), T("mjpeg_pcm_b.mkv")); compare(T("mjpeg_pcm.mkv"), T("mjpeg_pcm_b.mkv"))
+ff("-f", "lavfi", "-i", "testsrc2=size=160x120:rate=25:duration=1", "-f", "lavfi", "-i", "sine=frequency=500:duration=1",
+   "-c:v", "mpeg4", "-q:v", "4", "-c:a", "libmp3lame", T("mp4v_mp3.avi"))
+oc(T("mp4v_mp3.avi"), T("mp4v_mp3.mkv")); compare(T("mp4v_mp3.avi"), T("mp4v_mp3.mkv"))
+oc(T("mp4v_mp3.mkv"), T("mp4v_mp3_b.avi")); compare(T("mp4v_mp3.avi"), T("mp4v_mp3_b.avi"))
+oc(T("mp4v_mp3.avi"), T("mp4v_mp3.mp4")); compare(T("mp4v_mp3.avi"), T("mp4v_mp3.mp4"))
+ff("-i", T("vp8.webm"), "-c", "copy", T("vp8.avi"))
+oc(T("vp8.avi"), T("vp8_c.mkv")); compare(T("vp8.webm"), T("vp8_c.mkv"), ("v",))
+oc(T("vp8.webm"), T("vp8_d.avi")); compare(T("vp8.webm"), T("vp8_d.avi"), ("v",))
+
 print(f"{total - fails}/{total} checks passed")
 sys.exit(1 if fails else 0)

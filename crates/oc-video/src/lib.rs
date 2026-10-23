@@ -12,6 +12,7 @@
 pub mod avi;
 pub mod mkv;
 pub mod mp4;
+pub mod subs;
 pub mod y4m;
 
 use oc_core::{Error, ErrorCode, Result};

@@ -121,6 +121,16 @@ pub fn strip_markup(s: &str) -> String {
         .replace("&amp;", "&")
 }
 
+/// Text of one SRT cue (HTML-ish tags) to the inline form.
+pub fn srt_text_to_inline(raw: &str) -> String {
+    balance(&html_to_inline(raw))
+}
+
+/// The inline form as SRT cue text.
+pub fn inline_to_srt_text(inline: &str) -> String {
+    inline_to_html(&balance(inline), false)
+}
+
 /// Escape `<` and `&` that are text, not markup, before it goes into the inline form.
 pub(crate) fn text_to_inline(s: &str) -> String {
     s.replace('&', "&amp;")

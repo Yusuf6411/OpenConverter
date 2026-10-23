@@ -2314,6 +2314,7 @@ version = "2.2.0"
 dependencies = [
  "oc-container",
  "oc-core",
+ "oc-subtitle",
 ]
 
 [[package]]

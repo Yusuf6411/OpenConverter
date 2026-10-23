@@ -13,3 +13,4 @@ workspace = true
 [dependencies]
 oc-core = { path = "../oc-core" }
 oc-container = { path = "../oc-container" }
+oc-subtitle = { path = "../oc-subtitle" }
