@@ -403,6 +403,18 @@ pub fn sniff(data: &[u8]) -> bool {
     data.starts_with(&[0x1A, 0x45, 0xDF, 0xA3])
 }
 
+/// The DocType in the EBML header (`matroska` or `webm`), without parsing the rest.
+pub fn doc_type(data: &[u8]) -> Option<String> {
+    if !sniff(data) {
+        return None;
+    }
+    elements(data)
+        .into_iter()
+        .find(|e| e.id == id::EBML)
+        .and_then(|e| elements(e.body).into_iter().find(|c| c.id == id::DOC_TYPE))
+        .map(|c| text(c.body))
+}
+
 fn parse_track(body: &[u8]) -> Result<Track> {
     let mut t = Track::new(0, TrackKind::Other(0), "");
     t.language = "eng".into();

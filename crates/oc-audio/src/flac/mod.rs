@@ -4,7 +4,7 @@
 mod dec;
 mod enc;
 
-pub use dec::{decode_stream, read, sniff, StreamInfo};
+pub use dec::{decode_stream, parse_streaminfo, read, sniff, split_frames, StreamInfo};
 pub use enc::{write, Options};
 
 /// CRC-8 (polynomial 0x07) over a frame header.

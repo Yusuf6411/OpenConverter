@@ -899,6 +899,19 @@ impl Decoder {
         }
     }
 
+    /// Samples this packet adds to the output (per channel) given the previous block's size,
+    /// and its own block size. The first packet of a stream yields none.
+    pub fn packet_blocksize(&self, pkt: &[u8]) -> Option<usize> {
+        let mut br = Br::new(pkt);
+        if br.bit() {
+            return None;
+        }
+        let mode_bits = ilog(self.modes.len() as u32 - 1);
+        let mode_no = br.read(mode_bits) as usize;
+        let mode = self.modes.get(mode_no)?;
+        Some(self.bs[usize::from(mode.blockflag)])
+    }
+
     /// Decode one audio packet, appending interleaved samples to `out`.
     pub fn decode(&mut self, pkt: &[u8], out: &mut Vec<f32>) -> Result<()> {
         let mut br = Br::new(pkt);

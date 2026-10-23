@@ -3,6 +3,7 @@ mod dec;
 mod enc;
 mod mdct;
 
+pub use dec::{parse_identification, Identification};
 pub use enc::{write, Options};
 
 use crate::tags::parse_vorbis_comment;
@@ -19,6 +20,21 @@ pub(crate) fn layout(ch: usize) -> (Vec<usize>, u32) {
         8 => (vec![0, 2, 1, 7, 5, 6, 3, 4], 0x63F),
         n => ((0..n).collect(), crate::default_mask(n as u16)),
     }
+}
+
+/// Samples (per channel) each audio packet adds, for muxing into another container. The first
+/// packet of a stream yields none.
+pub fn packet_durations(ident: &[u8], setup: &[u8], packets: &[&[u8]]) -> Result<Vec<usize>> {
+    let id = dec::parse_identification(ident)?;
+    let d = dec::Decoder::new(&id, setup)?;
+    let mut prev = 0usize;
+    let mut out = Vec::with_capacity(packets.len());
+    for p in packets {
+        let n = d.packet_blocksize(p).unwrap_or(prev);
+        out.push(if prev == 0 { 0 } else { prev / 4 + n / 4 });
+        prev = n;
+    }
+    Ok(out)
 }
 
 pub fn sniff(data: &[u8]) -> bool {

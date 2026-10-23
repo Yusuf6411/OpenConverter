@@ -312,6 +312,21 @@ impl Engine {
                 progress,
                 &mut notes,
             )?
+        } else if let Some(out) = if audio::is_audio(from) && audio::is_audio(to) {
+            audio::try_copy(from, to, &data, &opts, &self.limits, &mut notes)?
+        } else {
+            None
+        } {
+            progress.report(3, 4, "copy");
+            let name = |id| self.registry.format(id).map_or("audio", |f| f.name);
+            (
+                out,
+                format!(
+                    "Copy the {} audio stream into {} (no re-encoding)",
+                    name(from),
+                    name(to)
+                ),
+            )
         } else if audio::is_audio(from) {
             let (clip, n) = audio::decode(from, &data, &self.limits)?;
             notes.extend(n);
@@ -596,6 +611,14 @@ impl Engine {
             .filter(|(_, id)| *id != audio::M4A || oc_audio::m4a::sniff(data))
             .filter(|(_, id)| *id != audio::OPUS || oc_audio::opus::sniff(data))
             .filter(|(_, id)| *id != audio::OGG || !oc_audio::opus::sniff(data))
+            .filter(|(_, id)| {
+                let doc = oc_container::matroska::doc_type(data);
+                match *id {
+                    i if i == audio::MKA => doc.as_deref() == Some("matroska"),
+                    i if i == audio::WEBA => doc.as_deref() == Some("webm"),
+                    _ => true,
+                }
+            })
             .max_by_key(|(c, _)| *c)
             .map(|(_, id)| id)
             .or_else(|| oc_audio::mp3::sniff(data).then_some(audio::MP3))
@@ -1173,6 +1196,35 @@ mod tests {
             oc_audio::wav::read(&std::fs::read(&back2).unwrap(), &Limits::default()).unwrap();
         let (c, _) = oc_audio::wav::read(&wav, &Limits::default()).unwrap();
         assert_eq!(b.samples, c.samples);
+
+        // Matroska holds FLAC without loss; WebM takes Opus and tells the formats apart.
+        let mka = dir.join("out.mka");
+        let rep = run(&src, &mka, &[]).unwrap();
+        assert_eq!(rep.output_format, audio::MKA);
+        let back3 = dir.join("back3.wav");
+        let rep = run(&mka, &back3, &[]).unwrap();
+        assert_eq!(rep.input_format, audio::MKA);
+        let (d, _) =
+            oc_audio::wav::read(&std::fs::read(&back3).unwrap(), &Limits::default()).unwrap();
+        assert_eq!(d.samples, c.samples);
+        let weba = dir.join("out.weba");
+        run(&src, &weba, &[("bitrate", "64")]).unwrap();
+        // Opus moves between Ogg and WebM as packets: no new encoding, so the audio is identical.
+        let opus2 = dir.join("copy.opus");
+        let rep = run(&weba, &opus2, &[]).unwrap();
+        assert!(rep.route.contains("no re-encoding"), "{}", rep.route);
+        let (x, _) =
+            oc_audio::opus::read(&std::fs::read(&opus).unwrap(), &Limits::default()).unwrap();
+        let weba2 = dir.join("copy.weba");
+        run(&opus, &weba2, &[]).unwrap();
+        let (y, _) =
+            oc_audio::mka::read(&std::fs::read(&weba2).unwrap(), &Limits::default()).unwrap();
+        assert_eq!(x.samples, y.samples);
+        // Asking for a different rate means a real re-encode.
+        let rep = run(&opus, &dir.join("again.weba"), &[("bitrate", "32")]).unwrap();
+        assert!(!rep.route.contains("no re-encoding"));
+        let rep = run(&weba, &dir.join("back4.wav"), &[]).unwrap();
+        assert_eq!(rep.input_format, audio::WEBA);
         let _ = std::fs::remove_dir_all(dir);
     }
 

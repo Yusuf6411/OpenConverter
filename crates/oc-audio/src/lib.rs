@@ -14,10 +14,12 @@
 pub mod aiff;
 pub mod alac;
 pub mod caf;
+pub mod copy;
 pub mod dsp;
 pub mod flac;
 pub mod id3;
 pub mod m4a;
+pub mod mka;
 pub mod mp3;
 pub mod ogg;
 pub mod opus;

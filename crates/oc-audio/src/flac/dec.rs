@@ -485,6 +485,25 @@ pub fn decode_stream(
     Ok(out)
 }
 
+/// Split a run of frames into `(offset, length, samples per channel)`, for muxing into another
+/// container. Stops at the first frame that does not decode.
+pub fn split_frames(data: &[u8], info: &StreamInfo) -> Vec<(usize, usize, usize)> {
+    let mut v = Vec::new();
+    let mut pos = 0;
+    let mut scratch = Vec::new();
+    while pos + 6 < data.len() {
+        scratch.clear();
+        match decode_frame(&data[pos..], info, &mut scratch) {
+            Ok((n, block)) => {
+                v.push((pos, n, block));
+                pos += n;
+            }
+            Err(_) => break,
+        }
+    }
+    v
+}
+
 pub fn read(data: &[u8], limits: &Limits) -> Result<(Audio, Notes)> {
     if !sniff(data) {
         return Err(Error::new(ErrorCode::UnsupportedFormat, "not a FLAC file"));

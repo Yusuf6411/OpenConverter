@@ -3,7 +3,7 @@
 //! Like images, every audio format connects to a hub (`audio-ir`), so a conversion is always
 //! "decode X, process, encode Y".
 use oc_audio::dsp::{self, Dither, Quality};
-use oc_audio::{aiff, caf, flac, m4a, mp3, opus, vorbis, wav, Audio, Samples};
+use oc_audio::{aiff, caf, flac, m4a, mka, mp3, opus, vorbis, wav, Audio, Samples};
 use oc_core::options::{OptionKind, OptionSchema, OptionSpec, Options};
 use oc_core::planner::{Edge, EdgeKind, Registry};
 use oc_core::{
@@ -19,9 +19,11 @@ pub const OGG: FormatId = FormatId("ogg");
 pub const MP3: FormatId = FormatId("mp3");
 pub const M4A: FormatId = FormatId("m4a");
 pub const OPUS: FormatId = FormatId("opus");
+pub const MKA: FormatId = FormatId("mka");
+pub const WEBA: FormatId = FormatId("weba");
 pub const AUDIO_IR: FormatId = FormatId("audio-ir");
 
-pub const FORMATS: [FormatId; 8] = [WAV, AIFF, CAF, FLAC, OGG, MP3, M4A, OPUS];
+pub const FORMATS: [FormatId; 10] = [WAV, AIFF, CAF, FLAC, OGG, MP3, M4A, OPUS, MKA, WEBA];
 
 pub fn is_audio(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -127,7 +129,7 @@ fn caps(id: FormatId) -> Caps {
             float: true,
         },
         // A lossy codec takes whatever the processing chain produced.
-        i if i == OGG || i == MP3 || i == OPUS => Caps {
+        i if i == OGG || i == MP3 || i == OPUS || i == WEBA => Caps {
             ints: &[16, 24, 32],
             float: true,
         },
@@ -140,6 +142,165 @@ fn caps(id: FormatId) -> Caps {
             float: false,
         },
     }
+}
+
+fn opus_specs() -> Vec<OptionSpec> {
+    vec![
+                OptionSpec {
+                    key: "bitrate",
+                    label: "Bit rate (kbit/s)",
+                    help: "Target rate for the whole file, 6 to 510; 0 picks 64 for mono, 96 for stereo and 48 per channel beyond",
+                    i18n_key: "opt.opus.bitrate",
+                    kind: OptionKind::Int { min: 0, max: 510, default: 0 },
+                },
+                OptionSpec {
+                    key: "rate_mode",
+                    label: "Rate control",
+                    help: "cbr keeps every packet the same size, vbr follows the signal, cvbr is vbr with a small reservoir",
+                    i18n_key: "opt.opus.rate_mode",
+                    kind: OptionKind::Enum { choices: vec!["cbr", "vbr", "cvbr"], default: "vbr" },
+                },
+                OptionSpec {
+                    key: "frame_ms",
+                    label: "Frame duration (ms)",
+                    help: "Shorter frames lower the delay and cost efficiency",
+                    i18n_key: "opt.opus.frame_ms",
+                    kind: OptionKind::Enum { choices: vec!["2.5", "5", "10", "20"], default: "20" },
+                },
+            ]
+}
+
+fn flac_specs() -> Vec<OptionSpec> {
+    vec![OptionSpec {
+        key: "level",
+        label: "FLAC compression level",
+        help: "0 is fastest, 8 searches hardest; every level is lossless",
+        i18n_key: "opt.flac.level",
+        kind: OptionKind::Int {
+            min: 0,
+            max: 8,
+            default: 5,
+        },
+    }]
+}
+
+fn mka_specs(webm: bool) -> Vec<OptionSpec> {
+    let mut v = vec![
+        depth_option(vec!["keep", "8", "12", "16", "20", "24", "32"]),
+        OptionSpec {
+            key: "codec",
+            label: "Codec",
+            help: if webm {
+                "auto keeps the source codec when it fits (no re-encoding) and otherwise uses opus; WebM holds opus or vorbis only"
+            } else {
+                "auto keeps the source codec when it fits (no re-encoding) and otherwise uses flac; pcm and flac are lossless, opus and vorbis lossy"
+            },
+            i18n_key: "opt.mka.codec",
+            kind: OptionKind::Enum {
+                choices: if webm {
+                    vec!["opus", "vorbis"]
+                } else {
+                    vec!["flac", "opus", "vorbis", "pcm"]
+                },
+                default: if webm { "opus" } else { "flac" },
+            },
+        },
+        float(
+            "quality",
+            "Vorbis quality",
+            "-1 is smallest, 10 is best; used when the codec is vorbis",
+            "opt.vorbis.quality",
+            -1.0,
+            10.0,
+            4.0,
+        ),
+    ];
+    v.extend(opus_specs());
+    if !webm {
+        v.extend(flac_specs());
+    }
+    v
+}
+
+/// The codec an MKA or WebM output will use.
+fn mka_codec(fmt: FormatId, opts: &Options) -> mka::Codec {
+    opts.text("codec")
+        .and_then(mka::Codec::from_name) // "auto" parses to none: the container's default
+        .unwrap_or(if fmt == WEBA {
+            mka::Codec::Opus
+        } else {
+            mka::Codec::Flac
+        })
+}
+
+/// Move the compressed audio to the target container as it is, when that is possible and the
+/// options ask for nothing that would change the sound.
+pub fn try_copy(
+    from: FormatId,
+    to: FormatId,
+    data: &[u8],
+    opts: &Options,
+    limits: &Limits,
+    notes: &mut Notes,
+) -> Result<Option<Vec<u8>>> {
+    use oc_audio::copy::{Container, Kind};
+    let container = |f: FormatId| match f {
+        f if f == OPUS => Some(Container::OggOpus),
+        f if f == OGG => Some(Container::OggVorbis),
+        f if f == FLAC => Some(Container::FlacFile),
+        f if f == MKA => Some(Container::Matroska),
+        f if f == WEBA => Some(Container::WebM),
+        _ => None,
+    };
+    let (Some(src), Some(dst)) = (container(from), container(to)) else {
+        return Ok(None);
+    };
+    if from == to {
+        return Ok(None);
+    }
+    let get = |k: &str| opts.float(k).unwrap_or(0.0);
+    let untouched = [
+        "trim_start",
+        "trim_end",
+        "trim_silence",
+        "fade_in",
+        "fade_out",
+        "normalize",
+    ]
+    .iter()
+    .all(|k| get(k) == 0.0)
+        && opts.int("sample_rate").unwrap_or(0) == 0
+        && opts.int("channels").unwrap_or(0) == 0
+        && opts.bool("replaygain") != Some(true)
+        && opts.text("bit_depth").unwrap_or("keep") == "keep";
+    if !untouched {
+        return Ok(None);
+    }
+    let tuned = opts.int("bitrate").unwrap_or(0) != 0
+        || opts.text("rate_mode").unwrap_or("vbr") != "vbr"
+        || opts.text("frame_ms").unwrap_or("20") != "20"
+        || (opts.float("quality").unwrap_or(4.0) - 4.0).abs() > f64::EPSILON;
+    let only = match opts.text("codec").unwrap_or("auto") {
+        "opus" => Some(Kind::Opus),
+        "vorbis" => Some(Kind::Vorbis),
+        "flac" => Some(Kind::Flac),
+        "auto" => None,
+        _ => return Ok(None),
+    };
+    // Tuned encoder settings ask for a lossy re-encode; only a FLAC source never needs one.
+    if tuned && from != FLAC {
+        return Ok(None);
+    }
+    oc_audio::copy::copy(data, src, dst, only, limits, notes)
+}
+
+/// True when the writer lowers quality by itself, so any depth or float input will do.
+fn lossy(fmt: FormatId, opts: &Options) -> bool {
+    fmt == OGG
+        || fmt == MP3
+        || fmt == OPUS
+        || ((fmt == MKA || fmt == WEBA)
+            && matches!(mka_codec(fmt, opts), mka::Codec::Opus | mka::Codec::Vorbis))
 }
 
 type Row = (
@@ -380,30 +541,34 @@ pub fn register(registry: &mut Registry) {
                 magic: b"OggS",
                 confidence: 60,
             }],
-            schema(vec![
-                OptionSpec {
-                    key: "bitrate",
-                    label: "Bit rate (kbit/s)",
-                    help: "Target rate for the whole file, 6 to 510; 0 picks 64 for mono, 96 for stereo and 48 per channel beyond",
-                    i18n_key: "opt.opus.bitrate",
-                    kind: OptionKind::Int { min: 0, max: 510, default: 0 },
-                },
-                OptionSpec {
-                    key: "rate_mode",
-                    label: "Rate control",
-                    help: "cbr keeps every packet the same size, vbr follows the signal, cvbr is vbr with a small reservoir",
-                    i18n_key: "opt.opus.rate_mode",
-                    kind: OptionKind::Enum { choices: vec!["cbr", "vbr", "cvbr"], default: "vbr" },
-                },
-                OptionSpec {
-                    key: "frame_ms",
-                    label: "Frame duration (ms)",
-                    help: "Shorter frames lower the delay and cost efficiency",
-                    i18n_key: "opt.opus.frame_ms",
-                    kind: OptionKind::Enum { choices: vec!["2.5", "5", "10", "20"], default: "20" },
-                },
-            ]),
+            schema(opus_specs()),
             "RFC 6716 (CELT), RFC 7845 Ogg encapsulation",
+        ),
+        (
+            MKA,
+            "Matroska Audio",
+            &["mka"],
+            &["audio/x-matroska"],
+            vec![Sniffer {
+                offset: 0,
+                magic: &[0x1A, 0x45, 0xDF, 0xA3],
+                confidence: 50,
+            }],
+            schema(mka_specs(false)),
+            "RFC 8794 (EBML), RFC 9559 (Matroska)",
+        ),
+        (
+            WEBA,
+            "WebM Audio",
+            &["weba", "webm"],
+            &["audio/webm"],
+            vec![Sniffer {
+                offset: 0,
+                magic: &[0x1A, 0x45, 0xDF, 0xA3],
+                confidence: 50,
+            }],
+            schema(mka_specs(true)),
+            "WebM container (Matroska subset), Opus or Vorbis",
         ),
     ];
     for (id, name, extensions, mime, sniffers, writer_options, spec) in rows {
@@ -456,6 +621,7 @@ pub fn decode(fmt: FormatId, data: &[u8], limits: &Limits) -> Result<(Audio, Not
         f if f == MP3 => mp3::read(data, limits),
         f if f == M4A => m4a::read(data, limits),
         f if f == OPUS => opus::read(data, limits),
+        f if f == MKA || f == WEBA => mka::read(data, limits),
         _ => Err(Error::new(
             ErrorCode::UnsupportedFormat,
             "no audio decoder for this format",
@@ -572,6 +738,21 @@ fn fit_depth(
             ints: &[16, 20, 24, 32],
             float: false,
         }
+    } else if fmt == MKA || fmt == WEBA {
+        match mka_codec(fmt, opts) {
+            mka::Codec::Flac => Caps {
+                ints: &[8, 12, 16, 20, 24, 32],
+                float: false,
+            },
+            mka::Codec::Pcm => Caps {
+                ints: &[8, 16, 24, 32],
+                float: true,
+            },
+            _ => Caps {
+                ints: &[16, 24, 32],
+                float: true,
+            },
+        }
     } else {
         caps(fmt)
     };
@@ -584,7 +765,7 @@ fn fit_depth(
     };
     let target: Option<u8> = match want {
         "keep" => {
-            if (src_float || fmt == OGG || fmt == MP3 || fmt == OPUS) && cap.float {
+            if (src_float || lossy(fmt, opts)) && cap.float {
                 None
             } else if src_float {
                 Some(
@@ -708,6 +889,31 @@ pub fn encode(
                 ..opus::Options::default()
             };
             opus::write(&a, &o, &mut notes)?
+        }
+        f if f == MKA || f == WEBA => {
+            let o = mka::Options {
+                codec: Some(mka_codec(f, opts)),
+                webm: f == WEBA,
+                opus: opus::Options {
+                    bitrate: (opts.int("bitrate").unwrap_or(0).max(0) as u32) * 1000,
+                    mode: opus::RateMode::from_name(opts.text("rate_mode").unwrap_or("vbr"))
+                        .unwrap_or(opus::RateMode::Vbr),
+                    frame_ms: opts
+                        .text("frame_ms")
+                        .and_then(|t| t.parse().ok())
+                        .unwrap_or(20.0),
+                    ..opus::Options::default()
+                },
+                flac: flac::Options {
+                    level: opts.int("level").unwrap_or(5) as u8,
+                    ..flac::Options::default()
+                },
+                vorbis: vorbis::Options {
+                    quality: opts.float("quality").unwrap_or(4.0) as f32,
+                    ..vorbis::Options::default()
+                },
+            };
+            mka::write(&a, &o, &mut notes)?
         }
         f if f == FLAC => {
             let o = flac::Options {
