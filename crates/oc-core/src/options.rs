@@ -71,6 +71,11 @@ pub struct OptionSchema {
 pub struct Options(BTreeMap<&'static str, OptionValue>);
 
 impl Options {
+    /// Sets a value the schema declares, for engines that fill in a missing option.
+    pub fn set(&mut self, key: &'static str, value: OptionValue) {
+        self.0.insert(key, value);
+    }
+
     pub fn get(&self, key: &str) -> Option<&OptionValue> {
         self.0.get(key)
     }

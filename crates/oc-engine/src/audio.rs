@@ -944,7 +944,7 @@ pub fn source_depth(a: &Audio) -> (Option<u8>, bool) {
     }
 }
 
-fn json_escape(s: &str) -> String {
+pub(crate) fn json_escape(s: &str) -> String {
     let mut o = String::with_capacity(s.len() + 2);
     o.push('"');
     for c in s.chars() {
@@ -962,7 +962,7 @@ fn json_escape(s: &str) -> String {
     o
 }
 
-fn num(v: f64) -> String {
+pub(crate) fn num(v: f64) -> String {
     if v.is_finite() {
         format!("{v:.4}")
     } else {

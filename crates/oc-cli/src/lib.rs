@@ -581,6 +581,17 @@ fn worker_inspect(engine: &Engine, args: &[String]) -> ExitCode {
                 Err(e) => fail(&e),
             }
         }
+        "video" => {
+            // __worker video <path> <format> [thumbnails]
+            let thumbs = args.get(3).and_then(|r| r.parse().ok()).unwrap_or(12);
+            match engine.video_analysis(from, &data, thumbs) {
+                Ok(json) => {
+                    println!("{json}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(&e),
+            }
+        }
         "wavprev" => {
             // __worker wavprev <path> <format> <out.wav> [seconds]
             let Some(out) = args.get(3) else {
@@ -664,7 +675,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
         Some("__worker")
             if matches!(
                 args.get(1).map(String::as_str),
-                Some("probe" | "thumb" | "table" | "audio" | "wavprev")
+                Some("probe" | "thumb" | "table" | "audio" | "wavprev" | "video")
             ) =>
         {
             worker_inspect(&engine, args.get(1..).unwrap_or(&[]))

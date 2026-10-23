@@ -20,6 +20,25 @@ export const AUDIO_PRESETS = [
     options: { sample_rate: 44100, bit_depth: "16" } },
 ];
 
+// Built-in presets for video conversions; the encoder in this build is VP8 (WebM, MP4, MKV)
+// or Motion JPEG, so the presets trade size against compatibility with those.
+export const VIDEO_PRESETS = [
+  { id: "web", name: "Web video (WebM VP8, balanced)", target: "webm",
+    options: { quality: 80, effort: 4 } },
+  { id: "web-small", name: "Small web video (WebM, 480 px wide, 500 kbps)", target: "webm",
+    options: { width: 480, bitrate_kbps: 500, effort: 5 } },
+  { id: "phone", name: "Phone sharing (MP4 VP8, 720 px wide, 1000 kbps)", target: "mp4",
+    options: { width: 720, bitrate_kbps: 1000 } },
+  { id: "editing", name: "Editing copy (MKV Motion JPEG, high quality)", target: "mkv",
+    options: { video_codec: "mjpeg", quality: 95 } },
+  { id: "gif", name: "Animated GIF (12 fps, 480 px wide)", target: "gif",
+    options: { fps: 12, width: 480 } },
+  { id: "frames", name: "Pictures (ZIP of numbered PNG frames, 5 fps)", target: "frames.zip",
+    options: { fps: 5 } },
+  { id: "copy", name: "Change container only (MKV, no re-encoding)", target: "mkv",
+    options: { video_codec: "copy", audio_codec: "copy" } },
+];
+
 // The options of `preset` that `schema` (a target's write_options) accepts.
 export function presetOptions(preset, schema) {
   const out = {};

@@ -200,6 +200,136 @@ impl Engine {
             .map(|(id, _)| id)
     }
 
+    fn video_to_frames(
+        &self,
+        from: FormatId,
+        data: &[u8],
+        opts: &Options,
+        progress: &dyn Progress,
+        notes: &mut Notes,
+    ) -> Result<Vec<u8>> {
+        let anim = video::video_frames(from, data, opts, &self.limits, progress, notes, false)?;
+        let jpeg = opts.text("frame_format") == Some("jpeg");
+        let schema = self
+            .registry
+            .format(image::JPEG)
+            .map(|f| f.writer_options.clone())
+            .unwrap_or_default();
+        let jpeg_opts = schema.validate(&[(
+            "quality".to_string(),
+            OptionValue::Int(opts.int("quality").unwrap_or(90)),
+        )])?;
+        let mut entries = Vec::with_capacity(anim.frames.len());
+        for (i, f) in anim.frames.iter().enumerate() {
+            progress.check_cancelled()?;
+            let (bytes, ext) = if jpeg {
+                (
+                    image::encode(image::JPEG, &f.image, &jpeg_opts, "jpg")?.0,
+                    "jpg",
+                )
+            } else {
+                (
+                    image::encode(image::PNG, &f.image, &Options::default(), "png")?.0,
+                    "png",
+                )
+            };
+            entries.push(oc_archive::Entry::file(
+                format!("frame_{:06}.{ext}", i + 1),
+                bytes,
+            ));
+        }
+        notes.push(Note::new(
+            Severity::Info,
+            "frames_untimed",
+            "an image sequence stores no frame times; set fps to space the frames evenly",
+        ));
+        let cx = oc_archive::Context {
+            limits: &self.limits,
+            progress,
+            password: None,
+            list_only: false,
+        };
+        oc_archive::format::write(
+            oc_archive::Format::Zip,
+            &oc_archive::Archive {
+                entries,
+                comment: None,
+            },
+            &oc_archive::format::WriteOpts::default(),
+            &cx,
+        )
+    }
+
+    fn frames_to_video(
+        &self,
+        data: &[u8],
+        to: FormatId,
+        opts: &Options,
+        progress: &dyn Progress,
+        notes: &mut Notes,
+    ) -> Result<Vec<u8>> {
+        let cx = oc_archive::Context {
+            limits: &self.limits,
+            progress,
+            password: None,
+            list_only: false,
+        };
+        let archive = oc_archive::format::read(oc_archive::Format::Zip, data, &cx, None)?;
+        let mut files: Vec<&oc_archive::Entry> = archive
+            .entries
+            .iter()
+            .filter(|e| e.kind == oc_archive::EntryKind::File)
+            .collect();
+        files.sort_by(|a, b| natural_cmp(&a.path, &b.path));
+        let mut anim: Option<oc_image::anim::Animation> = None;
+        for e in files {
+            progress.check_cancelled()?;
+            let Some(fmt) = self
+                .registry
+                .detect(&e.data)
+                .filter(|f| image::is_image(*f))
+            else {
+                notes.push(Note::new(
+                    Severity::Warning,
+                    "frame_skipped",
+                    format!("{} is not a picture this build can read", e.path),
+                ));
+                continue;
+            };
+            let (img, _) = image::decode(fmt, &e.data, &self.limits, progress)?;
+            let a =
+                anim.get_or_insert_with(|| oc_image::anim::Animation::new(img.width, img.height));
+            if (img.width, img.height) != (a.width, a.height) {
+                return Err(Error::new(
+                    ErrorCode::UnsupportedVariant,
+                    format!(
+                        "{} is {}x{}, but the first picture is {}x{}",
+                        e.path, img.width, img.height, a.width, a.height
+                    ),
+                ));
+            }
+            a.frames.push(oc_image::anim::Frame {
+                image: img,
+                delay_ms: 40,
+            });
+        }
+        let anim =
+            anim.ok_or_else(|| Error::new(ErrorCode::CorruptFile, "the ZIP holds no pictures"))?;
+        let fps = opts.float("fps").filter(|f| *f > 0.0).unwrap_or_else(|| {
+            // No rate given: 25 frames a second, as ffmpeg assumes for a numbered sequence.
+            notes.push(Note::new(
+                Severity::Info,
+                "frames_default_rate",
+                "no frame rate was set, so the pictures play at 25 frames a second",
+            ));
+            25.0
+        });
+        let mut o = opts.clone();
+        o.set("fps", OptionValue::Float(fps));
+        let per = (1e9 / fps).round() as i64;
+        video::animation_to_video_at(&anim, to, &o, &self.limits, progress, notes, Some(per))
+    }
+
     fn registry_formats(&self) -> impl Iterator<Item = &FormatDescriptor> {
         std::iter::once(TXT)
             .chain(image::FORMATS)
@@ -207,6 +337,7 @@ impl Engine {
             .chain(subtitle::FORMATS)
             .chain(table::FORMATS)
             .chain(video::FORMATS)
+            .chain([video::FRAMES])
             .chain(archive::FORMATS)
             .filter_map(|id| self.registry.format(id))
     }
@@ -373,6 +504,23 @@ impl Engine {
                 progress,
                 &mut notes,
             )?
+        } else if video::is_video(from) && to == video::FRAMES {
+            let out = self.video_to_frames(from, data, &opts, progress, &mut notes)?;
+            let name = |id| self.registry.format(id).map_or("video", |f| f.name);
+            (
+                out,
+                format!(
+                    "Decode {} frames -> Write numbered pictures in a ZIP",
+                    name(from)
+                ),
+            )
+        } else if from == video::FRAMES && video::is_video(to) {
+            let out = self.frames_to_video(data, to, &opts, progress, &mut notes)?;
+            let name = |id| self.registry.format(id).map_or("video", |f| f.name);
+            (
+                out,
+                format!("Read numbered pictures -> Encode video in {}", name(to)),
+            )
         } else if let Some(out) = if audio::is_audio(from) && audio::is_audio(to) {
             audio::try_copy(from, to, data, &opts, &self.limits, &mut notes)?
         } else {
@@ -762,6 +910,17 @@ impl Engine {
         audio::preview_wav(from, data, secs, &self.limits)
     }
 
+    /// Streams and a thumbnail strip of a video file, as JSON.
+    pub fn video_analysis(&self, from: FormatId, data: &[u8], thumbs: usize) -> Result<String> {
+        if !video::is_video(from) {
+            return Err(Error::new(
+                ErrorCode::UnsupportedFormat,
+                "not a video format",
+            ));
+        }
+        video::analyse_json(from, data, &self.limits, thumbs, 160)
+    }
+
     /// A PNG preview of at most `max` pixels on a side.
     pub fn thumbnail(
         &self,
@@ -799,8 +958,13 @@ impl Engine {
             .filter(|(_, id)| {
                 let doc = oc_container::matroska::doc_type(data);
                 match *id {
-                    i if i == audio::MKA => doc.as_deref() == Some("matroska"),
-                    i if i == audio::WEBA => doc.as_deref() == Some("webm"),
+                    i if i == audio::MKA => {
+                        doc.as_deref() == Some("matroska")
+                            && !oc_container::matroska::has_video(data)
+                    }
+                    i if i == audio::WEBA => {
+                        doc.as_deref() == Some("webm") && !oc_container::matroska::has_video(data)
+                    }
                     _ => true,
                 }
             })
@@ -874,6 +1038,42 @@ pub fn convert_text(data: &[u8], opts: &Options) -> Result<(Vec<u8>, Notes)> {
     }
     out.extend_from_slice(&body);
     Ok((out, notes))
+}
+
+/// Orders names so that `frame2` comes before `frame10`.
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let (mut x, mut y) = (a.as_bytes(), b.as_bytes());
+    loop {
+        match (x.first(), y.first()) {
+            (None, None) => return Ordering::Equal,
+            (None, _) => return Ordering::Less,
+            (_, None) => return Ordering::Greater,
+            (Some(p), Some(q)) if p.is_ascii_digit() && q.is_ascii_digit() => {
+                let nx = x.iter().take_while(|c| c.is_ascii_digit()).count();
+                let ny = y.iter().take_while(|c| c.is_ascii_digit()).count();
+                let (dx, rest_x) = x.split_at(nx);
+                let (dy, rest_y) = y.split_at(ny);
+                // Leading zeros do not count: compare by length, then digit by digit.
+                let tx = dx.get(dx.iter().take_while(|c| **c == b'0').count().min(nx - 1)..);
+                let ty = dy.get(dy.iter().take_while(|c| **c == b'0').count().min(ny - 1)..);
+                let (tx, ty) = (tx.unwrap_or_default(), ty.unwrap_or_default());
+                let ord = tx.len().cmp(&ty.len()).then_with(|| tx.cmp(ty));
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+                x = rest_x;
+                y = rest_y;
+            }
+            (Some(p), Some(q)) => {
+                if p != q {
+                    return p.cmp(q);
+                }
+                x = x.get(1..).unwrap_or_default();
+                y = y.get(1..).unwrap_or_default();
+            }
+        }
+    }
 }
 
 #[cfg(test)]

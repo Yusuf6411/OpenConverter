@@ -357,6 +357,8 @@ pub struct Options {
     pub mov: bool,
     /// Put the index in front of the media data so playback can start before the download ends.
     pub faststart: bool,
+    /// Write fragments (`moof`/`mdat` pairs) after an empty `moov`, for streaming.
+    pub fragmented: bool,
 }
 
 /// Whether the muxer can describe `codec` in this flavour.
@@ -505,6 +507,7 @@ struct SampleOut {
     data: Vec<u8>,
 }
 
+#[derive(Clone)]
 struct TrackOut {
     handler: FourCc,
     ts: u32,
@@ -791,6 +794,10 @@ pub fn write(media: &Media, opts: &Options) -> Res<Vec<u8>> {
         tracks.push(t);
     }
 
+    if opts.fragmented {
+        return Ok(write_fragmented(media, &tracks, &samples, &order, opts));
+    }
+
     // 3. Chunks and the media data, in `order`.
     let mut mdat: Vec<u8> = Vec::new();
     let mut counts = vec![0u32; tracks.len()];
@@ -858,6 +865,27 @@ fn moov(
     wide: bool,
     opts: &Options,
 ) -> Vec<u8> {
+    let stripped: Vec<TrackOut> = if opts.fragmented {
+        tracks
+            .iter()
+            .map(|t| TrackOut {
+                sizes: Vec::new(),
+                durs: Vec::new(),
+                cts: Vec::new(),
+                keys: Vec::new(),
+                chunks: Vec::new(),
+                ..t.clone()
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let full = tracks;
+    let tracks = if opts.fragmented {
+        &stripped[..]
+    } else {
+        tracks
+    };
     const MS: u64 = 1000;
     let track_ms = |t: &TrackOut| -> u64 { ((t.shown_ns.max(0) + t.empty_ns) / 1_000_000) as u64 };
     let movie_ms = tracks.iter().map(track_ms).max().unwrap_or(0);
@@ -1033,6 +1061,18 @@ fn moov(
                 });
             });
         }
+        if opts.fragmented {
+            m.boxed(b"mvex", |x| {
+                x.full(b"mehd", 0, 0, |b| {
+                    b.u32(movie_ms.min(u64::from(u32::MAX)) as u32);
+                });
+                for n in 0..full.len() {
+                    x.full(b"trex", 0, 0, |b| {
+                        b.u32(n as u32 + 1).u32(1).u32(0).u32(0).u32(0);
+                    });
+                }
+            });
+        }
         if !media.title.is_empty() && !opts.mov {
             m.boxed(b"udta", |u| {
                 u.full(b"meta", 0, 0, |b| {
@@ -1051,4 +1091,118 @@ fn moov(
         }
     });
     w.buf
+}
+
+/// An empty `moov` followed by `moof`/`mdat` pairs cut at video key frames about every two
+/// seconds (or at any sample when there is no video).
+fn write_fragmented(
+    media: &Media,
+    tracks: &[TrackOut],
+    samples: &[SampleOut],
+    order: &[usize],
+    opts: &Options,
+) -> Vec<u8> {
+    let has_video = media.streams.iter().any(|s| s.kind == Kind::Video);
+    let mut frags: Vec<Vec<usize>> = Vec::new();
+    let mut start = 0i64;
+    for &i in order {
+        let s = &samples[i];
+        let cut = (!has_video || media.streams[s.stream].kind == Kind::Video && s.key)
+            && s.dts.saturating_sub(start) >= 2_000_000_000;
+        if cut || frags.is_empty() {
+            if frags.last().is_some_and(|f| f.is_empty()) {
+                frags.pop();
+            }
+            frags.push(Vec::new());
+            start = s.dts;
+        }
+        if let Some(f) = frags.last_mut() {
+            f.push(i);
+        }
+    }
+    let mut ftyp = BoxWriter::new();
+    ftyp.boxed(b"ftyp", |b| {
+        b.bytes(b"iso5")
+            .u32(0x200)
+            .bytes(b"iso5")
+            .bytes(b"iso6")
+            .bytes(b"mp41");
+    });
+    let mut out = ftyp.buf;
+    out.extend_from_slice(&moov(media, tracks, 0, false, opts));
+    let mut next = vec![0usize; tracks.len()];
+    let mut base = vec![0u64; tracks.len()];
+    for (seq, frag) in frags.iter().enumerate() {
+        // Samples of the fragment grouped by track; the table index of each is its running
+        // position in the track.
+        let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+        for &i in frag {
+            let t = samples[i].stream;
+            match groups.iter_mut().find(|g| g.0 == t) {
+                Some(g) => g.1.push(i),
+                None => groups.push((t, vec![i])),
+            }
+        }
+        // (track, first table index, count, base decode time)
+        let mut runs = Vec::new();
+        for (t, ids) in &groups {
+            runs.push((*t, next[*t], ids.len(), base[*t]));
+            base[*t] += tracks[*t].durs[next[*t]..next[*t] + ids.len()]
+                .iter()
+                .map(|d| u64::from(*d))
+                .sum::<u64>();
+            next[*t] += ids.len();
+        }
+        let build = |offsets: &[u32]| {
+            let mut w = BoxWriter::new();
+            w.boxed(b"moof", |m| {
+                m.full(b"mfhd", 0, 0, |b| {
+                    b.u32(seq as u32 + 1);
+                });
+                for (k, (t, first, count, bdt)) in runs.iter().enumerate() {
+                    let tr = &tracks[*t];
+                    let signed = tr.cts[*first..first + count].iter().any(|c| *c < 0);
+                    m.boxed(b"traf", |tf| {
+                        tf.full(b"tfhd", 0, 0x02_0000, |b| {
+                            b.u32(*t as u32 + 1);
+                        });
+                        tf.full(b"tfdt", 1, 0, |b| {
+                            b.u64(*bdt);
+                        });
+                        tf.full(b"trun", u8::from(signed), 0xF01, |b| {
+                            b.u32(*count as u32).u32(offsets[k]);
+                            for j in *first..first + count {
+                                let flags: u32 = if tr.keys[j] { 0x0200_0000 } else { 0x0101_0000 };
+                                b.u32(tr.durs[j])
+                                    .u32(tr.sizes[j])
+                                    .u32(flags)
+                                    .u32(tr.cts[j] as u32);
+                            }
+                        });
+                    });
+                }
+            });
+            w.buf
+        };
+        let size = build(&vec![0; runs.len()]).len() as u32;
+        let mut offsets = Vec::new();
+        let mut at = size + 8;
+        for g in &groups {
+            offsets.push(at);
+            at +=
+                g.1.iter()
+                    .map(|&i| samples[i].data.len() as u32)
+                    .sum::<u32>();
+        }
+        out.extend_from_slice(&build(&offsets));
+        let total: usize = frag.iter().map(|&i| samples[i].data.len()).sum();
+        out.extend_from_slice(&(total as u32 + 8).to_be_bytes());
+        out.extend_from_slice(b"mdat");
+        for (_, ids) in &groups {
+            for &i in ids {
+                out.extend_from_slice(&samples[i].data);
+            }
+        }
+    }
+    out
 }

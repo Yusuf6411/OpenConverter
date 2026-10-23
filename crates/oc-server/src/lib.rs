@@ -88,6 +88,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/files/{id}", get(api::file))
         .route("/api/files/{id}/preview", get(api::file_preview))
         .route("/api/files/{id}/table", get(api::table_preview))
+        .route("/api/files/{id}/video", get(api::file_video))
         .route("/api/files/{id}/audio", get(api::file_audio))
         .route("/api/files/{id}/audio.wav", get(api::file_audio_wav))
         .route("/api/outputs/{id}/audio", get(api::output_audio))

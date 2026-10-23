@@ -44,3 +44,8 @@ Consequences: Opus files from low-rate voice encoders do not decode here until S
 Context: converting Opus from Ogg to WebM, or FLAC to Matroska, by decode and encode would lose quality for no reason.
 Decision: `oc-audio::copy` moves packets between Ogg, Matroska/WebM and FLAC files when the codec fits the target and no option changes the sound (processing, bit depth, encoder settings). The route text says "no re-encoding". `codec=auto` is the default of the Matroska/WebM writers for that reason.
 Consequences: the copy path must carry tags, pictures, pre-skip and end trimming exactly; round trips are tested packet for packet.
+
+## ADR-0010: Encumbered streams may be moved between containers, never decoded or encoded
+Context: ADR-0006 keeps AAC, AC-3, H.264 and HEVC code out of the default build. People still need to change the container of such files (MP4 to Matroska, MPEG-TS to MP4), and that work touches no codec.
+Decision: the container crates carry these streams as opaque packets. Reading them needs only bit-stream plumbing that is not decoding: finding NAL and ADTS frame boundaries, building `avcC`/`hvcC` from the parameter sets, reading picture size from an SPS, and splitting AC-3 and MPEG audio frames by their headers. There is no transform, prediction or entropy code for any of them. Converting such a stream to another codec, or to pictures, fails with `codec_not_in_build` and says the stream can only be copied. The `encumbered` feature of §7.4 remains reserved for real codecs and is still off.
+Consequences: a stream copy keeps every packet byte for byte (checked against ffmpeg, which decodes the output to the same pictures and samples). No H.264 or AAC encoder or decoder exists in the repository.

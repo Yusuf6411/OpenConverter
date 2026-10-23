@@ -415,6 +415,22 @@ pub fn doc_type(data: &[u8]) -> Option<String> {
         .map(|c| text(c.body))
 }
 
+/// Whether the file declares a video track (read from the track headers only).
+pub fn has_video(data: &[u8]) -> bool {
+    elements(data)
+        .into_iter()
+        .filter(|e| e.id == id::SEGMENT)
+        .flat_map(|seg| elements(seg.body))
+        .filter(|e| e.id == id::TRACKS)
+        .flat_map(|t| elements(t.body))
+        .filter(|e| e.id == id::TRACK_ENTRY)
+        .any(|t| {
+            elements(t.body)
+                .into_iter()
+                .any(|c| c.id == id::TRACK_TYPE && uint(c.body) == 1)
+        })
+}
+
 fn parse_track(body: &[u8]) -> Result<Track> {
     let mut t = Track::new(0, TrackKind::Other(0), "");
     t.language = "eng".into();

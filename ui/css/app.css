@@ -336,3 +336,14 @@ dialog.wide { width: min(720px, calc(100vw - 24px)); }
 dl.stats { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 13px; }
 dl.stats dt { color: var(--text-2); }
 dl.stats dd { margin: 0; overflow-wrap: anywhere; }
+
+/* ---------- video inspector ---------- */
+.strip { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.thumb-btn { display: grid; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text-2); font-size: 11px; cursor: pointer; flex: 0 0 auto; }
+.thumb-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.thumb-btn img { display: block; max-width: 160px; height: auto; border-radius: 4px; }
+.trim { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.trim .opt input { width: 90px; }
+table.streams { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.streams th, table.streams td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+table.streams th { color: var(--text-2); font-weight: 600; }

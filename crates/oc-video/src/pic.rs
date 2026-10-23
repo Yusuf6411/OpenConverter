@@ -182,6 +182,63 @@ impl Picture {
         Ok(out)
     }
 
+    /// Fits the picture inside a `w`×`h` frame without distorting it: scaled to the largest
+    /// size that fits, centred, with black bars.
+    pub fn pad(&self, w: usize, h: usize) -> Self {
+        let (w, h) = (w.max(2) & !1, h.max(2) & !1);
+        if (w, h) == (self.w, self.h) {
+            return self.clone();
+        }
+        let k = (w as f64 / self.w as f64).min(h as f64 / self.h as f64);
+        let (iw, ih) = (
+            (((self.w as f64 * k).round() as usize).max(2) & !1).min(w),
+            (((self.h as f64 * k).round() as usize).max(2) & !1).min(h),
+        );
+        let inner = self.scale(iw, ih);
+        let (x0, y0) = (((w - iw) / 2) & !1, ((h - ih) / 2) & !1);
+        let mut out = Self::black(w, h);
+        for r in 0..ih {
+            out.y[(y0 + r) * w + x0..(y0 + r) * w + x0 + iw]
+                .copy_from_slice(&inner.y[r * iw..(r + 1) * iw]);
+        }
+        let (ocw, icw) = (out.cw(), inner.cw());
+        for r in 0..inner.ch() {
+            let dr = y0 / 2 + r;
+            if dr >= out.ch() {
+                break;
+            }
+            let n = icw.min(ocw.saturating_sub(x0 / 2));
+            out.u[dr * ocw + x0 / 2..dr * ocw + x0 / 2 + n]
+                .copy_from_slice(&inner.u[r * icw..r * icw + n]);
+            out.v[dr * ocw + x0 / 2..dr * ocw + x0 / 2 + n]
+                .copy_from_slice(&inner.v[r * icw..r * icw + n]);
+        }
+        out
+    }
+
+    /// Removes combing from interlaced frames: every odd line is replaced by the average of
+    /// the even lines around it (the second field is dropped).
+    pub fn deinterlace(&self) -> Self {
+        fn fix(p: &mut [u8], w: usize, h: usize) {
+            for r in (1..h).step_by(2) {
+                for c in 0..w {
+                    let above = u16::from(p[(r - 1) * w + c]);
+                    let below = if r + 1 < h {
+                        u16::from(p[(r + 1) * w + c])
+                    } else {
+                        above
+                    };
+                    p[r * w + c] = ((above + below).div_ceil(2)) as u8;
+                }
+            }
+        }
+        let mut out = self.clone();
+        fix(&mut out.y, self.w, self.h);
+        fix(&mut out.u, self.cw(), self.ch());
+        fix(&mut out.v, self.cw(), self.ch());
+        out
+    }
+
     pub fn scale(&self, w: usize, h: usize) -> Self {
         if w == self.w && h == self.h {
             return self.clone();

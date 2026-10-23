@@ -50,6 +50,7 @@ export const api = {
   archiveExtract: (fileId, paths, password) => request("POST", "/api/files/" + fileId + "/extract", { paths, ...(password ? { password } : {}) }),
   tablePreview: (fileId, sheet, rows) => request("GET", "/api/files/" + fileId + "/table?rows=" + rows + (sheet ? "&sheet=" + encodeURIComponent(sheet) : "")),
   audioInfo: (id, output, buckets) => request("GET", "/api/" + (output ? "outputs/" : "files/") + id + "/audio?buckets=" + buckets),
+  videoInfo: (id, thumbs) => request("GET", "/api/files/" + id + "/video?thumbs=" + thumbs),
   fileAudioWavUrl: (id) => "/api/files/" + id + "/audio.wav",
   outputAudioWavUrl: (id) => "/api/outputs/" + id + "/audio.wav",
   createArchive: (body) => request("POST", "/api/archives", body),

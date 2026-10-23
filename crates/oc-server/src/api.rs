@@ -1693,6 +1693,50 @@ async fn audio_wav(app: &Arc<App>, id: &str, output: bool) -> R<Response> {
         .into_response())
 }
 
+#[derive(serde::Deserialize)]
+pub struct VideoQuery {
+    thumbs: Option<usize>,
+}
+
+/// `GET /api/files/{id}/video?thumbs=`: streams of a video file and a strip of thumbnails.
+pub async fn file_video(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    Query(q): Query<VideoQuery>,
+) -> R<Response> {
+    if !valid_id(&id) {
+        return Err(ApiErr::not_found());
+    }
+    let (path, format) = lock(&app.files)
+        .get(&id)
+        .map(|f| (f.path.clone(), f.format))
+        .ok_or_else(ApiErr::not_found)?;
+    let is_video = app
+        .engine
+        .format_by_name(format)
+        .and_then(|f| app.engine.registry().format(f))
+        .is_some_and(|d| d.category == Category::Video);
+    if !is_video {
+        return Err(ApiErr::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "unsupported_format",
+            "Only video files have streams to show.",
+        ));
+    }
+    let out = audio_worker(
+        &app,
+        vec![
+            "__worker".to_string(),
+            "video".to_string(),
+            path.display().to_string(),
+            format.to_string(),
+            q.thumbs.unwrap_or(12).min(24).to_string(),
+        ],
+    )
+    .await?;
+    Ok(([(header::CONTENT_TYPE, "application/json")], out).into_response())
+}
+
 /// `GET /api/files/{id}/audio?buckets=`: waveform peaks, loudness and tags as JSON.
 pub async fn file_audio(
     State(app): State<Arc<App>>,

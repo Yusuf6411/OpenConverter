@@ -218,5 +218,115 @@ import re
 m = re.search(r"average:([0-9.]+)", r.stderr)
 check("vp8 encode keeps quality", bool(m) and float(m.group(1)) > 30, r.stderr[-300:])
 
+# MPEG transport streams: demux ffmpeg's files, mux ours, and compare what decodes.
+def same_decode(a, b, name, video=True, audio=True):
+    if video:
+        ha, hb = frame_hashes(a), frame_hashes(b)
+        check(f"{name} video frames", ha == hb and len(ha) > 0, f"{len(ha)} vs {len(hb)}")
+    if audio:
+        check(f"{name} audio", md5_of(a, "-vn") == md5_of(b, "-vn") and md5_of(a, "-vn") != "", (md5_of(a, "-vn"), md5_of(b, "-vn")))
+
+
+def strict_ok(path):
+    r = sh("ffmpeg", "-v", "warning", "-err_detect", "explode", "-i", path, "-f", "null", "-")
+    return r.returncode == 0 and not r.stderr.strip()
+
+
+ff("-i", T("h264.mp4"), "-c", "copy", T("h264.ts"))
+ff("-i", T("hevc.mp4"), "-c", "copy", T("hevc.ts"))
+ff("-f", "lavfi", "-i", "sine=frequency=300:duration=2", "-c:a", "ac3", T("ac3.ts"))
+ff("-f", "lavfi", "-i", "sine=frequency=300:duration=2", "-c:a", "libmp3lame", T("mp3.ts"))
+ff("-i", T("h264.mp4"), "-c", "copy", "-f", "mpegts", "-mpegts_m2ts_mode", "1", T("h264.m2ts"))
+for name, kinds in (("h264", (1, 1)), ("hevc", (1, 0)), ("ac3", (0, 1)), ("mp3", (0, 1))):
+    src = T(name + ".ts")
+    if oc(src, T(name + "_t.mkv")):
+        same_decode(src, T(name + "_t.mkv"), f"ts {name} -> mkv", bool(kinds[0]), bool(kinds[1]))
+        if oc(T(name + "_t.mkv"), T(name + "_o.ts")):
+            same_decode(src, T(name + "_o.ts"), f"mkv -> ts {name}", bool(kinds[0]), bool(kinds[1]))
+            check(f"{name} ts passes ffmpeg's strict decode", strict_ok(T(name + "_o.ts")))
+            check(f"{name} ts is whole 188-byte packets", os.path.getsize(T(name + "_o.ts")) % 188 == 0)
+if oc(T("h264.m2ts"), T("h264_m.mp4")):
+    same_decode(T("h264.ts"), T("h264_m.mp4"), "m2ts -> mp4")
+if oc(T("h264.mp4"), T("h264_d.ts")):
+    same_decode(T("h264.ts"), T("h264_d.ts"), "mp4 -> ts")
+    check("ts keeps the frame rate", probe(T("h264_d.ts"))["streams"][0]["r_frame_rate"] == "30000/1001", probe(T("h264_d.ts"))["streams"][0])
+r = sh(OC, "convert", T("vp8.webm"), T("vp8.ts"), "--overwrite")
+check("ts refuses a codec it cannot carry", r.returncode != 0, r.stderr)
+
+# FLV (ffmpeg writes classic AVC and enhanced HEVC tags) and program streams (built here).
+ff("-i", T("h264.mp4"), "-c", "copy", T("h264.flv"))
+ff("-i", T("hevc.mp4"), "-c", "copy", T("hevc.flv"))
+ff("-f", "lavfi", "-i", "sine=frequency=300:duration=2", "-c:a", "libmp3lame", T("mp3.flv"))
+for name, kinds in (("h264", (1, 0)), ("hevc", (1, 0)), ("mp3", (0, 1))):
+    if oc(T(name + ".flv"), T(name + "_f.mkv")):
+        same_decode(T(name + ".flv"), T(name + "_f.mkv"), f"flv {name} -> mkv", bool(kinds[0]), bool(kinds[1]))
+r = sh(OC, "convert", T("h264.mp4"), T("x.flv"), "--overwrite")
+check("flv is read only", r.returncode != 0, r.stderr)
+
+
+def make_ps(es_path, times, out_path, chunk=2000):
+    """MPEG-2 program stream of one video stream: 2048-byte packs, PES cut every `chunk`
+    bytes regardless of picture boundaries, and a stamp only on the PES where a picture starts."""
+    import struct
+    data = open(es_path, "rb").read()
+    starts, i = [], 0
+    while True:
+        i = data.find(b"\x00\x00\x01\x09", i)
+        if i < 0:
+            break
+        starts.append(i)
+        i += 4
+    stamp = lambda m, t: bytes([(m << 4) | (((t >> 30) & 7) << 1) | 1, (t >> 22) & 255, (((t >> 15) & 127) << 1) | 1, (t >> 7) & 255, ((t & 127) << 1) | 1])
+    out = bytearray()
+    for off in range(0, len(data), chunk):
+        part = data[off:off + chunk]
+        first = next((k for k, s in enumerate(starts) if off <= s < off + chunk), None)
+        out += b"\x00\x00\x01\xba\x44\x00\x04\x00\x04\x01\x01\x89\xc3\xf8"
+        if first is not None:
+            pts, dts = times[first]
+            hdr = bytes([0x80, 0xC0 if dts != pts else 0x80, 10 if dts != pts else 5]) + stamp(3 if dts != pts else 2, pts) + (stamp(1, dts) if dts != pts else b"")
+        else:
+            hdr = bytes([0x80, 0x00, 0])
+        out += b"\x00\x00\x01\xe0" + struct.pack(">H", len(hdr) + len(part)) + hdr + part
+    open(out_path, "wb").write(out + b"\x00\x00\x01\xb9")
+
+
+ff("-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25:duration=2", "-c:v", "libx264", "-bf", "0", "-g", "25", "-pix_fmt", "yuv420p", T("nb.mp4"))
+ff("-i", T("nb.mp4"), "-c", "copy", "-bsf:v", "h264_mp4toannexb,h264_metadata=aud=insert", "-f", "h264", T("nb.h264"))
+pk = json.loads(sh("ffprobe", "-v", "error", "-show_entries", "packet=pts,dts", "-of", "json", T("nb.mp4")).stdout)["packets"]
+make_ps(T("nb.h264"), [(int(p["pts"]) * 90000 // 12800 + 9000, int(p["dts"]) * 90000 // 12800 + 9000) for p in pk], T("nb.mpg"))
+if oc(T("nb.mpg"), T("nb_p.mkv")):
+    same_decode(T("nb.mp4"), T("nb_p.mkv"), "program stream -> mkv", True, False)
+    check("program stream frame rate", probe(T("nb_p.mkv"))["streams"][0]["r_frame_rate"] == "25/1", probe(T("nb_p.mkv"))["streams"][0])
+
+# Fragmented MP4: moof/mdat pairs after an empty moov, decoding the same.
+# (Opus in MP4 keeps its end padding in either form, so VP9/Opus is compared with the plain MP4.)
+for src, kinds in (("h264.mp4", (1, 1)), ("vp9.mp4", (1, 1)), ("hevc.mp4", (1, 0))):
+    out = T("frag_" + src.split(".")[0] + ".mp4")
+    if oc(T(src), out, "--set", "fragmented=true"):
+        raw = open(out, "rb").read()
+        check(f"{src} fragmented has moof boxes", raw.count(b"moof") >= 1 and b"mvex" in raw)
+        same_decode(T(src), out, f"fragmented {src}", bool(kinds[0]), bool(kinds[1]))
+        check(f"{src} fragmented passes strict decode", strict_ok(out))
+
+# Image sequences: a ZIP of numbered pictures, both ways.
+import zipfile
+ff("-f", "lavfi", "-i", "testsrc2=size=160x120:rate=20:duration=2", "-c:v", "libvpx", "-b:v", "300k", T("seq_src.webm"))
+if oc(T("seq_src.webm"), T("seq.frames.zip"), "--set", "fps=10"):
+    names = zipfile.ZipFile(T("seq.frames.zip")).namelist()
+    check("sequence has 20 numbered frames", names == [f"frame_{i:06d}.png" for i in range(1, 21)], names[:3])
+    zipfile.ZipFile(T("seq.frames.zip")).extract("frame_000001.png", T("seq_dir"))
+    ff("-i", T("seq_src.webm"), "-frames:v", "1", T("seq_ref.png"))
+    r = sh("ffmpeg", "-v", "info", "-i", T("seq_dir/frame_000001.png"), "-i", T("seq_ref.png"), "-lavfi", "psnr", "-f", "null", "-")
+    m = re.search(r"average:([0-9.inf]+)", r.stderr)
+    check("sequence picture matches ffmpeg's", bool(m) and (m.group(1) == "inf" or float(m.group(1)) > 35), r.stderr[-200:])
+    for ext in ("mp4", "webm", "mkv"):
+        if oc(T("seq.frames.zip"), T("seq_back." + ext), "--set", "fps=10"):
+            n = sh("ffprobe", "-v", "error", "-count_frames", "-show_entries", "stream=nb_read_frames,r_frame_rate", "-of", "csv=p=0", T("seq_back." + ext)).stdout.strip()
+            check(f"sequence -> {ext}: 20 frames at 10 fps", n in ("10/1,20", "20,10/1") or n.replace(",", " ").split() == ["10/1", "20"], n)
+    if oc(T("seq_src.webm"), T("seq_j.frames.zip"), "--set", "frame_format=jpeg", "--set", "quality=85"):
+        check("jpeg frames", all(n.endswith(".jpg") for n in zipfile.ZipFile(T("seq_j.frames.zip")).namelist()))
+        oc(T("seq_j.frames.zip"), T("seq_j.mp4"), "--set", "fps=20")
+
 print(f"{total - fails}/{total} checks passed")
 sys.exit(1 if fails else 0)

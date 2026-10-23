@@ -4,4 +4,6 @@ One page per format family: what is read and written, how it was checked, and wh
 
 Subtitles: [subtitles](subtitles.md).
 
+Video: [containers](containers.md), [VP8](vp8.md).
+
 Audio: [wav-aiff-caf](wav-aiff-caf.md), [flac](flac.md), [mp3](mp3.md), [vorbis](vorbis.md), [opus](opus.md), [alac](alac.md), [matroska](matroska.md), [tags](tags.md).

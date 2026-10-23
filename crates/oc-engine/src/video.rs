@@ -12,7 +12,7 @@ use oc_core::{
 use oc_image::anim::Animation;
 use oc_video::frames;
 use oc_video::pic::Picture;
-use oc_video::{avi, codec, mkv, mp4, subs, y4m, Kind, Media, Packet};
+use oc_video::{avi, codec, flv, mkv, mp4, ps, subs, ts, y4m, Kind, Media, Packet};
 
 pub const MP4: FormatId = FormatId("mp4");
 pub const MOV: FormatId = FormatId("mov");
@@ -20,9 +20,60 @@ pub const MKV: FormatId = FormatId("mkv");
 pub const WEBM: FormatId = FormatId("webm");
 pub const AVI: FormatId = FormatId("avi");
 pub const Y4M: FormatId = FormatId("y4m");
+pub const TS: FormatId = FormatId("ts");
+pub const FLV: FormatId = FormatId("flv");
+pub const PS: FormatId = FormatId("mpeg-ps");
+/// A ZIP of numbered picture files, one per video frame.
+pub const FRAMES: FormatId = FormatId("frames.zip");
 pub const MEDIA_IR: FormatId = FormatId("media-ir");
 
-pub const FORMATS: [FormatId; 6] = [MP4, MOV, MKV, WEBM, AVI, Y4M];
+pub const FORMATS: [FormatId; 9] = [MP4, MOV, MKV, WEBM, AVI, Y4M, TS, FLV, PS];
+
+fn frames_options() -> OptionSchema {
+    let keep = [
+        "fps",
+        "width",
+        "height",
+        "rotate",
+        "flip",
+        "crop_w",
+        "crop_h",
+        "crop_x",
+        "crop_y",
+        "start_ms",
+        "duration_ms",
+    ];
+    let mut specs: Vec<OptionSpec> = options_for(MKV)
+        .specs
+        .into_iter()
+        .filter(|s| keep.contains(&s.key))
+        .collect();
+    specs.push(spec(
+        "frame_format",
+        "opt.video.frame_format",
+        "Picture format",
+        "File type of each frame",
+        OptionKind::Enum {
+            choices: vec!["png", "jpeg"],
+            default: "png",
+        },
+    ));
+    specs.push(int(
+        "quality",
+        "opt.video.frame_quality",
+        "JPEG quality",
+        "1 (smallest) to 100 (best) for JPEG frames",
+        1,
+        100,
+        90,
+    ));
+    OptionSchema { specs }
+}
+
+/// Containers this build only reads.
+fn read_only(id: FormatId) -> bool {
+    id == FLV || id == PS
+}
 
 pub fn is_video(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -65,6 +116,7 @@ fn int(
 fn options_for(id: FormatId) -> OptionSchema {
     let video_codecs = match id {
         i if i == Y4M => vec!["auto"],
+        i if i == TS => vec!["auto", "copy"],
         i if i == AVI => vec!["auto", "copy", "mjpeg", "vp8"],
         _ => vec!["auto", "copy", "vp8", "mjpeg"],
     };
@@ -91,6 +143,21 @@ fn options_for(id: FormatId) -> OptionSchema {
             OptionKind::Float { min: 0.0, max: 240.0, default: 0.0 },
         ),
         spec(
+            "pad",
+            "opt.video.pad",
+            "Keep proportions (add bars)",
+            "With both width and height set, fit the picture inside that size and fill the rest with black instead of stretching it",
+            OptionKind::Bool { default: false },
+        ),
+        spec(
+            "deinterlace",
+            "opt.video.deinterlace",
+            "Remove interlacing",
+            "Replace every second line by the average of its neighbours, which removes combing from interlaced footage",
+            OptionKind::Bool { default: false },
+        ),
+        int("audio_offset_ms", "opt.video.audio_offset_ms", "Audio delay (ms)", "Move the sound later (positive) or earlier (negative) against the picture to fix lip-sync", -10_000, 10_000, 0),
+        spec(
             "rotate",
             "opt.video.rotate",
             "Rotate",
@@ -116,9 +183,16 @@ fn options_for(id: FormatId) -> OptionSchema {
             "Audio codec",
             "auto copies the audio unchanged when the container can hold it, and otherwise converts it",
             OptionKind::Enum {
-                choices: if id == Y4M { vec!["auto"] } else { vec!["auto", "copy", "opus", "vorbis", "flac", "pcm"] },
+                choices: if id == Y4M { vec!["auto"] } else if id == TS { vec!["auto", "copy"] } else { vec!["auto", "copy", "opus", "vorbis", "flac", "pcm"] },
                 default: "auto",
             },
+        ),
+        spec(
+            "streams",
+            "opt.video.streams",
+            "Streams to keep",
+            "Comma-separated stream numbers from the streams list; empty keeps every stream",
+            OptionKind::Text { default: String::new() },
         ),
         spec(
             "drop_audio",
@@ -135,6 +209,15 @@ fn options_for(id: FormatId) -> OptionSchema {
             OptionKind::Bool { default: false },
         ),
     ];
+    if id == MP4 {
+        specs.push(spec(
+            "fragmented",
+            "opt.video.fragmented",
+            "Fragmented MP4",
+            "Write the media as short fragments after an empty index, the form streaming players and live tools expect",
+            OptionKind::Bool { default: false },
+        ));
+    }
     if id == MP4 || id == MOV {
         specs.push(spec(
             "faststart",
@@ -200,6 +283,30 @@ pub fn register(registry: &mut Registry) {
             "YUV4MPEG2 (8-bit 4:2:0, 4:2:2, 4:4:4 and mono)",
         ),
         (
+            TS,
+            "MPEG transport stream",
+            &["ts", "m2ts", "mts"],
+            &["video/mp2t"],
+            vec![],
+            "ISO/IEC 13818-1 (stream copy; H.264/H.265, AAC, MP3, AC-3)",
+        ),
+        (
+            FLV,
+            "Flash Video",
+            &["flv"],
+            &["video/x-flv"],
+            vec![Sniffer { offset: 0, magic: b"FLV\x01", confidence: 100 }],
+            "Adobe FLV (read only; H.264/H.265, AAC, MP3, PCM)",
+        ),
+        (
+            PS,
+            "MPEG program stream",
+            &["mpg", "mpeg", "vob", "ps"],
+            &["video/mpeg"],
+            vec![Sniffer { offset: 0, magic: &[0, 0, 1, 0xBA], confidence: 90 }],
+            "ISO/IEC 13818-1 program stream (read only; H.264/H.265, AAC, MP3, AC-3)",
+        ),
+        (
             WEBM,
             "WebM",
             &["webm"],
@@ -208,6 +315,41 @@ pub fn register(registry: &mut Registry) {
             "WebM profile of Matroska (VP8/VP9/AV1, Opus/Vorbis)",
         ),
     ];
+    registry.add_format(FormatDescriptor {
+        id: FRAMES,
+        name: "Image sequence",
+        category: Category::Video,
+        extensions: &["frames.zip"],
+        mime: &["application/zip"],
+        sniffers: Vec::new(),
+        capabilities: Capabilities {
+            read: true,
+            write: true,
+            ..Capabilities::default()
+        },
+        writer_options: frames_options(),
+        ownership: Ownership::Own,
+        spec: "ZIP of numbered PNG or JPEG pictures, one per frame",
+    });
+    for id in FORMATS {
+        for (a, b, text) in [
+            (id, FRAMES, "Decode the video into numbered pictures"),
+            (FRAMES, id, "Encode the pictures as video"),
+        ] {
+            if read_only(b) {
+                continue;
+            }
+            registry.add_edge(Edge {
+                from: a,
+                to: b,
+                kind: EdgeKind::Transcode,
+                loss: 2,
+                ownership: Ownership::Own,
+                time: 6,
+                description: text,
+            });
+        }
+    }
     for (id, name, extensions, mime, sniffers, spec) in rows {
         registry.add_format(FormatDescriptor {
             id,
@@ -218,7 +360,7 @@ pub fn register(registry: &mut Registry) {
             sniffers,
             capabilities: Capabilities {
                 read: true,
-                write: true,
+                write: !read_only(id),
                 ..Capabilities::default()
             },
             writer_options: options_for(id),
@@ -261,6 +403,9 @@ pub fn register(registry: &mut Registry) {
                 (id, img, "Decode the video into frames"),
                 (img, id, "Encode the frames as video"),
             ] {
+                if read_only(b) {
+                    continue;
+                }
                 registry.add_edge(Edge {
                     from: a,
                     to: b,
@@ -271,6 +416,9 @@ pub fn register(registry: &mut Registry) {
                     description: text,
                 });
             }
+        }
+        if read_only(id) {
+            continue;
         }
         registry.add_edge(Edge {
             from: MEDIA_IR,
@@ -299,6 +447,15 @@ pub fn detect(data: &[u8]) -> Option<FormatId> {
             MP4
         });
     }
+    if flv::sniff(data) {
+        return Some(FLV);
+    }
+    if ps::sniff(data) {
+        return Some(PS);
+    }
+    if ts::sniff(data) {
+        return Some(TS);
+    }
     match oc_container::matroska::doc_type(data).as_deref() {
         Some("webm") => Some(WEBM),
         Some(_) => Some(MKV),
@@ -311,6 +468,12 @@ pub fn read(from: FormatId, data: &[u8], limits: &Limits) -> Result<Media> {
         y4m::read(data, limits)
     } else if from == AVI {
         avi::read(data, limits)
+    } else if from == TS {
+        ts::read(data, limits)
+    } else if from == FLV {
+        flv::read(data, limits)
+    } else if from == PS {
+        ps::read(data, limits)
     } else if from == MP4 || from == MOV {
         mp4::read(data, limits)
     } else {
@@ -324,6 +487,8 @@ pub fn container_allows(to: FormatId, c: &str) -> bool {
         c == codec::RAW
     } else if to == AVI {
         avi::allows(c)
+    } else if to == TS {
+        ts::allows(c)
     } else if to == WEBM {
         mkv::webm_allows(c)
     } else if to == MKV {
@@ -338,12 +503,15 @@ pub fn write(to: FormatId, media: &Media, opts: &Options) -> Result<Vec<u8>> {
         y4m::write(media)
     } else if to == AVI {
         avi::write(media)
+    } else if to == TS {
+        ts::write(media)
     } else if to == MP4 || to == MOV {
         mp4::write(
             media,
             &mp4::Options {
                 mov: to == MOV,
                 faststart: opts.bool("faststart").unwrap_or(true),
+                fragmented: opts.bool("fragmented").unwrap_or(false),
             },
         )
     } else {
@@ -358,6 +526,8 @@ struct Edit {
     crop: Option<(usize, usize, usize, usize)>,
     rotate: u16,
     flip: String,
+    deinterlace: bool,
+    pad: bool,
     fps: Option<(u32, u32)>,
     start_ns: i64,
     duration_ns: Option<i64>,
@@ -378,6 +548,8 @@ impl Edit {
                 .and_then(|r| r.parse().ok())
                 .unwrap_or(0),
             flip: opts.text("flip").unwrap_or("none").to_string(),
+            deinterlace: opts.bool("deinterlace").unwrap_or(false),
+            pad: opts.bool("pad").unwrap_or(false),
             fps: (fps > 0.0).then(|| {
                 let milli = (fps * 1000.0).round() as u32;
                 let g = gcd(milli, 1000);
@@ -399,6 +571,8 @@ impl Edit {
         e.crop = None;
         e.rotate = 0;
         e.flip = "none".into();
+        e.deinterlace = false;
+        e.pad = false;
         e
     }
 
@@ -409,6 +583,7 @@ impl Edit {
             || self.crop.is_some()
             || self.rotate != 0
             || self.flip != "none"
+            || self.deinterlace
             || self.fps.is_some()
     }
 
@@ -504,7 +679,15 @@ pub fn retarget(
             .with_detail(s.codec.clone()),
         );
     };
+    let keep: Option<Vec<usize>> = opts
+        .text("streams")
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(|t| t.split(',').filter_map(|n| n.trim().parse().ok()).collect());
     for (si, s) in media.streams.iter().enumerate() {
+        if keep.as_ref().is_some_and(|k| !k.contains(&si)) {
+            continue;
+        }
         let drop = (s.kind == Kind::Audio && opts.bool("drop_audio") == Some(true))
             || (s.kind == Kind::Subtitle && opts.bool("drop_subtitles") == Some(true));
         if drop {
@@ -629,7 +812,9 @@ pub fn retarget(
                             out.packets.push(p);
                         }
                     }
-                    Err(e) if want == "auto" && e.code == ErrorCode::CodecNotInBuild => {
+                    Err(e)
+                        if want == "auto" && (e.code == ErrorCode::CodecNotInBuild || to == TS) =>
+                    {
                         drop_note(notes, s, e.message.clone());
                     }
                     Err(e) => return Err(e),
@@ -702,6 +887,23 @@ pub fn retarget(
             "none of the streams in this file can be stored in the chosen container",
         ));
     }
+    let shift = opts.int("audio_offset_ms").unwrap_or(0) * 1_000_000;
+    if shift != 0 {
+        let kinds: Vec<Kind> = out.streams.iter().map(|s| s.kind).collect();
+        out.packets.retain_mut(|p| {
+            if kinds.get(p.stream) == Some(&Kind::Video) {
+                return true;
+            }
+            p.pts += shift;
+            p.dts += shift;
+            if p.pts + p.duration <= 0 {
+                return false;
+            }
+            p.pts = p.pts.max(0);
+            p.dts = p.dts.max(0);
+            true
+        });
+    }
     out.sort_by_dts();
     Ok(out)
 }
@@ -727,6 +929,9 @@ fn run_pipeline(
 ) -> Result<()> {
     let process = |pic: Picture| -> Result<Picture> {
         let mut pic = pic;
+        if ed.deinterlace {
+            pic = pic.deinterlace();
+        }
         if let Some((x, y, w, h)) = ed.crop {
             pic = pic.crop(
                 x,
@@ -755,7 +960,11 @@ fn run_pipeline(
                 ),
                 (w, h) => (w, h),
             };
-            pic = pic.scale(w.max(2) & !1, h.max(2) & !1);
+            pic = if ed.pad && ed.width > 0 && ed.height > 0 {
+                pic.pad(w, h)
+            } else {
+                pic.scale(w.max(2) & !1, h.max(2) & !1)
+            };
         }
         Ok(pic)
     };
@@ -772,13 +981,13 @@ fn run_pipeline(
         }
         match per {
             // A frame owns the grid points nearest to it, so millisecond-rounded timestamps
-            // do not duplicate or drop frames.
+            // do not duplicate or drop frames; a tie goes to the earlier frame.
             Some(per) => loop {
                 let t = ed.start_ns + next_k * per;
-                if t >= hi - per / 2 {
+                if t > hi - per / 2 {
                     break Ok(());
                 }
-                if t >= lo - per / 2 {
+                if t > lo - per / 2 {
                     sink(next_k * per, per, pic)?;
                 }
                 next_k += 1;
@@ -1132,6 +1341,20 @@ pub fn video_to_animation(
     progress: &dyn Progress,
     notes: &mut Notes,
 ) -> Result<Animation> {
+    video_frames(from, data, opts, limits, progress, notes, true)
+}
+
+/// The decoded frames of the first video stream; with `timing_only` false the picture edits
+/// (resize, crop, rotate, mirror) are applied as well.
+pub fn video_frames(
+    from: FormatId,
+    data: &[u8],
+    opts: &Options,
+    limits: &Limits,
+    progress: &dyn Progress,
+    notes: &mut Notes,
+    timing_only: bool,
+) -> Result<Animation> {
     let media = read(from, data, limits)?;
     let si = media
         .streams
@@ -1147,7 +1370,11 @@ pub fn video_to_animation(
         .streams
         .get(si)
         .ok_or_else(|| Error::new(ErrorCode::InternalError, "stream index out of range"))?;
-    let ed = Edit::timing_only(opts);
+    let ed = if timing_only {
+        Edit::timing_only(opts)
+    } else {
+        Edit::from(opts)
+    };
     let mut dec = frames::Decoder::new(src, limits)?;
     let per = ed.fps.map(|f| oc_video::frame_ns(f).max(1));
     let total = media.packets_of(si).count() as u64;
@@ -1220,6 +1447,21 @@ pub fn animation_to_video(
     progress: &dyn Progress,
     notes: &mut Notes,
 ) -> Result<Vec<u8>> {
+    animation_to_video_at(anim, to, opts, limits, progress, notes, None)
+}
+
+/// Like [`animation_to_video`], with every frame shown for `frame_ns` when that is given
+/// (an image sequence has no times of its own).
+#[allow(clippy::too_many_arguments)]
+pub fn animation_to_video_at(
+    anim: &Animation,
+    to: FormatId,
+    opts: &Options,
+    limits: &Limits,
+    progress: &dyn Progress,
+    notes: &mut Notes,
+    frame_ns: Option<i64>,
+) -> Result<Vec<u8>> {
     let ed = Edit::from(opts);
     let target = match opts.text("video_codec").unwrap_or("auto") {
         "auto" | "copy" => default_video_codec(to),
@@ -1257,7 +1499,7 @@ pub fn animation_to_video(
         let dur = if single {
             ed.duration_ns.unwrap_or(1_000_000_000)
         } else {
-            d * 1_000_000
+            frame_ns.unwrap_or(d * 1_000_000)
         };
         let rgba = anim_over_black(&f.image);
         let pts = t;
@@ -1354,4 +1596,195 @@ fn anim_over_black(img: &oc_image::Image) -> Vec<u8> {
         px[3] = 255;
     }
     d
+}
+
+/// Whether this build can decode a video stream's pictures.
+fn can_decode_video(c: &str) -> bool {
+    matches!(c, codec::MJPEG | codec::RAW | codec::VP8)
+}
+
+fn can_decode_audio(c: &str) -> bool {
+    codec::is_pcm(c) || matches!(c, codec::OPUS | codec::VORBIS | codec::FLAC | codec::MP3)
+}
+
+/// The streams of a video file and a strip of thumbnails, as JSON for the interface.
+/// `thumbs` is how many pictures to cut from the first video stream (0 for none).
+pub fn analyse_json(
+    from: FormatId,
+    data: &[u8],
+    limits: &Limits,
+    thumbs: usize,
+    thumb_px: u32,
+) -> Result<String> {
+    use crate::audio::{json_escape, num};
+    let media = read(from, data, limits)?;
+    let duration = media.duration() as f64 / 1e9;
+    let mut streams = Vec::new();
+    for (si, s) in media.streams.iter().enumerate() {
+        let (mut n, mut bytes) = (0usize, 0usize);
+        for p in media.packets_of(si) {
+            n += 1;
+            bytes += p.data.len();
+        }
+        let span = {
+            let (lo, hi) = media
+                .packets_of(si)
+                .fold((i64::MAX, i64::MIN), |(lo, hi), p| {
+                    (lo.min(p.pts), hi.max(p.pts + p.duration))
+                });
+            (hi - lo).max(0) as f64 / 1e9
+        };
+        let kbps = if span > 0.0 {
+            num(bytes as f64 * 8.0 / span / 1000.0)
+        } else {
+            "null".into()
+        };
+        let decodable = match s.kind {
+            Kind::Video => can_decode_video(&s.codec),
+            Kind::Audio => can_decode_audio(&s.codec),
+            Kind::Subtitle => subs::is_text(&s.codec),
+        };
+        let copy_to: Vec<String> = FORMATS
+            .iter()
+            .filter(|f| !read_only(**f) && container_allows(**f, &s.codec))
+            .map(|f| json_escape(f.0))
+            .collect();
+        let fps = s.fps.map_or("null".to_string(), |(a, b)| {
+            num(f64::from(a) / f64::from(b.max(1)))
+        });
+        streams.push(format!(
+            "{{\"index\":{si},\"kind\":\"{}\",\"codec\":{},\"width\":{},\"height\":{},\"fps\":{fps},\
+\"sample_rate\":{},\"channels\":{},\"packets\":{n},\"bytes\":{bytes},\"bitrate_kbps\":{kbps},\
+\"language\":{},\"name\":{},\"default\":{},\"forced\":{},\"rotation\":{},\"decodable\":{decodable},\
+\"copy_to\":[{}]}}",
+            kind_name(s.kind),
+            json_escape(&s.codec),
+            s.width,
+            s.height,
+            s.sample_rate,
+            s.channels,
+            json_escape(&s.language),
+            json_escape(&s.name),
+            s.default,
+            s.forced,
+            s.rotation,
+            copy_to.join(",")
+        ));
+    }
+    let total_bytes: usize = media.packets.iter().map(|p| p.data.len()).sum();
+    let bitrate = if duration > 0.0 {
+        num(total_bytes as f64 * 8.0 / duration / 1000.0)
+    } else {
+        "null".into()
+    };
+    let strip = if thumbs > 0 {
+        thumbnail_strip(&media, limits, thumbs.min(24), thumb_px.clamp(32, 512))
+    } else {
+        Err("no thumbnails were asked for".to_string())
+    };
+    let strip_json = match strip {
+        Ok((si, w, h, items)) => format!(
+            "{{\"stream\":{si},\"width\":{w},\"height\":{h},\"items\":[{}]}}",
+            items.join(",")
+        ),
+        Err(why) => format!("{{\"items\":[],\"note\":{}}}", json_escape(&why)),
+    };
+    Ok(format!(
+        "{{\"container\":{},\"duration\":{},\"bitrate_kbps\":{bitrate},\"title\":{},\"streams\":[{}],\"thumbs\":{strip_json}}}",
+        json_escape(&media.source),
+        num(duration),
+        json_escape(&media.title),
+        streams.join(",")
+    ))
+}
+
+type Strip = (usize, usize, usize, Vec<String>);
+
+fn thumbnail_strip(
+    media: &Media,
+    limits: &Limits,
+    count: usize,
+    max_px: u32,
+) -> std::result::Result<Strip, String> {
+    let si = media
+        .streams
+        .iter()
+        .position(|s| s.kind == Kind::Video)
+        .ok_or_else(|| "this file has no video track".to_string())?;
+    let s = media
+        .streams
+        .get(si)
+        .ok_or_else(|| "stream index out of range".to_string())?;
+    if !can_decode_video(&s.codec) {
+        return Err(format!(
+            "{} pictures cannot be decoded in this build, so no thumbnails are shown",
+            s.codec
+        ));
+    }
+    let packets: Vec<&Packet> = media.packets_of(si).collect();
+    let (lo, hi) = packets.iter().fold((i64::MAX, i64::MIN), |(lo, hi), p| {
+        (lo.min(p.pts), hi.max(p.pts))
+    });
+    if packets.is_empty() {
+        return Err("the video track holds no pictures".into());
+    }
+    let mut items = Vec::new();
+    let (mut tw, mut th) = (0, 0);
+    for i in 0..count {
+        let t = lo + ((hi - lo) as f64 * (i as f64 + 0.5) / count as f64) as i64;
+        let Some((j, _)) = packets
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, p)| (p.pts - t).abs())
+        else {
+            continue;
+        };
+        let mut k = j;
+        while k > 0 && !packets.get(k).is_some_and(|p| p.key) && j - k < 300 {
+            k -= 1;
+        }
+        let mut dec = frames::Decoder::new(s, limits).map_err(|e| e.message)?;
+        let mut pic = None;
+        for p in packets.get(k..=j).unwrap_or_default() {
+            if let Ok(Some(x)) = dec.decode(&p.data) {
+                pic = Some(x);
+            }
+        }
+        let Some(pic) = pic else {
+            continue;
+        };
+        let scale = f64::from(max_px) / pic.w.max(pic.h).max(1) as f64;
+        let (w, h) = if scale < 1.0 {
+            (
+                ((pic.w as f64 * scale).round() as usize).max(1),
+                ((pic.h as f64 * scale).round() as usize).max(1),
+            )
+        } else {
+            (pic.w, pic.h)
+        };
+        let small = if (w, h) == (pic.w, pic.h) {
+            pic
+        } else {
+            pic.scale(w, h)
+        };
+        let img = oc_image::Image::new(
+            w as u32,
+            h as u32,
+            oc_image::Layout::Rgba,
+            oc_image::Depth::Eight,
+            small.to_rgba(),
+        )
+        .map_err(|e| e.message)?;
+        let png = oc_image::png::encode(&img, &oc_image::png::EncodeOptions::default()).0;
+        (tw, th) = (w, h);
+        items.push(format!(
+            "{{\"t\":{},\"png\":\"data:image/png;base64,{}\"}}",
+            crate::audio::num((packets.get(j).map_or(lo, |p| p.pts) - lo) as f64 / 1e9),
+            oc_audio::tags::base64_encode(&png)
+        ));
+    }
+    if items.is_empty() {
+        return Err("no picture could be decoded".into());
+    }
+    Ok((si, tw, th, items))
 }

@@ -64,6 +64,17 @@ Format notes are in [formats/](formats/README.md). Interop checks (ffmpeg, libop
 - Fuzz targets: `flac`, `vorbis`, `mp3`, `alac`, `opus`, `matroska`, `audio_wav_aiff`, run 45 s each locally; the nightly workflow lists them.
 - Not run on a real machine: the desktop shell's audio playback (WebKitGTK codec support varies; the WAV preview exists for that reason).
 
+## Phase 5a: Video containers, remux, subtitles, VP8
+Format notes: [formats/containers.md](formats/containers.md), [formats/vp8.md](formats/vp8.md). Interop checks against ffmpeg and ffprobe (test-time oracles) are in `tools/video_interop.py`.
+- [~] M5.1 Media IR (`oc-video`): MP4/MOV, Matroska/WebM, AVI, Y4M, MPEG-TS/M2TS (read and write), MPEG-PS and FLV (read). Not done: Ogg video (needs Theora), AVI OpenDML, MPEG-1/2 video.
+- [~] M5.2 Remux planner: stream copy where the target holds the codec, including avcC and hvcC to Annex B and back; encumbered streams are copied only (ADR-0010). Fragmented MP4 output.
+- [~] M5.3 Subtitles: SRT, ASS, WebVTT, tx3g, rewritten between containers. Not done: bitmap subtitles.
+- [~] M5.4 MJPEG and raw video, animated GIF/WebP/APNG as video, image sequences as `.frames.zip`. Not done: loose numbered files on disk.
+- [~] M5.5 VP8: full decoder (bit-exact with libvpx) and encoder with rate control and threading. See formats/vp8.md for what is not done.
+- [~] M5.6 Processing: scale, crop, rotate, mirror, frame rate, trim, pad, deinterlace, audio delay, stream selection. Not done: colour matrices, pixel formats other than 8-bit 4:2:0.
+- [~] M5.7 Video UI: streams inspector with keep/drop per stream, thumbnail strip, trim marks, seven presets; `/api/files/{id}/video`. Driven in headless Chromium. Not done: playback of the original, drag handles on the strip.
+- Fuzz target `video`, run 2 minutes locally.
+
 ## Known gaps
 - 1.x Python test cases are not ported yet; they are available at tag v1.0.0. Port them as each Rust codec lands (M1.x, M2.x).
 - cargo-deny passes locally (advisories, bans, licenses, sources); the Tauri tree is allowed through named wrappers (ADR-0005).
@@ -73,6 +84,6 @@ Format notes are in [formats/](formats/README.md). Interop checks (ffmpeg, libop
 - [~] M2.8 [COMPATIBILITY.md](COMPATIBILITY.md) is generated from the registry by `tools/gen_compat.py`; screenshots of the UI are in `docs/screenshots/`.
 
 ## Next step
-Phase 5a: containers, remux, subtitles, VP8.
+Phase 5b: VP9 and AV1.
 
 - **Tables (CSV, TSV, JSON, XLSX, ODS)**: `oc-sheet` reads and writes RFC 4180 delimited text (delimiter detection, lenient quotes, BOM, ragged rows padded), flat JSON tables (own strict parser) and, since Phase 3, XLSX and ODS workbooks (M3.5). Engine options mirror 1.x. Fuzz targets `table` and `workbook`.
