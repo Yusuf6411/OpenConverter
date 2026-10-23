@@ -18,7 +18,10 @@ pub fn read(text: &str, opts: &ReadOptions) -> Document {
 fn front_matter(text: &str) -> (Meta, &str) {
     let mut meta = Meta::default();
     let t = text.strip_prefix('\u{FEFF}').unwrap_or(text);
-    let Some(rest) = t.strip_prefix("---\n").or_else(|| t.strip_prefix("---\r\n")) else {
+    let Some(rest) = t
+        .strip_prefix("---\n")
+        .or_else(|| t.strip_prefix("---\r\n"))
+    else {
         return (meta, text);
     };
     let mut pos = 0;
@@ -30,18 +33,24 @@ fn front_matter(text: &str) -> (Meta, &str) {
         }
         pos += line.len();
     }
-    let Some(end) = found else { return (meta, text) };
+    let Some(end) = found else {
+        return (meta, text);
+    };
     let head = &rest[..pos];
     // only plain `key: value` lines count as front matter
     if head.trim().is_empty()
-        || !head
-            .lines()
-        .all(|l| l.trim().is_empty() || l.trim_start().starts_with('#') || (l.contains(": ") || l.ends_with(':')))
+        || !head.lines().all(|l| {
+            l.trim().is_empty()
+                || l.trim_start().starts_with('#')
+                || (l.contains(": ") || l.ends_with(':'))
+        })
     {
         return (meta, text);
     }
     for l in head.lines() {
-        let Some((k, v)) = l.split_once(':') else { continue };
+        let Some((k, v)) = l.split_once(':') else {
+            continue;
+        };
         let v = v.trim().trim_matches(|c| c == '"' || c == '\'').to_string();
         if v.is_empty() {
             continue;

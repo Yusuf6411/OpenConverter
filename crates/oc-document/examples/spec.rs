@@ -1,6 +1,6 @@
 //! Run CommonMark / GFM spec examples: `spec <spec.txt> [gfm] [-v] [number...]`.
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::print_stdout)]
-use oc_document::{html_out, markdown};
+use oc_document::{html_out, markdown, md_out};
 
 fn norm(s: &str) -> String {
     // whitespace between block tags does not matter
@@ -33,7 +33,11 @@ fn main() {
             section = l.trim_start_matches('#').trim().to_string();
         }
         if l.starts_with("```````````````````````````````` example") {
-            let ext = l.contains("table") || l.contains("strikethrough") || l.contains("autolink") || l.contains("tasklist") || l.contains("disabled");
+            let ext = l.contains("table")
+                || l.contains("strikethrough")
+                || l.contains("autolink")
+                || l.contains("tasklist")
+                || l.contains("disabled");
             let mut md = String::new();
             let mut html = String::new();
             let mut in_html = false;
@@ -58,6 +62,13 @@ fn main() {
             let md = md.replace('→', "\t");
             let html = html.replace('→', "\t");
             let doc = markdown::read(&md, &markdown::ReadOptions { github: gfm || ext });
+            let doc = if args.iter().any(|a| a == "rt") {
+                let id = |s: &str| s.to_string();
+                let m = md_out::write(&doc, &md_out::WriteOptions { image_src: &id });
+                markdown::read(&m, &markdown::ReadOptions { github: gfm || ext })
+            } else {
+                doc
+            };
             let got = html_out::fragment(&doc);
             let e = by_section.entry(section.clone()).or_default();
             if norm(&got) == norm(&html) {

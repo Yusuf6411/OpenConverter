@@ -2233,6 +2233,7 @@ dependencies = [
  "oc-compress",
  "oc-container",
  "oc-core",
+ "oc-document",
  "oc-font",
  "oc-image",
  "oc-pdf",

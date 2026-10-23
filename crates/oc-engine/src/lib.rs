@@ -8,6 +8,7 @@
 pub mod archive;
 pub mod audio;
 mod burn;
+pub mod document;
 pub mod font;
 pub mod image;
 pub mod isolated;
@@ -147,6 +148,7 @@ impl Engine {
         font::register(&mut registry);
         svg::register(&mut registry);
         pdf::register(&mut registry);
+        document::register(&mut registry);
         let packable: Vec<FormatId> = std::iter::once(TXT)
             .chain(image::FORMATS)
             .chain(audio::FORMATS)
@@ -156,6 +158,7 @@ impl Engine {
             .chain(font::FORMATS)
             .chain(svg::FORMATS)
             .chain(pdf::FORMATS)
+            .chain(document::FORMATS)
             .collect();
         archive::register(&mut registry, &packable);
         Self {
@@ -387,6 +390,7 @@ impl Engine {
             .chain(font::FORMATS)
             .chain(svg::FORMATS)
             .chain(pdf::FORMATS)
+            .chain(document::FORMATS)
             .chain(archive::FORMATS)
             .filter_map(|id| self.registry.format(id))
     }
@@ -727,6 +731,34 @@ impl Engine {
             let (out, n) = image::encode(to, &img, &opts, &out_ext)?;
             notes.extend(n);
             (out, "Draw SVG -> Encode picture".to_string())
+        } else if document::is_document(from) && document::is_document(to) {
+            let out = document::convert(from, to, data, &opts, &self.limits, &mut notes)?;
+            (out, "Read document -> Write document".to_string())
+        } else if from == TXT && document::is_document(to) {
+            let (utf8, n) = convert_text(data, &opts)?;
+            notes.extend(n);
+            let text = String::from_utf8_lossy(&utf8).into_owned();
+            let out = document::from_text(to, &text, &opts, &self.limits, &mut notes)?;
+            (
+                out,
+                "Decode text -> Make paragraphs -> Write document".to_string(),
+            )
+        } else if document::is_document(from) && to == TXT {
+            let text = document::to_text(from, data, &opts, &self.limits, &mut notes)?;
+            let mut o = opts.clone();
+            o.set(
+                "from_encoding",
+                oc_core::options::OptionValue::Text("utf-8".into()),
+            );
+            let (out, n) = convert_text(text.as_bytes(), &o)?;
+            notes.extend(n);
+            (out, "Read document -> Write text".to_string())
+        } else if from == pdf::PDF && document::is_document(to) {
+            let out = document::from_pdf(to, data, &opts, &self.limits, &mut notes)?;
+            (
+                out,
+                "Extract page text -> Rebuild structure -> Write document".to_string(),
+            )
         } else if pdf::is_pdf(from) && image::is_image(to) {
             let (img, n) = pdf::render_first(data, &opts, &self.limits)?;
             notes.extend(n);

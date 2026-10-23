@@ -21,6 +21,7 @@ oc-font = { path = "../crates/oc-font" }
 oc-raster = { path = "../crates/oc-raster" }
 oc-svg = { path = "../crates/oc-svg" }
 oc-pdf = { path = "../crates/oc-pdf" }
+oc-document = { path = "../crates/oc-document" }
 oc-sheet = { path = "../crates/oc-sheet" }
 oc-archive = { path = "../crates/oc-archive" }
 oc-audio = { path = "../crates/oc-audio" }
@@ -328,6 +329,20 @@ bench = false
 [[bin]]
 name = "pdf"
 path = "fuzz_targets/pdf.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "markdown"
+path = "fuzz_targets/markdown.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "html"
+path = "fuzz_targets/html.rs"
 test = false
 doc = false
 bench = false

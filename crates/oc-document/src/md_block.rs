@@ -65,6 +65,9 @@ struct Parser {
     tables: bool,
 }
 
+/// Containers nested deeper than this are read as text.
+const MAX_DEPTH: usize = 64;
+
 fn is_space_or_tab(b: u8) -> bool {
     b == b' ' || b == b'\t'
 }
@@ -103,6 +106,16 @@ impl Parser {
             all_matched: true,
             tables,
         }
+    }
+
+    /// Nesting depth of a node (containers only), used to stop pathological input.
+    fn depth(&self, mut id: usize) -> usize {
+        let mut d = 0;
+        while id != 0 {
+            d += 1;
+            id = self.nodes[id].parent;
+        }
+        d
     }
 
     fn peek(&self, i: usize) -> u8 {
@@ -198,7 +211,11 @@ impl Parser {
     fn accepts_lines(&self, id: usize) -> bool {
         matches!(
             self.nodes[id].kind,
-            Kind::Paragraph | Kind::Heading(_) | Kind::Code { .. } | Kind::Html(_) | Kind::Table { .. }
+            Kind::Paragraph
+                | Kind::Heading(_)
+                | Kind::Code { .. }
+                | Kind::Html(_)
+                | Kind::Table { .. }
         )
     }
 
@@ -244,7 +261,10 @@ impl Parser {
                     if lines.last() == Some(&"") {
                         lines.pop();
                     }
-                    while lines.last().is_some_and(|l| l.chars().all(|c| c == ' ' || c == '\t')) {
+                    while lines
+                        .last()
+                        .is_some_and(|l| l.chars().all(|c| c == ' ' || c == '\t'))
+                    {
                         lines.pop();
                     }
                     let mut s = lines.join("\n");
@@ -264,7 +284,9 @@ impl Parser {
                     }
                     let subs = self.nodes[it].children.clone();
                     for (m, &s) in subs.iter().enumerate() {
-                        if (n + 1 < items.len() || m + 1 < subs.len()) && self.ends_with_blank_line(s) {
+                        if (n + 1 < items.len() || m + 1 < subs.len())
+                            && self.ends_with_blank_line(s)
+                        {
                             tight = false;
                             break 'outer;
                         }
@@ -301,7 +323,8 @@ impl Parser {
                 self.nodes[to].content.push(' ');
             }
         }
-        let rest = String::from_utf8_lossy(&self.line[self.offset.min(self.line.len())..]).to_string();
+        let rest =
+            String::from_utf8_lossy(&self.line[self.offset.min(self.line.len())..]).to_string();
         self.nodes[to].content.push_str(&rest);
     }
 
@@ -422,7 +445,9 @@ impl Parser {
         let mut container = 0usize;
         self.all_matched = true;
         loop {
-            let Some(&last) = self.nodes[container].children.last() else { break };
+            let Some(&last) = self.nodes[container].children.last() else {
+                break;
+            };
             if !self.nodes[last].open {
                 break;
             }
@@ -443,12 +468,15 @@ impl Parser {
         let maybe_lazy = matches!(self.nodes[self.tip].kind, Kind::Paragraph);
         let mut maybe_lazy_flag = maybe_lazy;
         // try new block starts
-        while !matches!(self.nodes[container].kind, Kind::Code { .. } | Kind::Html(_)) {
+        while !matches!(
+            self.nodes[container].kind,
+            Kind::Code { .. } | Kind::Html(_)
+        ) {
             self.find_first_nonspace();
             let indented = self.indent >= 4;
             let c = self.peek(self.first_nonspace);
             let cont_is_para = matches!(self.nodes[container].kind, Kind::Paragraph);
-            if !indented && c == b'>' {
+            if !indented && c == b'>' && self.depth(container) < MAX_DEPTH {
                 self.advance_offset(self.first_nonspace + 1 - self.offset, false);
                 if is_space_or_tab(self.peek(self.offset)) {
                     self.advance_offset(1, true);
@@ -499,9 +527,7 @@ impl Parser {
                 self.nodes[container].kind = Kind::Heading(level);
                 self.nodes[container].content = rest;
                 self.advance_offset(self.line.len() - self.offset, false);
-            } else if !indented
-                && !(cont_is_para && !self.all_matched)
-                && self.is_thematic_break()
+            } else if !indented && !(cont_is_para && !self.all_matched) && self.is_thematic_break()
             {
                 self.close_unmatched();
                 container = self.add_child(container, Kind::Rule);
@@ -514,6 +540,7 @@ impl Parser {
             {
                 // consumed the delimiter row
             } else if self.indent < 4
+                && self.depth(container) < MAX_DEPTH
                 && self.try_list_item(&mut container, cont_is_para)
             {
             } else if indented && !maybe_lazy_flag && !self.blank {
@@ -539,7 +566,12 @@ impl Parser {
         // add the rest of the line
         self.find_first_nonspace();
         let tip_is_para = matches!(self.nodes[self.tip].kind, Kind::Paragraph);
-        if !self.all_matched && !self.blank && tip_is_para && self.tip != container && self.oldtip_is_lazy(container) {
+        if !self.all_matched
+            && !self.blank
+            && tip_is_para
+            && self.tip != container
+            && self.oldtip_is_lazy(container)
+        {
             // lazy paragraph continuation
             self.advance_offset(self.first_nonspace - self.offset, false);
             let t = self.tip;
@@ -707,7 +739,9 @@ impl Parser {
             let mut n = 0u32;
             let mut digits = 0;
             while digits < 10 && self.peek(i).is_ascii_digit() {
-                n = n.saturating_mul(10).saturating_add(u32::from(self.peek(i) - b'0'));
+                n = n
+                    .saturating_mul(10)
+                    .saturating_add(u32::from(self.peek(i) - b'0'));
                 digits += 1;
                 i += 1;
             }
@@ -816,13 +850,7 @@ impl Parser {
         } else {
             self.nodes[id].content = format!("{before}\n");
             self.finalize(id);
-            let t = self.add_child(
-                parent,
-                Kind::Table {
-                    aligns,
-                    header,
-                },
-            );
+            let t = self.add_child(parent, Kind::Table { aligns, header });
             *container = t;
         }
         self.advance_offset(self.line.len() - self.offset, false);
@@ -858,7 +886,9 @@ fn html_start(rest: &[u8], in_paragraph: bool) -> Option<u8> {
     let lower = s.to_ascii_lowercase();
     let after = |name: &str| -> bool {
         lower.strip_prefix(name).is_some_and(|r| {
-            r.chars().next().is_none_or(|c| c == ' ' || c == '\t' || c == '>' || c == '\n' || c == '\r')
+            r.chars()
+                .next()
+                .is_none_or(|c| c == ' ' || c == '\t' || c == '>' || c == '\n' || c == '\r')
         })
     };
     if after("<script") || after("<pre") || after("<style") || after("<textarea") {
@@ -873,13 +903,21 @@ fn html_start(rest: &[u8], in_paragraph: bool) -> Option<u8> {
     if lower.starts_with("<![cdata[") {
         return Some(5);
     }
-    if lower.starts_with("<!") && lower.as_bytes().get(2).is_some_and(|b| b.is_ascii_alphabetic()) {
+    if lower.starts_with("<!")
+        && lower
+            .as_bytes()
+            .get(2)
+            .is_some_and(|b| b.is_ascii_alphabetic())
+    {
         return Some(4);
     }
     // block-level tag names
     let body = lower.strip_prefix("</").or_else(|| lower.strip_prefix('<'));
     if let Some(b) = body {
-        let name: String = b.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+        let name: String = b
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .collect();
         let tail = &b[name.len()..];
         if BLOCK_TAGS.contains(&name.as_str())
             && (tail.is_empty()
@@ -892,14 +930,19 @@ fn html_start(rest: &[u8], in_paragraph: bool) -> Option<u8> {
     if !in_paragraph {
         if let Some(n) = md_inline::scan_html_tag(&s, true) {
             let tail = &s[n..];
-            if tail.chars().all(|c| c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            if tail
+                .chars()
+                .all(|c| c == ' ' || c == '\t' || c == '\n' || c == '\r')
+            {
                 let name: String = lower
                     .trim_start_matches("</")
                     .trim_start_matches('<')
                     .chars()
                     .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
                     .collect();
-                if !matches!(name.as_str(), "script" | "style" | "pre" | "textarea") || lower.starts_with("</") {
+                if !matches!(name.as_str(), "script" | "style" | "pre" | "textarea")
+                    || lower.starts_with("</")
+                {
                     return Some(7);
                 }
             }
@@ -909,18 +952,76 @@ fn html_start(rest: &[u8], in_paragraph: bool) -> Option<u8> {
 }
 
 const BLOCK_TAGS: &[&str] = &[
-    "address", "article", "aside", "base", "basefont", "blockquote", "body", "caption", "center",
-    "col", "colgroup", "dd", "details", "dialog", "dir", "div", "dl", "dt", "fieldset",
-    "figcaption", "figure", "footer", "form", "frame", "frameset", "h1", "h2", "h3", "h4", "h5",
-    "h6", "head", "header", "hr", "html", "iframe", "legend", "li", "link", "main", "menu",
-    "menuitem", "nav", "noframes", "ol", "optgroup", "option", "p", "param", "search", "section",
-    "summary", "table", "tbody", "td", "tfoot", "th", "thead", "title", "tr", "track", "ul",
+    "address",
+    "article",
+    "aside",
+    "base",
+    "basefont",
+    "blockquote",
+    "body",
+    "caption",
+    "center",
+    "col",
+    "colgroup",
+    "dd",
+    "details",
+    "dialog",
+    "dir",
+    "div",
+    "dl",
+    "dt",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "frame",
+    "frameset",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "header",
+    "hr",
+    "html",
+    "iframe",
+    "legend",
+    "li",
+    "link",
+    "main",
+    "menu",
+    "menuitem",
+    "nav",
+    "noframes",
+    "ol",
+    "optgroup",
+    "option",
+    "p",
+    "param",
+    "search",
+    "section",
+    "summary",
+    "table",
+    "tbody",
+    "td",
+    "tfoot",
+    "th",
+    "thead",
+    "title",
+    "tr",
+    "track",
+    "ul",
 ];
 
 fn html_end(kind: u8, rest: &[u8]) -> bool {
     let s = String::from_utf8_lossy(rest).to_ascii_lowercase();
     match kind {
-        1 => ["</script>", "</pre>", "</style>", "</textarea>"].iter().any(|t| s.contains(t)),
+        1 => ["</script>", "</pre>", "</style>", "</textarea>"]
+            .iter()
+            .any(|t| s.contains(t)),
         2 => s.contains("-->"),
         3 => s.contains("?>"),
         4 => s.contains('>'),
@@ -952,7 +1053,8 @@ pub fn split_row(row: &str) -> Vec<String> {
     if t.starts_with('|') && cells.first().is_some_and(|c| c.trim().is_empty()) {
         cells.remove(0);
     }
-    if t.ends_with('|') && !t.ends_with("\\|") && cells.last().is_some_and(|c| c.trim().is_empty()) {
+    if t.ends_with('|') && !t.ends_with("\\|") && cells.last().is_some_and(|c| c.trim().is_empty())
+    {
         cells.pop();
     }
     cells.into_iter().map(|c| c.trim().to_string()).collect()
@@ -993,7 +1095,10 @@ pub struct Parsed {
 }
 
 pub fn parse(text: &str, tables: bool) -> Vec<Block> {
-    let normalized = text.replace("\r\n", "\n").replace('\r', "\n").replace('\0', "\u{FFFD}");
+    let normalized = text
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace('\0', "\u{FFFD}");
     let mut p = Parser::new(tables);
     let text = normalized.strip_prefix('\u{FEFF}').unwrap_or(&normalized);
     let mut lines: Vec<&str> = text.split('\n').collect();
@@ -1054,7 +1159,11 @@ fn convert_children(p: &Parser, ids: &[usize], refs: &RefMap, tables: bool) -> V
                 if text.trim().is_empty() {
                     continue;
                 }
-                out.push(Block::Paragraph(md_inline::parse_inlines(text.trim_start(), refs, tables)));
+                out.push(Block::Paragraph(md_inline::parse_inlines(
+                    text.trim_start(),
+                    refs,
+                    tables,
+                )));
             }
             Kind::Heading(l) => {
                 let text = n.content.trim_end_matches('\n').trim();
@@ -1095,7 +1204,13 @@ fn convert_children(p: &Parser, ids: &[usize], refs: &RefMap, tables: bool) -> V
                     }
                     let mut cells = split_row(line);
                     cells.resize(aligns.len(), String::new());
-                    rows.push(cells.iter().enumerate().map(|(i, c)| cell(c, false, i)).collect());
+                    rows.push(
+                        cells
+                            .iter()
+                            .enumerate()
+                            .map(|(i, c)| cell(c, false, i))
+                            .collect(),
+                    );
                 }
                 out.push(Block::Table { rows });
             }

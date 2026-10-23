@@ -286,7 +286,11 @@ pub fn open(data: &[u8], opts: &Options, limits: &Limits) -> Result<oc_pdf::Pdf>
     Ok(pdf)
 }
 
-fn selection(pdf: &oc_pdf::Pdf, opts: &Options, default_first: bool) -> Result<Vec<usize>> {
+pub(crate) fn selection(
+    pdf: &oc_pdf::Pdf,
+    opts: &Options,
+    default_first: bool,
+) -> Result<Vec<usize>> {
     let total = pdf.pages().len();
     if total == 0 {
         return Err(Error::new(ErrorCode::CorruptFile, "the PDF has no pages"));
@@ -413,7 +417,7 @@ pub fn render_first(
     Ok((img, notes))
 }
 
-fn page_text(
+pub(crate) fn page_text(
     pdf: &oc_pdf::Pdf,
     indices: &[usize],
     fonts: &oc_font::db::FontDb,

@@ -7,14 +7,22 @@
     clippy::type_complexity,
     clippy::collapsible_else_if,
     clippy::collapsible_if,
-    clippy::needless_range_loop
+    clippy::needless_range_loop,
+    clippy::manual_strip,
+    clippy::manual_range_contains,
+    clippy::while_let_loop,
+    clippy::question_mark
 )]
 
+pub mod base64;
 pub mod entities;
+pub mod html_in;
 pub mod html_out;
 pub mod markdown;
 pub mod md_block;
 pub mod md_inline;
+pub mod md_out;
 pub mod model;
+pub mod text_io;
 
 pub use model::{Align, Block, Cell, Document, Image, Inline, ListItem, Meta};

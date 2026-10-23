@@ -79,7 +79,10 @@ pub fn entity_at(s: &str, i: usize) -> Option<(String, usize)> {
         } else {
             (num, 10, 3)
         };
-        let n = digits.bytes().take_while(|b| b.is_ascii_hexdigit() && (radix == 16 || b.is_ascii_digit())).count();
+        let n = digits
+            .bytes()
+            .take_while(|b| b.is_ascii_hexdigit() && (radix == 16 || b.is_ascii_digit()))
+            .count();
         if n == 0 || n > if radix == 16 { 6 } else { 7 } {
             return None;
         }
@@ -94,12 +97,17 @@ pub fn entity_at(s: &str, i: usize) -> Option<(String, usize)> {
         };
         return Some((c.to_string(), skip + n));
     }
-    let n = rest.bytes().take_while(|b| b.is_ascii_alphanumeric()).count();
+    let n = rest
+        .bytes()
+        .take_while(|b| b.is_ascii_alphanumeric())
+        .count();
     if n == 0 || rest.as_bytes().get(n) != Some(&b';') {
         return None;
     }
     let name = &rest[..n];
-    let idx = entities::NAMED.binary_search_by(|(k, _)| (*k).cmp(name)).ok()?;
+    let idx = entities::NAMED
+        .binary_search_by(|(k, _)| (*k).cmp(name))
+        .ok()?;
     Some((entities::NAMED[idx].1.to_string(), n + 2))
 }
 
@@ -226,7 +234,9 @@ fn parse_label(s: &str, i: usize) -> Option<(String, usize)> {
 
 /// Parse a link reference definition at the start of `s`; returns the bytes consumed (0 = none).
 pub fn parse_reference_definition(s: &str, refs: &mut RefMap) -> usize {
-    let Some((label, mut i)) = parse_label(s, 0) else { return 0 };
+    let Some((label, mut i)) = parse_label(s, 0) else {
+        return 0;
+    };
     let b = s.as_bytes();
     if b.get(i) != Some(&b':') {
         return 0;
@@ -236,7 +246,9 @@ pub fn parse_reference_definition(s: &str, refs: &mut RefMap) -> usize {
     }
     i += 1;
     i = skip_ws_one_newline(b, i);
-    let Some((dest, after_dest)) = parse_destination(s, i) else { return 0 };
+    let Some((dest, after_dest)) = parse_destination(s, i) else {
+        return 0;
+    };
     if after_dest == i && dest.is_empty() && b.get(i) != Some(&b'<') {
         return 0;
     }
@@ -308,12 +320,17 @@ pub fn scan_html_tag(s: &str, tag_only: bool) -> Option<usize> {
             match b.get(i)? {
                 b'>' => return Some(i + 1),
                 b'/' => {
-                    return if b.get(i + 1) == Some(&b'>') { Some(i + 2) } else { None };
+                    return if b.get(i + 1) == Some(&b'>') {
+                        Some(i + 2)
+                    } else {
+                        None
+                    };
                 }
                 c if had_ws && (c.is_ascii_alphabetic() || *c == b'_' || *c == b':') => {
                     i += 1;
                     while i < b.len()
-                        && (b[i].is_ascii_alphanumeric() || matches!(b[i], b'_' | b'.' | b':' | b'-'))
+                        && (b[i].is_ascii_alphanumeric()
+                            || matches!(b[i], b'_' | b'.' | b':' | b'-'))
                     {
                         i += 1;
                     }
@@ -343,7 +360,17 @@ pub fn scan_html_tag(s: &str, tag_only: bool) -> Option<usize> {
                             _ => {
                                 let st = j;
                                 while j < b.len()
-                                    && !matches!(b[j], b' ' | b'\t' | b'\n' | b'"' | b'\'' | b'=' | b'<' | b'>' | b'`')
+                                    && !matches!(
+                                        b[j],
+                                        b' ' | b'\t'
+                                            | b'\n'
+                                            | b'"'
+                                            | b'\''
+                                            | b'='
+                                            | b'<'
+                                            | b'>'
+                                            | b'`'
+                                    )
                                 {
                                     j += 1;
                                 }
@@ -372,7 +399,11 @@ pub fn scan_html_tag(s: &str, tag_only: bool) -> Option<usize> {
         while i < b.len() && matches!(b[i], b' ' | b'\t' | b'\n') {
             i += 1;
         }
-        return if b.get(i) == Some(&b'>') { Some(i + 1) } else { None };
+        return if b.get(i) == Some(&b'>') {
+            Some(i + 1)
+        } else {
+            None
+        };
     }
     if tag_only {
         return None;
@@ -412,7 +443,9 @@ fn scan_autolink(s: &str) -> Option<(String, bool, usize)> {
         let scheme = &inner[..colon];
         if (2..=32).contains(&scheme.len())
             && scheme.as_bytes()[0].is_ascii_alphabetic()
-            && scheme.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'+' | b'.' | b'-'))
+            && scheme
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'+' | b'.' | b'-'))
         {
             return Some((inner.to_string(), false, end + 1));
         }
@@ -421,7 +454,9 @@ fn scan_autolink(s: &str) -> Option<(String, bool, usize)> {
     if let Some(at) = inner.find('@') {
         let (local, domain) = (&inner[..at], &inner[at + 1..]);
         let ok_local = !local.is_empty()
-            && local.bytes().all(|c| c.is_ascii_alphanumeric() || b".!#$%&'*+/=?^_`{|}~-".contains(&c));
+            && local
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b".!#$%&'*+/=?^_`{|}~-".contains(&c));
         let ok_domain = !domain.is_empty()
             && domain.split('.').all(|l| {
                 !l.is_empty()
@@ -582,7 +617,11 @@ impl Scanner<'_> {
                 self.toks.pop();
             }
         }
-        self.toks.push(Tok::Node(if hard { Inline::LineBreak } else { Inline::SoftBreak }));
+        self.toks.push(Tok::Node(if hard {
+            Inline::LineBreak
+        } else {
+            Inline::SoftBreak
+        }));
         self.pos += 1;
         while self.pos < self.b.len() && matches!(self.b[self.pos], b' ' | b'\t') {
             self.pos += 1;
@@ -644,13 +683,17 @@ impl Scanner<'_> {
                 j += 1;
             }
         }
-        push_text(&mut self.toks, &self.s[start..content_start].to_string());
+        push_text(&mut self.toks, &self.s[start..content_start]);
     }
 
     fn angle(&mut self) {
         let rest = &self.s[self.pos..];
         if let Some((target, email, n)) = scan_autolink(rest) {
-            let url = if email { format!("mailto:{target}") } else { target.clone() };
+            let url = if email {
+                format!("mailto:{target}")
+            } else {
+                target.clone()
+            };
             self.toks.push(Tok::Node(Inline::Link {
                 url,
                 title: String::new(),
@@ -660,7 +703,8 @@ impl Scanner<'_> {
             return;
         }
         if let Some(n) = scan_html_tag(rest, false) {
-            self.toks.push(Tok::Node(Inline::Html(rest[..n].to_string())));
+            self.toks
+                .push(Tok::Node(Inline::Html(rest[..n].to_string())));
             self.pos += n;
             return;
         }
@@ -765,6 +809,14 @@ impl Scanner<'_> {
                 let n = tail.len();
                 let tail = process_emphasis(tail, 0, n, self.gfm);
                 let content = tokens_to_inlines(tail);
+                if depth_of(&content) >= MAX_INLINE_DEPTH {
+                    // too deep: the link or image is left as text
+                    self.toks
+                        .push(Tok::Text(if opener.image { "![" } else { "[" }.into()));
+                    self.toks.extend(content.into_iter().map(Tok::Node));
+                    push_text(&mut self.toks, "]");
+                    return;
+                }
                 let node = if opener.image {
                     Inline::Image {
                         src: url,
@@ -838,7 +890,9 @@ fn process_emphasis(mut toks: Vec<Tok>, bottom: usize, _end: usize, gfm: bool) -
             } = &toks[o]
             {
                 if *ch == cch && *can_open {
-                    let odd = (*can_close || ccan_open) && (orig + corig) % 3 == 0 && !(orig % 3 == 0 && corig % 3 == 0);
+                    let odd = (*can_close || ccan_open)
+                        && (orig + corig) % 3 == 0
+                        && !(orig % 3 == 0 && corig % 3 == 0);
                     let tilde_ok = cch != b'~' || *count == ccount;
                     if !odd && tilde_ok {
                         opener = Some(o);
@@ -872,6 +926,26 @@ fn process_emphasis(mut toks: Vec<Tok>, bottom: usize, _end: usize, gfm: bool) -
         };
         let inner: Vec<Tok> = toks.drain(o + 1..closer).map(convert_leftover).collect();
         let children = tokens_to_inlines(inner);
+        if depth_of(&children) >= MAX_INLINE_DEPTH {
+            // too deep: keep the markers as text
+            let mut flat = vec![Tok::Text((cch as char).to_string().repeat(use_n))];
+            flat.extend(children.into_iter().map(Tok::Node));
+            flat.push(Tok::Text((cch as char).to_string().repeat(use_n)));
+            let n = flat.len();
+            toks.splice(o + 1..o + 1, flat);
+            let cidx = o + 1 + n;
+            if let Tok::Delim { count, .. } = &mut toks[o] {
+                *count -= use_n;
+            }
+            if let Tok::Delim { count, .. } = &mut toks[cidx] {
+                *count -= use_n;
+            }
+            closer = cidx;
+            if matches!(&toks[cidx], Tok::Delim { count: 0, .. }) {
+                toks.remove(cidx);
+            }
+            continue;
+        }
         let node = match (cch, use_n) {
             (b'~', _) => Inline::Strike(children),
             (_, 2) => Inline::Strong(children),
@@ -900,10 +974,29 @@ fn process_emphasis(mut toks: Vec<Tok>, bottom: usize, _end: usize, gfm: bool) -
             toks.remove(o);
             cidx -= 1;
         }
-        closer = if ccount_left == 0 { cidx } else { cidx };
+        closer = cidx;
         let _ = gfm;
     }
     toks.into_iter().map(convert_leftover).collect()
+}
+
+const MAX_INLINE_DEPTH: usize = 64;
+
+fn depth_of(v: &[Inline]) -> usize {
+    v.iter()
+        .map(|i| match i {
+            Inline::Emph(c)
+            | Inline::Strong(c)
+            | Inline::Strike(c)
+            | Inline::Underline(c)
+            | Inline::Sup(c)
+            | Inline::Sub(c) => 1 + depth_of(c),
+            Inline::Link { content, .. } => 1 + depth_of(content),
+            Inline::Image { alt, .. } => 1 + depth_of(alt),
+            _ => 0,
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 fn tokens_to_inlines(toks: Vec<Tok>) -> Vec<Inline> {
@@ -948,7 +1041,8 @@ fn split_autolinks(t: &str, out: &mut Vec<Inline>) {
     let b = t.as_bytes();
     let mut last = 0;
     let mut i = 0;
-    let boundary = |i: usize| i == 0 || matches!(b[i - 1], b' ' | b'\t' | b'\n' | b'*' | b'_' | b'~' | b'(');
+    let boundary =
+        |i: usize| i == 0 || matches!(b[i - 1], b' ' | b'\t' | b'\n' | b'*' | b'_' | b'~' | b'(');
     while i < b.len() {
         if !t.is_char_boundary(i) {
             i += 1;
@@ -956,7 +1050,12 @@ fn split_autolinks(t: &str, out: &mut Vec<Inline>) {
         }
         let rest = &t[i..];
         let mut url_start = None;
-        if boundary(i) && (rest.starts_with("http://") || rest.starts_with("https://") || rest.starts_with("ftp://") || rest.starts_with("www.")) {
+        if boundary(i)
+            && (rest.starts_with("http://")
+                || rest.starts_with("https://")
+                || rest.starts_with("ftp://")
+                || rest.starts_with("www."))
+        {
             url_start = Some(i);
         }
         if let Some(st) = url_start {
@@ -967,13 +1066,20 @@ fn split_autolinks(t: &str, out: &mut Vec<Inline>) {
             // trailing punctuation and unbalanced parentheses
             loop {
                 let seg = &t[st..end];
-                let Some(lastc) = seg.chars().next_back() else { break };
-                if matches!(lastc, '?' | '!' | '.' | ',' | ':' | '*' | '_' | '~' | '\'' | '"') {
+                let Some(lastc) = seg.chars().next_back() else {
+                    break;
+                };
+                if matches!(
+                    lastc,
+                    '?' | '!' | '.' | ',' | ':' | '*' | '_' | '~' | '\'' | '"'
+                ) {
                     end -= lastc.len_utf8();
-                } else if lastc == ';' && seg.rfind('&').is_some_and(|p| {
-                    let name = &seg[p + 1..seg.len() - 1];
-                    !name.is_empty() && name.bytes().all(|c| c.is_ascii_alphanumeric())
-                }) {
+                } else if lastc == ';'
+                    && seg.rfind('&').is_some_and(|p| {
+                        let name = &seg[p + 1..seg.len() - 1];
+                        !name.is_empty() && name.bytes().all(|c| c.is_ascii_alphanumeric())
+                    })
+                {
                     end = st + seg.rfind('&').unwrap_or(seg.len());
                 } else if lastc == ')' && seg.matches(')').count() > seg.matches('(').count() {
                     end -= 1;
@@ -982,15 +1088,20 @@ fn split_autolinks(t: &str, out: &mut Vec<Inline>) {
                 }
             }
             let url = &t[st..end];
-            let host_ok = url
-                .split("://")
-                .last()
-                .is_some_and(|h| h.split(['/', '?', '#']).next().is_some_and(|h| h.contains('.') && !h.starts_with('.')));
+            let host_ok = url.split("://").last().is_some_and(|h| {
+                h.split(['/', '?', '#'])
+                    .next()
+                    .is_some_and(|h| h.contains('.') && !h.starts_with('.'))
+            });
             if host_ok && end > st + 4 {
                 if st > last {
                     out.push(Inline::Text(t[last..st].to_string()));
                 }
-                let href = if url.starts_with("www.") { format!("http://{url}") } else { url.to_string() };
+                let href = if url.starts_with("www.") {
+                    format!("http://{url}")
+                } else {
+                    url.to_string()
+                };
                 out.push(Inline::Link {
                     url: href,
                     title: String::new(),
@@ -1003,18 +1114,29 @@ fn split_autolinks(t: &str, out: &mut Vec<Inline>) {
         }
         if b[i] == b'@' && i > 0 {
             let mut s = i;
-            while s > 0 && (b[s - 1].is_ascii_alphanumeric() || matches!(b[s - 1], b'.' | b'_' | b'+' | b'-')) {
+            while s > 0
+                && (b[s - 1].is_ascii_alphanumeric()
+                    || matches!(b[s - 1], b'.' | b'_' | b'+' | b'-'))
+            {
                 s -= 1;
             }
             let mut e = i + 1;
-            while e < b.len() && (b[e].is_ascii_alphanumeric() || matches!(b[e], b'.' | b'-' | b'_')) {
+            while e < b.len()
+                && (b[e].is_ascii_alphanumeric() || matches!(b[e], b'.' | b'-' | b'_'))
+            {
                 e += 1;
             }
             while e > i + 1 && matches!(b[e - 1], b'.' | b'-' | b'_') {
                 e -= 1;
             }
             let domain = &t[i + 1..e];
-            if s < i && s >= last && domain.contains('.') && !domain.starts_with('.') && !t[e..].starts_with(['-', '_']) && domain.split('.').all(|l| !l.is_empty()) {
+            if s < i
+                && s >= last
+                && domain.contains('.')
+                && !domain.starts_with('.')
+                && !t[e..].starts_with(['-', '_'])
+                && domain.split('.').all(|l| !l.is_empty())
+            {
                 if s > last {
                     out.push(Inline::Text(t[last..s].to_string()));
                 }

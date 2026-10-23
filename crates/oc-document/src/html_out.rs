@@ -18,14 +18,13 @@ pub fn escape_url(s: &str, out: &mut String) {
     let mut i = 0;
     while i < b.len() {
         let c = b[i];
-        let keep = c.is_ascii_alphanumeric()
-            || b"-_.+!*'(),%#@?=;:/&$~".contains(&c);
+        let keep = c.is_ascii_alphanumeric() || b"-_.+!*'(),%#@?=;:/&$~".contains(&c);
         if c == b'&' {
             out.push_str("&amp;");
         } else if c == b'\'' {
             out.push_str("&#x27;");
         } else if c == b'%'
-            && !(i + 2 < b.len() + 0 && b[i + 1].is_ascii_hexdigit() && b[i + 2].is_ascii_hexdigit())
+            && !(i + 2 < b.len() && b[i + 1].is_ascii_hexdigit() && b[i + 2].is_ascii_hexdigit())
         {
             out.push_str("%25");
         } else if keep {
@@ -123,7 +122,9 @@ fn block(cx: &Ctx, b: &Block, tight: bool, out: &mut String) {
                     });
                 }
                 blocks(cx, &it.blocks, *tight, out);
-                if !it.blocks.is_empty() && (!*tight || !matches!(it.blocks.last(), Some(Block::Paragraph(_)))) {
+                if !it.blocks.is_empty()
+                    && (!*tight || !matches!(it.blocks.last(), Some(Block::Paragraph(_))))
+                {
                     cr(out);
                 }
                 out.push_str("</li>\n");
@@ -212,7 +213,11 @@ fn inline(cx: &Ctx, i: &Inline, out: &mut String) {
         Inline::Underline(c) => wrap(cx, "u", c, out),
         Inline::Sup(c) => wrap(cx, "sup", c, out),
         Inline::Sub(c) => wrap(cx, "sub", c, out),
-        Inline::Link { url, title, content } => {
+        Inline::Link {
+            url,
+            title,
+            content,
+        } => {
             out.push_str("<a href=\"");
             escape_url(url, out);
             out.push('"');
@@ -244,11 +249,25 @@ fn inline(cx: &Ctx, i: &Inline, out: &mut String) {
 
 /// GitHub escapes the opening `<` of tags that could swallow the rest of the page.
 fn raw_html(h: &str, out: &mut String) {
-    let t = h.trim_start_matches('<').trim_start_matches('/').to_ascii_lowercase();
-    let name: String = t.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+    let t = h
+        .trim_start_matches('<')
+        .trim_start_matches('/')
+        .to_ascii_lowercase();
+    let name: String = t
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric())
+        .collect();
     let unsafe_tag = matches!(
         name.as_str(),
-        "title" | "textarea" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "script" | "plaintext"
+        "title"
+            | "textarea"
+            | "style"
+            | "xmp"
+            | "iframe"
+            | "noembed"
+            | "noframes"
+            | "script"
+            | "plaintext"
     );
     if unsafe_tag && h.starts_with('<') {
         out.push_str("&lt;");
@@ -266,4 +285,63 @@ fn wrap(cx: &Ctx, tag: &str, c: &[Inline], out: &mut String) {
     out.push_str("</");
     out.push_str(tag);
     out.push('>');
+}
+
+const CSS: &str = "body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;line-height:1.55;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}pre{background:#f4f4f4;padding:.8rem;overflow:auto;border-radius:4px}code{font-family:ui-monospace,Menlo,Consolas,monospace}blockquote{margin-left:0;padding-left:1rem;border-left:3px solid #ccc;color:#444}table{border-collapse:collapse}td,th{border:1px solid #bbb;padding:.3rem .6rem}img{max-width:100%}";
+
+pub struct PageOptions {
+    pub embed_images: bool,
+    pub style: bool,
+    /// XHTML flavour (EPUB): declared namespace, no doctype shorthand.
+    pub xhtml: bool,
+}
+
+/// A complete HTML page; pictures carried by the document are embedded as `data:` URIs.
+pub fn page(doc: &Document, o: &PageOptions) -> String {
+    let embed = |s: &str| -> String {
+        match doc.image(s) {
+            Some(img) if o.embed_images => {
+                format!(
+                    "data:{};base64,{}",
+                    img.mime,
+                    crate::base64::encode(&img.data)
+                )
+            }
+            _ => s.to_string(),
+        }
+    };
+    let cx = Ctx {
+        doc,
+        image_src: &embed,
+    };
+    let body = fragment_with(&cx);
+    let mut head = String::new();
+    head.push_str("<meta charset=\"utf-8\" />\n");
+    head.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n");
+    let mut title = String::new();
+    escape_html(doc.meta.title.as_deref().unwrap_or(""), &mut title);
+    head.push_str(&format!("<title>{title}</title>\n"));
+    for (k, v) in [
+        ("author", &doc.meta.author),
+        ("description", &doc.meta.subject),
+        ("date", &doc.meta.date),
+    ] {
+        if let Some(v) = v {
+            let mut e = String::new();
+            escape_html(v, &mut e);
+            head.push_str(&format!("<meta name=\"{k}\" content=\"{e}\" />\n"));
+        }
+    }
+    if o.style {
+        head.push_str(&format!("<style>{CSS}</style>\n"));
+    }
+    let lang = doc.meta.language.as_deref().map(|l| {
+        let mut e = String::new();
+        escape_html(l, &mut e);
+        format!(" lang=\"{e}\"")
+    });
+    let lang = lang.unwrap_or_default();
+    format!(
+        "<!DOCTYPE html>\n<html{lang}>\n<head>\n{head}</head>\n<body>\n{body}</body>\n</html>\n"
+    )
 }
