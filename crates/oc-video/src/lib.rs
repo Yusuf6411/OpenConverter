@@ -10,9 +10,12 @@
 #![allow(clippy::indexing_slicing)]
 
 pub mod avi;
+pub mod frames;
 pub mod mkv;
 pub mod mp4;
+pub mod pic;
 pub mod subs;
+pub mod vp8;
 pub mod y4m;
 
 use oc_core::{Error, ErrorCode, Result};

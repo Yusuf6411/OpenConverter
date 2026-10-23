@@ -7,8 +7,11 @@ use oc_core::options::{OptionKind, OptionSchema, OptionSpec, Options};
 use oc_core::planner::{Edge, EdgeKind, Registry};
 use oc_core::{
     Capabilities, Category, Error, ErrorCode, FormatDescriptor, FormatId, Limits, Note, Notes,
-    Ownership, Result, Severity, Sniffer,
+    Ownership, Progress, Result, Severity, Sniffer,
 };
+use oc_image::anim::Animation;
+use oc_video::frames;
+use oc_video::pic::Picture;
 use oc_video::{avi, codec, mkv, mp4, subs, y4m, Kind, Media, Packet};
 
 pub const MP4: FormatId = FormatId("mp4");
@@ -41,8 +44,79 @@ fn spec(
     }
 }
 
+fn int(
+    key: &'static str,
+    i18n: &'static str,
+    label: &'static str,
+    help: &'static str,
+    min: i64,
+    max: i64,
+    default: i64,
+) -> OptionSpec {
+    spec(
+        key,
+        i18n,
+        label,
+        help,
+        OptionKind::Int { min, max, default },
+    )
+}
+
 fn options_for(id: FormatId) -> OptionSchema {
+    let video_codecs = match id {
+        i if i == Y4M => vec!["auto"],
+        i if i == AVI => vec!["auto", "copy", "mjpeg", "vp8"],
+        _ => vec!["auto", "copy", "vp8", "mjpeg"],
+    };
     let mut specs = vec![
+        spec(
+            "video_codec",
+            "opt.video.video_codec",
+            "Video codec",
+            "auto copies the picture unchanged when the container can hold it and nothing is being edited, and otherwise encodes",
+            OptionKind::Enum { choices: video_codecs, default: "auto" },
+        ),
+        int("quality", "opt.video.quality", "Video quality", "1 (smallest) to 100 (best) for encoded video", 1, 100, 80),
+        int("keyframe_interval", "opt.video.keyframe_interval", "Key frame every (frames)", "Seeking granularity of encoded video", 1, 1000, 120),
+        int("width", "opt.video.width", "Width", "Scale to this width in pixels; 0 keeps the original (with only one of width and height set, the aspect ratio is kept)", 0, 16384, 0),
+        int("height", "opt.video.height", "Height", "Scale to this height in pixels; 0 keeps the original", 0, 16384, 0),
+        spec(
+            "fps",
+            "opt.video.fps",
+            "Frame rate",
+            "Frames per second; 0 keeps the original",
+            OptionKind::Float { min: 0.0, max: 240.0, default: 0.0 },
+        ),
+        spec(
+            "rotate",
+            "opt.video.rotate",
+            "Rotate",
+            "Degrees clockwise",
+            OptionKind::Enum { choices: vec!["0", "90", "180", "270"], default: "0" },
+        ),
+        spec(
+            "flip",
+            "opt.video.flip",
+            "Mirror",
+            "Flip the picture",
+            OptionKind::Enum { choices: vec!["none", "horizontal", "vertical"], default: "none" },
+        ),
+        int("crop_w", "opt.video.crop_w", "Crop width", "Width of the part to keep; 0 turns cropping off", 0, 16384, 0),
+        int("crop_h", "opt.video.crop_h", "Crop height", "Height of the part to keep", 0, 16384, 0),
+        int("crop_x", "opt.video.crop_x", "Crop left", "Distance of the kept part from the left edge", 0, 16384, 0),
+        int("crop_y", "opt.video.crop_y", "Crop top", "Distance of the kept part from the top edge", 0, 16384, 0),
+        int("start_ms", "opt.video.start_ms", "Start (ms)", "Leave out everything before this time", 0, 86_400_000, 0),
+        int("duration_ms", "opt.video.duration_ms", "Length (ms)", "Keep only this much; 0 keeps the rest", 0, 86_400_000, 0),
+        spec(
+            "audio_codec",
+            "opt.video.audio_codec",
+            "Audio codec",
+            "auto copies the audio unchanged when the container can hold it, and otherwise converts it",
+            OptionKind::Enum {
+                choices: if id == Y4M { vec!["auto"] } else { vec!["auto", "copy", "opus", "vorbis", "flac", "pcm"] },
+                default: "auto",
+            },
+        ),
         spec(
             "drop_audio",
             "opt.video.drop_audio",
@@ -179,6 +253,22 @@ pub fn register(registry: &mut Registry) {
                 description: "Extract the first audio track",
             });
         }
+        for img in [crate::image::GIF, crate::image::WEBP, crate::image::PNG] {
+            for (a, b, text) in [
+                (id, img, "Decode the video into frames"),
+                (img, id, "Encode the frames as video"),
+            ] {
+                registry.add_edge(Edge {
+                    from: a,
+                    to: b,
+                    kind: EdgeKind::Transcode,
+                    loss: 2,
+                    ownership: Ownership::Own,
+                    time: 6,
+                    description: text,
+                });
+            }
+        }
         registry.add_edge(Edge {
             from: MEDIA_IR,
             to: id,
@@ -258,66 +348,350 @@ pub fn write(to: FormatId, media: &Media, opts: &Options) -> Result<Vec<u8>> {
     }
 }
 
+/// What the user asked for beyond moving streams between containers.
+struct Edit {
+    width: usize,
+    height: usize,
+    crop: Option<(usize, usize, usize, usize)>,
+    rotate: u16,
+    flip: String,
+    fps: Option<(u32, u32)>,
+    start_ns: i64,
+    duration_ns: Option<i64>,
+}
+
+impl Edit {
+    fn from(opts: &Options) -> Self {
+        let n = |k: &str| opts.int(k).unwrap_or(0).max(0) as usize;
+        let fps = opts.float("fps").unwrap_or(0.0);
+        let crop = (n("crop_w") > 0 && n("crop_h") > 0)
+            .then(|| (n("crop_x"), n("crop_y"), n("crop_w"), n("crop_h")));
+        Self {
+            width: n("width"),
+            height: n("height"),
+            crop,
+            rotate: opts
+                .text("rotate")
+                .and_then(|r| r.parse().ok())
+                .unwrap_or(0),
+            flip: opts.text("flip").unwrap_or("none").to_string(),
+            fps: (fps > 0.0).then(|| {
+                let milli = (fps * 1000.0).round() as u32;
+                let g = gcd(milli, 1000);
+                (milli / g, 1000 / g)
+            }),
+            start_ns: opts.int("start_ms").unwrap_or(0).max(0) * 1_000_000,
+            duration_ns: opts
+                .int("duration_ms")
+                .filter(|d| *d > 0)
+                .map(|d| d * 1_000_000),
+        }
+    }
+
+    /// Only the timing fields; the picture edits are left to a later stage (image transforms).
+    fn timing_only(opts: &Options) -> Self {
+        let mut e = Self::from(opts);
+        e.width = 0;
+        e.height = 0;
+        e.crop = None;
+        e.rotate = 0;
+        e.flip = "none".into();
+        e
+    }
+
+    /// Whether the picture itself changes.
+    fn touches_picture(&self) -> bool {
+        self.width > 0
+            || self.height > 0
+            || self.crop.is_some()
+            || self.rotate != 0
+            || self.flip != "none"
+            || self.fps.is_some()
+    }
+
+    fn trims(&self) -> bool {
+        self.start_ns > 0 || self.duration_ns.is_some()
+    }
+
+    fn end_ns(&self) -> i64 {
+        self.duration_ns
+            .map_or(i64::MAX, |d| self.start_ns.saturating_add(d))
+    }
+}
+
+fn gcd(a: u32, b: u32) -> u32 {
+    if b == 0 {
+        a.max(1)
+    } else {
+        gcd(b, a % b)
+    }
+}
+
+fn default_video_codec(to: FormatId) -> &'static str {
+    if to == Y4M {
+        codec::RAW
+    } else if to == AVI || to == MOV {
+        codec::MJPEG
+    } else {
+        codec::VP8
+    }
+}
+
+fn default_audio_codec(to: FormatId) -> &'static str {
+    if to == AVI {
+        "pcm"
+    } else {
+        "opus"
+    }
+}
+
+fn kind_name(k: Kind) -> &'static str {
+    match k {
+        Kind::Video => "video",
+        Kind::Audio => "audio",
+        Kind::Subtitle => "subtitle",
+    }
+}
+
+fn holds_rotation(to: FormatId) -> bool {
+    to == MP4 || to == MOV
+}
+
+/// Packets of a stream that fall inside the trim window, moved to start at zero.
+fn trimmed(media: &Media, si: usize, ed: &Edit) -> Vec<Packet> {
+    media
+        .packets_of(si)
+        .filter(|p| p.pts + p.duration.max(1) > ed.start_ns && p.pts < ed.end_ns())
+        .map(|p| {
+            let mut p = p.clone();
+            p.pts -= ed.start_ns;
+            p.dts -= ed.start_ns;
+            p
+        })
+        .collect()
+}
+
 /// Decide what happens to each stream and build the media to write.
-pub fn retarget(media: Media, to: FormatId, opts: &Options, notes: &mut Notes) -> Result<Media> {
-    let mut keep: Vec<Option<usize>> = Vec::new();
+pub fn retarget(
+    media: Media,
+    to: FormatId,
+    opts: &Options,
+    registry: &Registry,
+    limits: &Limits,
+    progress: &dyn Progress,
+    notes: &mut Notes,
+) -> Result<Media> {
+    let ed = Edit::from(opts);
     let mut out = Media {
         title: media.title.clone(),
         source: media.source.clone(),
         ..Media::default()
     };
-    // Text subtitle streams the container cannot hold are rewritten in a codec it can.
-    let mut rewritten: Vec<(usize, Vec<Packet>)> = Vec::new();
-    for (si, s) in media.streams.iter().enumerate() {
-        let drop = (s.kind == Kind::Audio && opts.bool("drop_audio") == Some(true))
-            || (s.kind == Kind::Subtitle && opts.bool("drop_subtitles") == Some(true));
-        if drop {
-            keep.push(None);
-            continue;
-        }
-        if container_allows(to, &s.codec) {
-            keep.push(Some(out.streams.len()));
-            out.streams.push(s.clone());
-            continue;
-        }
-        let alt = [codec::SRT, codec::ASS]
-            .into_iter()
-            .find(|c| subs::is_text(&s.codec) && container_allows(to, c));
-        if let (Some(alt), Some(track)) = (alt, subs::to_track(&media, si)) {
-            let (mut ns, packets) = subs::from_track(&track, alt);
-            ns.name = s.name.clone();
-            ns.default = s.default;
-            ns.forced = s.forced;
-            notes.push(
-                Note::new(
-                    Severity::Info,
-                    "subtitle_converted",
-                    format!("a {} subtitle track was rewritten as {alt}, which this container can hold", s.codec),
-                )
-                .with_detail(alt),
-            );
-            keep.push(None);
-            rewritten.push((out.streams.len(), packets));
-            out.streams.push(ns);
-            continue;
-        }
-        keep.push(None);
+    let drop_note = |notes: &mut Notes, s: &oc_video::Stream, why: String| {
         notes.push(
             Note::new(
                 Severity::Warning,
                 "stream_dropped",
                 format!(
-                    "a {} stream ({}) cannot be stored in this container and was left out",
-                    match s.kind {
-                        Kind::Video => "video",
-                        Kind::Audio => "audio",
-                        Kind::Subtitle => "subtitle",
-                    },
+                    "a {} stream ({}) was left out: {why}",
+                    kind_name(s.kind),
                     s.codec
                 ),
             )
             .with_detail(s.codec.clone()),
         );
+    };
+    for (si, s) in media.streams.iter().enumerate() {
+        let drop = (s.kind == Kind::Audio && opts.bool("drop_audio") == Some(true))
+            || (s.kind == Kind::Subtitle && opts.bool("drop_subtitles") == Some(true));
+        if drop {
+            continue;
+        }
+        match s.kind {
+            Kind::Video => {
+                let want = opts.text("video_codec").unwrap_or("auto");
+                let copy_ok =
+                    container_allows(to, &s.codec) && !ed.touches_picture() && !ed.trims();
+                let can_dec = frames::can_decode(&s.codec);
+                if want == "copy" || (want == "auto" && copy_ok) {
+                    if !container_allows(to, &s.codec) {
+                        return Err(Error::new(
+                            ErrorCode::CodecNotInBuild,
+                            format!(
+                                "{} video cannot be stored in this container as it is",
+                                s.codec
+                            ),
+                        ));
+                    }
+                    if ed.touches_picture() || ed.trims() {
+                        return Err(Error::invalid_option(
+                            "video_codec",
+                            "copy cannot be combined with editing the picture or the time range",
+                        ));
+                    }
+                    if s.rotation != 0 && !holds_rotation(to) {
+                        notes.push(Note::new(
+                            Severity::Warning,
+                            "rotation_dropped",
+                            "this video is stored rotated; the chosen container cannot say so, so it will play sideways. Re-encode to apply the rotation.",
+                        ));
+                    }
+                    let n = out.streams.len();
+                    out.streams.push(s.clone());
+                    for mut p in media.packets_of(si).cloned() {
+                        p.stream = n;
+                        out.packets.push(p);
+                    }
+                    continue;
+                }
+                let target = if want == "auto" {
+                    default_video_codec(to)
+                } else {
+                    want
+                };
+                if !can_dec {
+                    if want == "auto"
+                        && !container_allows(to, &s.codec)
+                        && !ed.touches_picture()
+                        && !ed.trims()
+                    {
+                        drop_note(
+                            notes,
+                            s,
+                            "the container cannot hold it and this build cannot convert it".into(),
+                        );
+                        continue;
+                    }
+                    return Err(Error::new(
+                        ErrorCode::CodecNotInBuild,
+                        format!("{} video cannot be decoded in this build, so it can only be copied between containers", s.codec),
+                    ));
+                }
+                if !container_allows(to, target) {
+                    return Err(Error::invalid_option(
+                        "video_codec",
+                        format!("{target} cannot be stored in this container"),
+                    ));
+                }
+                let (ns, packets) =
+                    transcode_video(&media, si, target, &ed, to, opts, limits, progress, notes)?;
+                let n = out.streams.len();
+                out.streams.push(ns);
+                for mut p in packets {
+                    p.stream = n;
+                    out.packets.push(p);
+                }
+            }
+            Kind::Audio => {
+                if to == Y4M {
+                    drop_note(notes, s, "this container holds no audio".into());
+                    continue;
+                }
+                let want = opts.text("audio_codec").unwrap_or("auto");
+                let allowed = container_allows(to, &s.codec);
+                if want == "copy" || (want == "auto" && allowed) {
+                    if !allowed {
+                        return Err(Error::new(
+                            ErrorCode::CodecNotInBuild,
+                            format!(
+                                "{} audio cannot be stored in this container as it is",
+                                s.codec
+                            ),
+                        ));
+                    }
+                    let n = out.streams.len();
+                    out.streams.push(s.clone());
+                    let packets = if ed.trims() {
+                        trimmed(&media, si, &ed)
+                    } else {
+                        media.packets_of(si).cloned().collect()
+                    };
+                    for mut p in packets {
+                        p.stream = n;
+                        out.packets.push(p);
+                    }
+                    continue;
+                }
+                let target = if want == "auto" {
+                    default_audio_codec(to)
+                } else {
+                    want
+                };
+                match transcode_audio(&media, si, target, &ed, to, registry, limits, notes) {
+                    Ok((ns, packets)) => {
+                        let n = out.streams.len();
+                        out.streams.push(ns);
+                        for mut p in packets {
+                            p.stream = n;
+                            out.packets.push(p);
+                        }
+                    }
+                    Err(e) if want == "auto" && e.code == ErrorCode::CodecNotInBuild => {
+                        drop_note(notes, s, e.message.clone());
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            Kind::Subtitle => {
+                if to == Y4M {
+                    drop_note(notes, s, "this container holds no subtitles".into());
+                    continue;
+                }
+                let mut media_s = s.clone();
+                let mut packets: Vec<Packet> = if ed.trims() {
+                    trimmed(&media, si, &ed)
+                } else {
+                    media.packets_of(si).cloned().collect()
+                };
+                if container_allows(to, &s.codec) {
+                    let n = out.streams.len();
+                    media_s.default = s.default;
+                    out.streams.push(media_s);
+                    for mut p in packets {
+                        p.stream = n;
+                        out.packets.push(p);
+                    }
+                    continue;
+                }
+                // Text subtitle streams the container cannot hold are rewritten in a codec it can.
+                let alt = [codec::SRT, codec::ASS]
+                    .into_iter()
+                    .find(|c| subs::is_text(&s.codec) && container_allows(to, c));
+                let tmp = Media {
+                    streams: vec![s.clone()],
+                    packets: {
+                        for p in &mut packets {
+                            p.stream = 0;
+                        }
+                        packets
+                    },
+                    ..Media::default()
+                };
+                match (alt, subs::to_track(&tmp, 0)) {
+                    (Some(alt), Some(track)) => {
+                        let (mut ns, ps) = subs::from_track(&track, alt);
+                        ns.name = s.name.clone();
+                        ns.default = s.default;
+                        ns.forced = s.forced;
+                        notes.push(
+                            Note::new(
+                                Severity::Info,
+                                "subtitle_converted",
+                                format!("a {} subtitle track was rewritten as {alt}, which this container can hold", s.codec),
+                            )
+                            .with_detail(alt),
+                        );
+                        let n = out.streams.len();
+                        out.streams.push(ns);
+                        for mut p in ps {
+                            p.stream = n;
+                            out.packets.push(p);
+                        }
+                    }
+                    _ => drop_note(notes, s, "the container cannot hold it".into()),
+                }
+            }
+        }
     }
     if out.streams.is_empty() {
         return Err(Error::new(
@@ -325,20 +699,317 @@ pub fn retarget(media: Media, to: FormatId, opts: &Options, notes: &mut Notes) -
             "none of the streams in this file can be stored in the chosen container",
         ));
     }
-    for mut p in media.packets {
-        if let Some(Some(n)) = keep.get(p.stream) {
-            p.stream = *n;
-            out.packets.push(p);
-        }
-    }
-    for (n, packets) in rewritten {
-        for mut p in packets {
-            p.stream = n;
-            out.packets.push(p);
-        }
-    }
     out.sort_by_dts();
     Ok(out)
+}
+
+/// A decoded picture with its place on the timeline.
+struct Timed {
+    pts: i64,
+    dur: i64,
+    pic: Picture,
+}
+
+/// Apply the edit to each picture and hand the frames that fall on the output timeline to
+/// `sink` as `(time, duration, picture)`, relative to the trim start. With `per` set the output
+/// is constant-rate: a picture is repeated or skipped to fill the grid.
+fn run_pipeline(
+    frames: &mut dyn Iterator<Item = Result<Timed>>,
+    ed: &Edit,
+    per: Option<i64>,
+    physical_rot: u16,
+    progress: &dyn Progress,
+    total: u64,
+    sink: &mut dyn FnMut(i64, i64, &Picture) -> Result<()>,
+) -> Result<()> {
+    let process = |pic: Picture| -> Result<Picture> {
+        let mut pic = pic;
+        if let Some((x, y, w, h)) = ed.crop {
+            pic = pic.crop(
+                x,
+                y,
+                w.min(pic.w.saturating_sub(x & !1)),
+                h.min(pic.h.saturating_sub(y & !1)),
+            )?;
+        }
+        if physical_rot != 0 {
+            pic = pic.rotate(physical_rot);
+        }
+        match ed.flip.as_str() {
+            "horizontal" => pic = pic.flip_horizontal(),
+            "vertical" => pic = pic.flip_vertical(),
+            _ => {}
+        }
+        if ed.width > 0 || ed.height > 0 {
+            let (w, h) = match (ed.width, ed.height) {
+                (w, 0) => (
+                    w,
+                    ((pic.h as f64 * w as f64 / pic.w as f64).round() as usize).max(1),
+                ),
+                (0, h) => (
+                    ((pic.w as f64 * h as f64 / pic.h as f64).round() as usize).max(1),
+                    h,
+                ),
+                (w, h) => (w, h),
+            };
+            pic = pic.scale(w.max(2) & !1, h.max(2) & !1);
+        }
+        Ok(pic)
+    };
+    let mut next_k: i64 = 0;
+    let mut emit = |t0: i64,
+                    t1: i64,
+                    pic: &Picture,
+                    sink: &mut dyn FnMut(i64, i64, &Picture) -> Result<()>|
+     -> Result<()> {
+        let lo = t0.max(ed.start_ns);
+        let hi = t1.min(ed.end_ns());
+        if hi <= lo {
+            return Ok(());
+        }
+        match per {
+            Some(per) => loop {
+                let t = ed.start_ns + next_k * per;
+                if t >= hi {
+                    break Ok(());
+                }
+                if t >= lo {
+                    sink(next_k * per, per, pic)?;
+                }
+                next_k += 1;
+            },
+            None => sink(lo - ed.start_ns, hi - lo, pic),
+        }
+    };
+    let mut pending: Option<Timed> = None;
+    for (n, f) in frames.enumerate() {
+        progress.check_cancelled()?;
+        if n % 8 == 0 {
+            progress.report(n as u64, total.max(1), "video");
+        }
+        let f = f?;
+        let pic = process(f.pic)?;
+        if let Some(prev) = pending.take() {
+            let t1 = if per.is_some() {
+                f.pts.max(prev.pts)
+            } else {
+                prev.pts + prev.dur
+            };
+            emit(prev.pts, t1, &prev.pic, sink)?;
+        }
+        pending = Some(Timed {
+            pts: f.pts,
+            dur: f.dur,
+            pic,
+        });
+    }
+    if let Some(last) = pending.take() {
+        emit(last.pts, last.pts + last.dur, &last.pic, sink)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn transcode_video(
+    media: &Media,
+    si: usize,
+    target: &str,
+    ed: &Edit,
+    to: FormatId,
+    opts: &Options,
+    limits: &Limits,
+    progress: &dyn Progress,
+    notes: &mut Notes,
+) -> Result<(oc_video::Stream, Vec<Packet>)> {
+    let src = media
+        .streams
+        .get(si)
+        .ok_or_else(|| Error::new(ErrorCode::InternalError, "stream index out of range"))?;
+    let mut dec = frames::Decoder::new(src, limits)?;
+    // Constant-rate containers need frames on a grid.
+    let cfr = ed.fps.is_some() || to == AVI || to == Y4M;
+    let out_fps = ed.fps.or(src.fps).unwrap_or((25, 1));
+    let per = oc_video::frame_ns(out_fps).max(1);
+    let physical_rot = (ed.rotate + if holds_rotation(to) { 0 } else { src.rotation }) % 360;
+    let params = frames::EncodeParams {
+        quality: opts.int("quality").unwrap_or(80).clamp(1, 100) as u8,
+        fps: out_fps,
+        keyint: opts.int("keyframe_interval").unwrap_or(120).max(1) as u32,
+        bitrate_kbps: 0,
+    };
+    let keyint = params.keyint;
+    let mut enc: Option<frames::Encoder> = None;
+    let mut stream = oc_video::Stream::new(Kind::Video, target);
+    stream.language = src.language.clone();
+    stream.name = src.name.clone();
+    stream.default = src.default;
+    // The edit's rotation is always applied to the pixels; the container flag only carries the
+    // source's own, where the container has one.
+    stream.rotation = if holds_rotation(to) { src.rotation } else { 0 };
+    let mut packets: Vec<Packet> = Vec::new();
+    let total = media.packets_of(si).count() as u64;
+    let mut frame_no = 0u32;
+    let mut source = media.packets_of(si).map(|p| {
+        Ok(dec.decode(&p.data)?.map(|pic| Timed {
+            pts: p.pts,
+            dur: p.duration.max(per),
+            pic,
+        }))
+    });
+    let mut frames_iter = std::iter::from_fn(|| loop {
+        match source.next()? {
+            Ok(Some(t)) => return Some(Ok(t)),
+            Ok(None) => continue,
+            Err(e) => return Some(Err(e)),
+        }
+    });
+    run_pipeline(
+        &mut frames_iter,
+        ed,
+        cfr.then_some(per),
+        physical_rot,
+        progress,
+        total,
+        &mut |pts, dur, pic| {
+            if enc.is_none() {
+                let e = frames::Encoder::new(target, pic.w, pic.h, &params)?;
+                stream.width = pic.w as u32;
+                stream.height = pic.h as u32;
+                stream.fps = if cfr { Some(out_fps) } else { src.fps };
+                e.describe(&mut stream);
+                enc = Some(e);
+            }
+            let e = enc
+                .as_mut()
+                .ok_or_else(|| Error::new(ErrorCode::InternalError, "encoder missing"))?;
+            let (data, key) = e.encode(pic)?;
+            let key = key || frame_no.is_multiple_of(keyint);
+            frame_no += 1;
+            packets.push(Packet {
+                stream: 0,
+                pts,
+                dts: pts,
+                duration: dur,
+                key,
+                discard_end: 0,
+                data,
+            });
+            Ok(())
+        },
+    )?;
+    if packets.is_empty() {
+        return Err(Error::new(
+            ErrorCode::CorruptFile,
+            "no video frame could be decoded (or the time range is empty)",
+        ));
+    }
+    if cfr && ed.fps.is_none() && src.fps.is_none() {
+        notes.push(Note::new(
+            Severity::Info,
+            "frame_rate_guessed",
+            "the source states no frame rate; 25 fps was used",
+        ));
+    }
+    Ok((stream, packets))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn transcode_audio(
+    media: &Media,
+    si: usize,
+    target: &str,
+    ed: &Edit,
+    to: FormatId,
+    registry: &Registry,
+    limits: &Limits,
+    notes: &mut Notes,
+) -> Result<(oc_video::Stream, Vec<Packet>)> {
+    let src = media
+        .streams
+        .get(si)
+        .ok_or_else(|| Error::new(ErrorCode::InternalError, "stream index out of range"))?;
+    let from_fmt = if codec::is_pcm(&src.codec)
+        || matches!(
+            src.codec.as_str(),
+            codec::OPUS | codec::VORBIS | codec::FLAC | codec::MP3
+        ) {
+        crate::audio::MKA
+    } else {
+        return Err(Error::new(
+            ErrorCode::CodecNotInBuild,
+            format!("{} audio cannot be decoded in this build (it may be covered by patents); it can only be copied", src.codec),
+        ));
+    };
+    let target_codec = match target {
+        "opus" | "vorbis" | "flac" | "pcm" => target,
+        other => {
+            return Err(Error::invalid_option(
+                "audio_codec",
+                format!("{other} audio is not available"),
+            ))
+        }
+    };
+    let tc = match target_codec {
+        "opus" => codec::OPUS,
+        "vorbis" => codec::VORBIS,
+        "flac" => codec::FLAC,
+        _ => codec::PCM_S16,
+    };
+    if !container_allows(to, tc) {
+        return Err(Error::invalid_option(
+            "audio_codec",
+            format!("{target_codec} audio cannot be stored in this container"),
+        ));
+    }
+    let only = Media {
+        streams: vec![src.clone()],
+        packets: {
+            let mut v = if ed.trims() {
+                trimmed(media, si, ed)
+            } else {
+                media.packets_of(si).cloned().collect()
+            };
+            for p in &mut v {
+                p.stream = 0;
+            }
+            v
+        },
+        ..Media::default()
+    };
+    let wrapped = mkv::write(&only, false, "OpenConverter")?;
+    let (clip, n) = crate::audio::decode(from_fmt, &wrapped, limits)?;
+    notes.extend(n);
+    let mka_schema = &registry
+        .format(crate::audio::MKA)
+        .ok_or_else(|| Error::new(ErrorCode::InternalError, "MKA format missing"))?
+        .writer_options;
+    let aopts = mka_schema.validate(&[(
+        "codec".to_string(),
+        oc_core::options::OptionValue::Text(target_codec.to_string()),
+    )])?;
+    let source = crate::audio::source_depth(&clip);
+    let (clip, n) = crate::audio::process(clip, &aopts, limits)?;
+    notes.extend(n);
+    let (bytes, n) = crate::audio::encode(crate::audio::MKA, clip, &aopts, source)?;
+    notes.extend(n);
+    let back = mkv::read(&bytes, limits)?;
+    let mut s = back
+        .streams
+        .into_iter()
+        .next()
+        .ok_or_else(|| Error::new(ErrorCode::InternalError, "no audio stream written"))?;
+    s.language = src.language.clone();
+    s.name = src.name.clone();
+    s.default = src.default;
+    notes.push(
+        Note::new(
+            Severity::Info,
+            "audio_transcoded",
+            format!("the {} audio was converted to {}", src.codec, s.codec),
+        )
+        .with_detail(s.codec.clone()),
+    );
+    Ok((s, back.packets))
 }
 
 /// The first subtitle stream of a video container as cues, with its text codec.
@@ -366,12 +1037,15 @@ pub fn extract_subtitle(
         notes.push(Note::new(
             Severity::Info,
             "subtitle_track_chosen",
-            format!("the file has {} subtitle tracks; the first one was used", found.len()),
+            format!(
+                "the file has {} subtitle tracks; the first one was used",
+                found.len()
+            ),
         ));
     }
     let track = subs::to_track(&media, si)
         .ok_or_else(|| Error::new(ErrorCode::InternalError, "subtitle stream vanished"))?;
-    let kind = if media.streams[si].codec == codec::ASS {
+    let kind = if media.streams.get(si).is_some_and(|s| s.codec == codec::ASS) {
         crate::subtitle::ASS
     } else {
         crate::subtitle::SRT
@@ -381,7 +1055,12 @@ pub fn extract_subtitle(
 
 /// The first audio stream of a video container, re-wrapped as a Matroska audio file so the
 /// audio converters can read it like any other.
-pub fn extract_audio(from: FormatId, data: &[u8], limits: &Limits, notes: &mut Notes) -> Result<Vec<u8>> {
+pub fn extract_audio(
+    from: FormatId,
+    data: &[u8],
+    limits: &Limits,
+    notes: &mut Notes,
+) -> Result<Vec<u8>> {
     let media = read(from, data, limits)?;
     let found: Vec<usize> = media
         .streams
@@ -391,17 +1070,23 @@ pub fn extract_audio(from: FormatId, data: &[u8], limits: &Limits, notes: &mut N
         .map(|(i, _)| i)
         .collect();
     let Some(&si) = found.first() else {
-        return Err(Error::new(ErrorCode::UnsupportedVariant, "this file has no audio track"));
+        return Err(Error::new(
+            ErrorCode::UnsupportedVariant,
+            "this file has no audio track",
+        ));
     };
     if found.len() > 1 {
         notes.push(Note::new(
             Severity::Info,
             "audio_track_chosen",
-            format!("the file has {} audio tracks; the first one was used", found.len()),
+            format!(
+                "the file has {} audio tracks; the first one was used",
+                found.len()
+            ),
         ));
     }
     let mut only = Media {
-        streams: vec![media.streams[si].clone()],
+        streams: media.streams.get(si).cloned().into_iter().collect(),
         title: media.title.clone(),
         ..Media::default()
     };
@@ -414,15 +1099,250 @@ pub fn extract_audio(from: FormatId, data: &[u8], limits: &Limits, notes: &mut N
     mkv::write(&only, false, "OpenConverter")
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn convert(
     from: FormatId,
     to: FormatId,
     data: &[u8],
     opts: &Options,
+    registry: &Registry,
     limits: &Limits,
+    progress: &dyn Progress,
     notes: &mut Notes,
 ) -> Result<Vec<u8>> {
     let media = read(from, data, limits)?;
-    let media = retarget(media, to, opts, notes)?;
+    let media = retarget(media, to, opts, registry, limits, progress, notes)?;
     write(to, &media, opts)
+}
+
+/// Frames of the first video stream as an animation (for GIF, animated WebP or APNG output).
+/// Only timing options apply here; resizing and the like are left to the image transforms.
+pub fn video_to_animation(
+    from: FormatId,
+    data: &[u8],
+    opts: &Options,
+    limits: &Limits,
+    progress: &dyn Progress,
+    notes: &mut Notes,
+) -> Result<Animation> {
+    let media = read(from, data, limits)?;
+    let si = media
+        .streams
+        .iter()
+        .position(|s| s.kind == Kind::Video)
+        .ok_or_else(|| {
+            Error::new(
+                ErrorCode::UnsupportedVariant,
+                "this file has no video track",
+            )
+        })?;
+    let src = media
+        .streams
+        .get(si)
+        .ok_or_else(|| Error::new(ErrorCode::InternalError, "stream index out of range"))?;
+    let ed = Edit::timing_only(opts);
+    let mut dec = frames::Decoder::new(src, limits)?;
+    let per = ed.fps.map(|f| oc_video::frame_ns(f).max(1));
+    let total = media.packets_of(si).count() as u64;
+    let mut source = media.packets_of(si).map(|p| {
+        Ok(dec.decode(&p.data)?.map(|pic| Timed {
+            pts: p.pts,
+            dur: p.duration.max(1),
+            pic,
+        }))
+    });
+    let mut frames_iter = std::iter::from_fn(|| loop {
+        match source.next()? {
+            Ok(Some(t)) => return Some(Ok(t)),
+            Ok(None) => continue,
+            Err(e) => return Some(Err(e)),
+        }
+    });
+    let mut anim = Animation::new(0, 0);
+    run_pipeline(
+        &mut frames_iter,
+        &ed,
+        per,
+        0,
+        progress,
+        total,
+        &mut |_, dur, pic| {
+            oc_image::anim::check_frame(limits, pic.w as u32, pic.h as u32, anim.frames.len())?;
+            if anim.frames.is_empty() {
+                anim.width = pic.w as u32;
+                anim.height = pic.h as u32;
+            }
+            let image = oc_image::Image::new(
+                pic.w as u32,
+                pic.h as u32,
+                oc_image::Layout::Rgba,
+                oc_image::Depth::Eight,
+                pic.to_rgba(),
+            )?;
+            anim.frames.push(oc_image::anim::Frame {
+                image,
+                delay_ms: ((dur + 500_000) / 1_000_000).clamp(1, u32::MAX as i64) as u32,
+            });
+            Ok(())
+        },
+    )?;
+    if anim.frames.is_empty() {
+        return Err(Error::new(
+            ErrorCode::CorruptFile,
+            "no video frame could be decoded (or the time range is empty)",
+        ));
+    }
+    if src.rotation != 0 {
+        notes.push(Note::new(
+            Severity::Info,
+            "rotation_not_applied",
+            "the video is stored rotated; use the rotate option to turn the frames",
+        ));
+    }
+    Ok(anim)
+}
+
+/// A video container holding `anim` (an animated GIF, WebP or APNG, or a single picture shown
+/// for `duration_ms`).
+#[allow(clippy::too_many_arguments)]
+pub fn animation_to_video(
+    anim: &Animation,
+    to: FormatId,
+    opts: &Options,
+    limits: &Limits,
+    progress: &dyn Progress,
+    notes: &mut Notes,
+) -> Result<Vec<u8>> {
+    let ed = Edit::from(opts);
+    let target = match opts.text("video_codec").unwrap_or("auto") {
+        "auto" | "copy" => default_video_codec(to),
+        other => other,
+    };
+    if !container_allows(to, target) {
+        return Err(Error::invalid_option(
+            "video_codec",
+            format!("{target} cannot be stored in this container"),
+        ));
+    }
+    let single = anim.frames.len() == 1;
+    let delays: Vec<i64> = anim
+        .frames
+        .iter()
+        .map(|f| {
+            if f.delay_ms == 0 {
+                100
+            } else {
+                i64::from(f.delay_ms)
+            }
+        })
+        .collect();
+    let cfr = ed.fps.is_some() || to == AVI || to == Y4M || single;
+    // Frame rate of the grid: the one asked for, else the one that fits the most common delay.
+    let out_fps = ed.fps.unwrap_or_else(|| {
+        let mut sorted = delays.clone();
+        sorted.sort_unstable();
+        let mid = sorted.get(sorted.len() / 2).copied().unwrap_or(100);
+        oc_video::fps_from_ns(mid * 1_000_000).unwrap_or((10, 1))
+    });
+    let per = oc_video::frame_ns(out_fps).max(1);
+    let mut t = 0i64;
+    let mut timed = anim.frames.iter().zip(&delays).map(|(f, d)| {
+        let dur = if single {
+            ed.duration_ns.unwrap_or(1_000_000_000)
+        } else {
+            d * 1_000_000
+        };
+        let rgba = anim_over_black(&f.image);
+        let pts = t;
+        t += dur;
+        Ok(Timed {
+            pts,
+            dur,
+            pic: Picture::from_rgba(f.image.width as usize, f.image.height as usize, &rgba)?,
+        })
+    });
+    let mut frames_iter = std::iter::from_fn(|| timed.next());
+    let mut ed2 = Edit::from(opts);
+    if single {
+        ed2.duration_ns = None;
+    }
+    let params = frames::EncodeParams {
+        quality: opts.int("quality").unwrap_or(80).clamp(1, 100) as u8,
+        fps: out_fps,
+        keyint: opts.int("keyframe_interval").unwrap_or(120).max(1) as u32,
+        bitrate_kbps: 0,
+    };
+    let mut enc: Option<frames::Encoder> = None;
+    let mut stream = oc_video::Stream::new(Kind::Video, target);
+    let mut packets: Vec<Packet> = Vec::new();
+    let mut frame_no = 0u32;
+    let _ = limits;
+    run_pipeline(
+        &mut frames_iter,
+        &ed2,
+        cfr.then_some(per),
+        0,
+        progress,
+        anim.frames.len() as u64,
+        &mut |pts, dur, pic| {
+            if enc.is_none() {
+                let e = frames::Encoder::new(target, pic.w, pic.h, &params)?;
+                stream.width = pic.w as u32;
+                stream.height = pic.h as u32;
+                stream.fps = cfr.then_some(out_fps);
+                e.describe(&mut stream);
+                enc = Some(e);
+            }
+            let e = enc
+                .as_mut()
+                .ok_or_else(|| Error::new(ErrorCode::InternalError, "encoder missing"))?;
+            let (data, key) = e.encode(pic)?;
+            packets.push(Packet {
+                stream: 0,
+                pts,
+                dts: pts,
+                duration: dur,
+                key: key || frame_no.is_multiple_of(params.keyint),
+                discard_end: 0,
+                data,
+            });
+            frame_no += 1;
+            Ok(())
+        },
+    )?;
+    if packets.is_empty() {
+        return Err(Error::new(ErrorCode::CorruptFile, "no frame to write"));
+    }
+    if anim.frames.iter().any(|f| {
+        f.image
+            .data
+            .chunks(4)
+            .any(|p| p.get(3).is_some_and(|a| *a < 255))
+    }) {
+        notes.push(Note::new(
+            Severity::Info,
+            "transparency_dropped",
+            "video has no transparency; transparent areas became black",
+        ));
+    }
+    let media = Media {
+        streams: vec![stream],
+        packets,
+        ..Media::default()
+    };
+    write(to, &media, opts)
+}
+
+fn anim_over_black(img: &oc_image::Image) -> Vec<u8> {
+    let (img, _) = oc_image::ops::convert_depth(img, oc_image::Depth::Eight);
+    let (img, _) = oc_image::ops::convert_layout(&img, oc_image::Layout::Rgba, [0, 0, 0]);
+    let mut d = img.data;
+    for px in d.as_chunks_mut::<4>().0 {
+        let a = u32::from(px[3]);
+        for c in &mut px[..3] {
+            *c = ((u32::from(*c) * a + 127) / 255) as u8;
+        }
+        px[3] = 255;
+    }
+    d
 }

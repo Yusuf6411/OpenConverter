@@ -365,7 +365,7 @@ impl Engine {
             archive::convert(
                 from,
                 to,
-                &data,
+                data,
                 &req.input,
                 req.display_name.as_deref(),
                 &opts,
@@ -374,7 +374,7 @@ impl Engine {
                 &mut notes,
             )?
         } else if let Some(out) = if audio::is_audio(from) && audio::is_audio(to) {
-            audio::try_copy(from, to, &data, &opts, &self.limits, &mut notes)?
+            audio::try_copy(from, to, data, &opts, &self.limits, &mut notes)?
         } else {
             None
         } {
@@ -389,7 +389,7 @@ impl Engine {
                 ),
             )
         } else if audio::is_audio(from) {
-            let (clip, n) = audio::decode(from, &data, &self.limits)?;
+            let (clip, n) = audio::decode(from, data, &self.limits)?;
             notes.extend(n);
             progress.report(2, 4, "decode");
             progress.check_cancelled()?;
@@ -404,19 +404,102 @@ impl Engine {
                 out,
                 format!("Decode {} -> Process -> Encode {}", name(from), name(to)),
             )
+        } else if video::is_video(from) && image::is_image(to) {
+            let anim =
+                video::video_to_animation(from, data, &opts, &self.limits, progress, &mut notes)?;
+            let (anim, n) = image::transform_animation(anim, &opts, &self.limits)?;
+            notes.extend(n);
+            let out_ext = req
+                .output
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let name = |id| self.registry.format(id).map_or("video", |f| f.name);
+            if image::writes_animation(to, &out_ext) {
+                let (out, n) = image::encode_animation(to, &anim, &opts)?;
+                notes.extend(n);
+                (
+                    out,
+                    format!(
+                        "Decode {} frames -> Encode animated {}",
+                        name(from),
+                        name(to)
+                    ),
+                )
+            } else {
+                let first = anim
+                    .first_image()
+                    .ok_or_else(|| Error::new(ErrorCode::InternalError, "no frame"))?;
+                let (out, n) = image::encode(to, &first, &opts, &out_ext)?;
+                notes.extend(n);
+                notes.push(Note::new(
+                    Severity::Info,
+                    "image.first_frame_only",
+                    "this output holds one picture; the first frame was used",
+                ));
+                (
+                    out,
+                    format!("Decode first {} frame -> Encode {}", name(from), name(to)),
+                )
+            }
+        } else if image::is_image(from) && video::is_video(to) {
+            let anim = match image::decode_animation(from, data, &self.limits, progress)? {
+                Some((a, n)) => {
+                    notes.extend(n);
+                    a
+                }
+                None => {
+                    let (img, n) = image::decode(from, data, &self.limits, progress)?;
+                    notes.extend(n);
+                    let mut a = oc_image::anim::Animation::new(img.width, img.height);
+                    a.frames.push(oc_image::anim::Frame {
+                        image: img,
+                        delay_ms: 1000,
+                    });
+                    a
+                }
+            };
+            let out =
+                video::animation_to_video(&anim, to, &opts, &self.limits, progress, &mut notes)?;
+            let name = |id| self.registry.format(id).map_or("image", |f| f.name);
+            (
+                out,
+                format!(
+                    "Decode {} frames -> Encode video in {}",
+                    name(from),
+                    name(to)
+                ),
+            )
         } else if let Some((track, kind)) = sub_track {
             let out = subtitle::finish(track, kind, to, &opts, &mut notes)?;
             let name = |id| self.registry.format(id).map_or("video", |f| f.name);
-            (out, format!("Extract subtitles from {} -> Write {}", name(from), name(to)))
+            (
+                out,
+                format!(
+                    "Extract subtitles from {} -> Write {}",
+                    name(from),
+                    name(to)
+                ),
+            )
         } else if video::is_video(from) {
-            let out = video::convert(from, to, &data, &opts, &self.limits, &mut notes)?;
+            let out = video::convert(
+                from,
+                to,
+                data,
+                &opts,
+                &self.registry,
+                &self.limits,
+                progress,
+                &mut notes,
+            )?;
             let name = |id| self.registry.format(id).map_or("video", |f| f.name);
             (
                 out,
                 format!("Read {} streams -> Write {}", name(from), name(to)),
             )
         } else if subtitle::is_subtitle(from) {
-            let (out, n) = subtitle::convert(from, to, &data, &opts)?;
+            let (out, n) = subtitle::convert(from, to, data, &opts)?;
             notes.extend(n);
             let name = |id| self.registry.format(id).map_or("subtitle", |f| f.name);
             (
@@ -424,12 +507,12 @@ impl Engine {
                 format!("Parse {} cues -> Write {}", name(from), name(to)),
             )
         } else if table::is_table(from) {
-            let (out, n) = table::convert(from, to, &data, &opts, &self.limits, progress)?;
+            let (out, n) = table::convert(from, to, data, &opts, &self.limits, progress)?;
             notes.extend(n);
             let name = |id| self.registry.format(id).map_or("table", |f| f.name);
             (out, format!("Read {} -> Write {}", name(from), name(to)))
         } else if from == TXT {
-            let (out, n) = convert_text(&data, &opts)?;
+            let (out, n) = convert_text(data, &opts)?;
             notes.extend(n);
             // Same-format conversions plan to an empty route; describe the actual work.
             (
@@ -447,7 +530,7 @@ impl Engine {
                 && to == image::JPEG
                 && opts.bool("lossless") == Some(true)
             {
-                image::lossless_jpeg(&data, &opts, &self.limits, progress)?
+                image::lossless_jpeg(data, &opts, &self.limits, progress)?
             } else {
                 None
             };
@@ -470,7 +553,7 @@ impl Engine {
                 let animation = if image::writes_animation(to, &out_ext)
                     && opts.text("frames") != Some("first")
                 {
-                    image::decode_animation(from, &data, &self.limits, progress)?
+                    image::decode_animation(from, data, &self.limits, progress)?
                 } else {
                     None
                 };
@@ -492,7 +575,7 @@ impl Engine {
                         ),
                     )
                 } else {
-                    let (img, n) = image::decode(from, &data, &self.limits, progress)?;
+                    let (img, n) = image::decode(from, data, &self.limits, progress)?;
                     notes.extend(n);
                     progress.report(2, 4, "decode");
                     progress.check_cancelled()?;

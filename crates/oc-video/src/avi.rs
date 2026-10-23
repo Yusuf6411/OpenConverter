@@ -1,5 +1,7 @@
 //! AVI (RIFF): Motion JPEG, MPEG-4 part 2 and VP8 video; PCM, MP3 and AC-3 audio.
-use crate::{codec, div_round, fps_from_ns, frame_ns, unsupported, Kind, Media, Packet, Res, Stream};
+use crate::{
+    codec, div_round, fps_from_ns, frame_ns, unsupported, Kind, Media, Packet, Res, Stream,
+};
 use oc_core::{Error, ErrorCode, Limits};
 
 pub fn sniff(data: &[u8]) -> bool {
@@ -10,7 +12,12 @@ fn le16(b: &[u8], o: usize) -> Option<u16> {
     Some(u16::from_le_bytes([*b.get(o)?, *b.get(o + 1)?]))
 }
 fn le32(b: &[u8], o: usize) -> Option<u32> {
-    Some(u32::from_le_bytes([*b.get(o)?, *b.get(o + 1)?, *b.get(o + 2)?, *b.get(o + 3)?]))
+    Some(u32::from_le_bytes([
+        *b.get(o)?,
+        *b.get(o + 1)?,
+        *b.get(o + 2)?,
+        *b.get(o + 3)?,
+    ]))
 }
 
 /// Chunks of a buffer: `(id, body, offset of the chunk header)`. A truncated last chunk is clipped.
@@ -58,14 +65,26 @@ fn parse_strl(list: &[u8]) -> Option<StreamInfo> {
         match &id {
             b"strh" => strh = Some(body),
             b"strf" => strf = Some(body),
-            b"strn" => name = String::from_utf8_lossy(body).trim_end_matches('\0').to_string(),
+            b"strn" => {
+                name = String::from_utf8_lossy(body)
+                    .trim_end_matches('\0')
+                    .to_string()
+            }
             _ => {}
         }
     }
     let (h, f) = (strh?, strf?);
     let kind_tag = h.get(..4)?;
     let (scale, rate, sample_size) = (le32(h, 20)?, le32(h, 24)?, le32(h, 44)?);
-    let mut info = StreamInfo { stream: None, scale, rate, sample_size, kind: Kind::Video, count: 0, bytes: 0 };
+    let mut info = StreamInfo {
+        stream: None,
+        scale,
+        rate,
+        sample_size,
+        kind: Kind::Video,
+        count: 0,
+        bytes: 0,
+    };
     match kind_tag {
         b"vids" => {
             let compression = f.get(16..20)?;
@@ -130,7 +149,10 @@ pub fn read(data: &[u8], limits: &Limits) -> Res<Media> {
     }
     let mut infos: Vec<StreamInfo> = Vec::new();
     // Stream numbers in chunk ids count every `strl`, including ones we cannot carry.
-    let mut media = Media { source: "avi".into(), ..Media::default() };
+    let mut media = Media {
+        source: "avi".into(),
+        ..Media::default()
+    };
     let mut map: Vec<Option<usize>> = Vec::new();
     let mut flags_idx: Vec<u32> = Vec::new();
     let mut data_chunks: Vec<([u8; 4], &[u8])> = Vec::new();
@@ -143,7 +165,12 @@ pub fn read(data: &[u8], limits: &Limits) -> Res<Media> {
             for (id, body, _) in chunks(&data[pos + 12..end]) {
                 if &id != b"LIST" || body.len() < 4 {
                     if &id == b"idx1" {
-                        flags_idx = body.chunks_exact(16).filter_map(|e| le32(e, 4)).collect();
+                        flags_idx = body
+                            .as_chunks::<16>()
+                            .0
+                            .iter()
+                            .filter_map(|e| le32(e, 4))
+                            .collect();
                     }
                     continue;
                 }
@@ -159,7 +186,15 @@ pub fn read(data: &[u8], limits: &Limits) -> Res<Media> {
                                     }
                                     _ => {
                                         map.push(None);
-                                        infos.push(StreamInfo { stream: None, scale: 1, rate: 1, sample_size: 0, kind: Kind::Video, count: 0, bytes: 0 });
+                                        infos.push(StreamInfo {
+                                            stream: None,
+                                            scale: 1,
+                                            rate: 1,
+                                            sample_size: 0,
+                                            kind: Kind::Video,
+                                            count: 0,
+                                            bytes: 0,
+                                        });
                                     }
                                 }
                             }
@@ -183,18 +218,27 @@ pub fn read(data: &[u8], limits: &Limits) -> Res<Media> {
         pos = end + (size & 1);
     }
     if media.streams.is_empty() {
-        return Err(unsupported("no stream in this AVI uses a codec this build can carry"));
+        return Err(unsupported(
+            "no stream in this AVI uses a codec this build can carry",
+        ));
     }
     for (n, (id, body)) in data_chunks.iter().enumerate() {
         limits.check_entries(n as u64)?;
-        let Some(num) = std::str::from_utf8(&id[..2]).ok().and_then(|s| usize::from_str_radix(s, 16).ok()) else {
+        let Some(num) = std::str::from_utf8(&id[..2])
+            .ok()
+            .and_then(|s| usize::from_str_radix(s, 16).ok())
+        else {
             continue;
         };
         if !matches!(&id[2..], b"dc" | b"db" | b"wb") {
             continue;
         }
-        let Some(info) = infos.get_mut(num) else { continue };
-        let Some(Some(si)) = map.get(num).copied() else { continue };
+        let Some(info) = infos.get_mut(num) else {
+            continue;
+        };
+        let Some(Some(si)) = map.get(num).copied() else {
+            continue;
+        };
         let ticks = if info.sample_size > 0 {
             info.bytes / u64::from(info.sample_size)
         } else {
@@ -229,7 +273,16 @@ pub fn read(data: &[u8], limits: &Limits) -> Res<Media> {
 pub fn allows(c: &str) -> bool {
     matches!(
         c,
-        codec::MJPEG | codec::MPEG4 | codec::VP8 | codec::PCM_U8 | codec::PCM_S16 | codec::PCM_S24 | codec::PCM_S32 | codec::PCM_F32 | codec::MP3 | codec::AC3
+        codec::MJPEG
+            | codec::MPEG4
+            | codec::VP8
+            | codec::PCM_U8
+            | codec::PCM_S16
+            | codec::PCM_S24
+            | codec::PCM_S32
+            | codec::PCM_F32
+            | codec::MP3
+            | codec::AC3
     )
 }
 
@@ -311,7 +364,11 @@ pub fn write(media: &Media) -> Res<Vec<u8>> {
                 let fps = s.fps.or_else(|| {
                     let mut pts: Vec<i64> = pkts.iter().map(|p| p.pts).collect();
                     pts.sort_unstable();
-                    pts.windows(2).map(|x| x[1] - x[0]).filter(|g| *g > 0).min().and_then(fps_from_ns)
+                    pts.windows(2)
+                        .map(|x| x[1] - x[0])
+                        .filter(|g| *g > 0)
+                        .min()
+                        .and_then(fps_from_ns)
                 });
                 let (rate, scale) = fps.unwrap_or((25, 1));
                 usec = (frame_ns((rate, scale)) / 1000) as u32;
@@ -323,11 +380,40 @@ pub fn write(media: &Media) -> Res<Vec<u8>> {
                     codec::MPEG4 => b"XVID",
                     _ => b"VP80",
                 };
-                strh.bytes(b"vids").bytes(fourcc).u32(0).u16(0).u16(0).u32(0).u32(scale).u32(rate).u32(0);
-                strh.u32(slots_of(&pkts, fps).1 as u32).u32(0).u32(u32::MAX).u32(0).u16(0).u16(0).u16(s.width as u16).u16(s.height as u16);
-                let extra: &[u8] = if s.codec == codec::MPEG4 { &s.private } else { &[] };
-                strf.u32(40 + extra.len() as u32).u32(s.width).u32(s.height).u16(1).u16(24).bytes(fourcc);
-                strf.u32(s.width * s.height * 3).u32(0).u32(0).u32(0).u32(0).bytes(extra);
+                strh.bytes(b"vids")
+                    .bytes(fourcc)
+                    .u32(0)
+                    .u16(0)
+                    .u16(0)
+                    .u32(0)
+                    .u32(scale)
+                    .u32(rate)
+                    .u32(0);
+                strh.u32(slots_of(&pkts, fps).1 as u32)
+                    .u32(0)
+                    .u32(u32::MAX)
+                    .u32(0)
+                    .u16(0)
+                    .u16(0)
+                    .u16(s.width as u16)
+                    .u16(s.height as u16);
+                let extra: &[u8] = if s.codec == codec::MPEG4 {
+                    &s.private
+                } else {
+                    &[]
+                };
+                strf.u32(40 + extra.len() as u32)
+                    .u32(s.width)
+                    .u32(s.height)
+                    .u16(1)
+                    .u16(24)
+                    .bytes(fourcc);
+                strf.u32(s.width * s.height * 3)
+                    .u32(0)
+                    .u32(0)
+                    .u32(0)
+                    .u32(0)
+                    .bytes(extra);
             }
             _ => {
                 let (tag, bits, align, extra): (u16, u16, u16, Vec<u8>) = match s.codec.as_str() {
@@ -345,22 +431,62 @@ pub fn write(media: &Media) -> Res<Vec<u8>> {
                     }
                     _ => (0x2000, 0, 1, vec![]),
                 };
-                let secs = pkts.iter().map(|p| p.pts + p.duration).max().unwrap_or(0).max(1) as f64 / 1e9;
+                let secs = pkts
+                    .iter()
+                    .map(|p| p.pts + p.duration)
+                    .max()
+                    .unwrap_or(0)
+                    .max(1) as f64
+                    / 1e9;
                 let avg = if codec::is_pcm(&s.codec) {
                     s.sample_rate * u32::from(align)
                 } else {
                     (total_bytes as f64 / secs) as u32
                 };
                 let (scale, rate, sample_size) = if codec::is_pcm(&s.codec) {
-                    (u32::from(align), s.sample_rate * u32::from(align), u32::from(align))
+                    (
+                        u32::from(align),
+                        s.sample_rate * u32::from(align),
+                        u32::from(align),
+                    )
                 } else {
-                    let per = if s.codec == codec::MP3 { mp3_frame_samples(s.sample_rate) } else { 1536 };
+                    let per = if s.codec == codec::MP3 {
+                        mp3_frame_samples(s.sample_rate)
+                    } else {
+                        1536
+                    };
                     (per, s.sample_rate, 0)
                 };
-                strh.bytes(b"auds").u32(0).u32(0).u16(0).u16(0).u32(0).u32(scale).u32(rate).u32(0);
-                let length = if sample_size > 0 { (total_bytes / u64::from(sample_size)) as u32 } else { pkts.len() as u32 };
-                strh.u32(length).u32(0).u32(u32::MAX).u32(sample_size).u16(0).u16(0).u16(0).u16(0);
-                strf.u16(tag).u16(s.channels).u32(s.sample_rate).u32(avg).u16(align).u16(bits).u16(extra.len() as u16).bytes(&extra);
+                strh.bytes(b"auds")
+                    .u32(0)
+                    .u32(0)
+                    .u16(0)
+                    .u16(0)
+                    .u32(0)
+                    .u32(scale)
+                    .u32(rate)
+                    .u32(0);
+                let length = if sample_size > 0 {
+                    (total_bytes / u64::from(sample_size)) as u32
+                } else {
+                    pkts.len() as u32
+                };
+                strh.u32(length)
+                    .u32(0)
+                    .u32(u32::MAX)
+                    .u32(sample_size)
+                    .u16(0)
+                    .u16(0)
+                    .u16(0)
+                    .u16(0);
+                strf.u16(tag)
+                    .u16(s.channels)
+                    .u32(s.sample_rate)
+                    .u32(avg)
+                    .u16(align)
+                    .u16(bits)
+                    .u16(extra.len() as u16)
+                    .bytes(&extra);
                 max_bytes = max_bytes.max(avg);
             }
         }
@@ -370,7 +496,13 @@ pub fn write(media: &Media) -> Res<Vec<u8>> {
         strls.extend_from_slice(&list(b"strl", &body));
     }
     let mut avih = Chunk::new(b"avih");
-    avih.u32(usec).u32(max_bytes).u32(0).u32(0x110).u32(video_frames).u32(0).u32(media.streams.len() as u32);
+    avih.u32(usec)
+        .u32(max_bytes)
+        .u32(0)
+        .u32(0x110)
+        .u32(video_frames)
+        .u32(0)
+        .u32(media.streams.len() as u32);
     avih.u32(1 << 20).u32(w).u32(h).u32(0).u32(0).u32(0).u32(0);
     let mut hdrl_body = avih.finish();
     hdrl_body.extend_from_slice(&strls);
@@ -388,7 +520,11 @@ pub fn write(media: &Media) -> Res<Vec<u8>> {
         let fps = s.fps.or_else(|| {
             let mut pts: Vec<i64> = pkts.iter().map(|p| p.pts).collect();
             pts.sort_unstable();
-            pts.windows(2).map(|x| x[1] - x[0]).filter(|g| *g > 0).min().and_then(fps_from_ns)
+            pts.windows(2)
+                .map(|x| x[1] - x[0])
+                .filter(|g| *g > 0)
+                .min()
+                .and_then(fps_from_ns)
         });
         let per = frame_ns(fps.unwrap_or((25, 1)));
         let (slots, count) = slots_of(&pkts, fps);
@@ -399,8 +535,20 @@ pub fn write(media: &Media) -> Res<Vec<u8>> {
         for (sl, p) in by_slot.into_iter().enumerate() {
             let t = div_round(sl as i128 * i128::from(per), 1);
             all.push(match p {
-                Some(p) => Packet { dts: t, pts: t, ..p.clone() },
-                None => Packet { stream: si, pts: t, dts: t, duration: per, key: false, discard_end: 0, data: Vec::new() },
+                Some(p) => Packet {
+                    dts: t,
+                    pts: t,
+                    ..p.clone()
+                },
+                None => Packet {
+                    stream: si,
+                    pts: t,
+                    dts: t,
+                    duration: per,
+                    key: false,
+                    discard_end: 0,
+                    data: Vec::new(),
+                },
             });
         }
     }
@@ -423,7 +571,11 @@ pub fn write(media: &Media) -> Res<Vec<u8>> {
         let mut c = Chunk::new(&id);
         c.bytes(&p.data);
         let off = 4 + movi.len() as u32;
-        let flags = if p.key || s.kind != Kind::Video { 0x10u32 } else { 0 };
+        let flags = if p.key || s.kind != Kind::Video {
+            0x10u32
+        } else {
+            0
+        };
         idx.extend_from_slice(&id);
         idx.extend_from_slice(&flags.to_le_bytes());
         idx.extend_from_slice(&off.to_le_bytes());
@@ -439,7 +591,10 @@ pub fn write(media: &Media) -> Res<Vec<u8>> {
     body.extend_from_slice(&movi_list);
     body.extend_from_slice(&idx1);
     if body.len() as u64 + 8 > 0x7FFF_FFFF {
-        return Err(Error::new(ErrorCode::LimitExceeded, "AVI files are limited to 2 GB here (no OpenDML)"));
+        return Err(Error::new(
+            ErrorCode::LimitExceeded,
+            "AVI files are limited to 2 GB here (no OpenDML)",
+        ));
     }
     let mut out = b"RIFF".to_vec();
     out.extend_from_slice(&(body.len() as u32).to_le_bytes());

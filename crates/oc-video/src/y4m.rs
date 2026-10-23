@@ -33,16 +33,25 @@ pub fn read(data: &[u8], limits: &Limits) -> Res<Media> {
             "W" => w = v.parse().map_err(|_| corrupt("bad Y4M width"))?,
             "H" => h = v.parse().map_err(|_| corrupt("bad Y4M height"))?,
             "F" => {
-                let (n, d) = v.split_once(':').ok_or_else(|| corrupt("bad Y4M frame rate"))?;
-                fps = (n.parse().map_err(|_| corrupt("bad Y4M rate"))?, d.parse().map_err(|_| corrupt("bad Y4M rate"))?);
+                let (n, d) = v
+                    .split_once(':')
+                    .ok_or_else(|| corrupt("bad Y4M frame rate"))?;
+                fps = (
+                    n.parse().map_err(|_| corrupt("bad Y4M rate"))?,
+                    d.parse().map_err(|_| corrupt("bad Y4M rate"))?,
+                );
             }
             "C" => {
                 pix = match v {
                     "mono" => "gray",
                     s if s.starts_with("420") && !s.starts_with("420p1") => "yuv420p",
-                    s if s == "422" => "yuv422p",
-                    s if s == "444" => "yuv444p",
-                    _ => return Err(unsupported(format!("Y4M colour space {v} is not supported (8-bit only)"))),
+                    "422" => "yuv422p",
+                    "444" => "yuv444p",
+                    _ => {
+                        return Err(unsupported(format!(
+                            "Y4M colour space {v} is not supported (8-bit only)"
+                        )))
+                    }
                 }
             }
             _ => {}
@@ -79,7 +88,10 @@ pub fn read(data: &[u8], limits: &Limits) -> Res<Media> {
             break; // a truncated last frame is dropped
         };
         limits.check_entries(n as u64)?;
-        let t = div_round(i128::from(n) * 1_000_000_000 * i128::from(fps.1), i128::from(fps.0));
+        let t = div_round(
+            i128::from(n) * 1_000_000_000 * i128::from(fps.1),
+            i128::from(fps.0),
+        );
         media.packets.push(Packet {
             stream: 0,
             pts: t,
@@ -93,7 +105,10 @@ pub fn read(data: &[u8], limits: &Limits) -> Res<Media> {
         n += 1;
     }
     if media.packets.is_empty() {
-        return Err(Error::new(ErrorCode::TruncatedFile, "Y4M has no complete frame"));
+        return Err(Error::new(
+            ErrorCode::TruncatedFile,
+            "Y4M has no complete frame",
+        ));
     }
     Ok(media)
 }
@@ -115,8 +130,13 @@ pub fn write(media: &Media) -> Res<Vec<u8>> {
         "gray" => "mono",
         other => return Err(unsupported(format!("Y4M cannot hold {other}"))),
     };
-    let mut out = format!("YUV4MPEG2 W{} H{} F{}:{} Ip A1:1 C{tag}\n", s.width, s.height, fps.0, fps.1).into_bytes();
-    let want = frame_size(&s.pix_fmt, s.width as usize, s.height as usize).ok_or_else(|| unsupported("pixel format"))?;
+    let mut out = format!(
+        "YUV4MPEG2 W{} H{} F{}:{} Ip A1:1 C{tag}\n",
+        s.width, s.height, fps.0, fps.1
+    )
+    .into_bytes();
+    let want = frame_size(&s.pix_fmt, s.width as usize, s.height as usize)
+        .ok_or_else(|| unsupported("pixel format"))?;
     for p in &media.packets {
         if p.data.len() != want {
             return Err(corrupt("a raw frame has the wrong size"));
@@ -138,9 +158,20 @@ mod tests {
         s.height = 2;
         s.fps = Some((30000, 1001));
         s.pix_fmt = "yuv420p".into();
-        let mut m = Media { streams: vec![s], ..Media::default() };
+        let mut m = Media {
+            streams: vec![s],
+            ..Media::default()
+        };
         for i in 0..3u8 {
-            m.packets.push(Packet { stream: 0, pts: 0, dts: 0, duration: 0, key: true, discard_end: 0, data: vec![i; 8 + 2 * 2 * 1] });
+            m.packets.push(Packet {
+                stream: 0,
+                pts: 0,
+                dts: 0,
+                duration: 0,
+                key: true,
+                discard_end: 0,
+                data: vec![i; 8 + 2 * 2],
+            });
         }
         let bytes = write(&m).unwrap_or_default();
         assert!(sniff(&bytes));

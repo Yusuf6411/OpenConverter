@@ -161,5 +161,19 @@ ff("-i", T("vp8.webm"), "-c", "copy", T("vp8.avi"))
 oc(T("vp8.avi"), T("vp8_c.mkv")); compare(T("vp8.webm"), T("vp8_c.mkv"), ("v",))
 oc(T("vp8.webm"), T("vp8_d.avi")); compare(T("vp8.webm"), T("vp8_d.avi"), ("v",))
 
+# Animated images as video sources and sinks.
+ff("-f", "lavfi", "-i", "testsrc=size=96x64:rate=10:duration=1.5", T("anim.gif"))
+for ext in ("mp4", "webm", "mkv", "y4m"):
+    if oc(T("anim.gif"), T("anim_g." + ext)):
+        v = probe(T("anim_g." + ext))
+        st = v["streams"][0] if v else {}
+        check(f"gif -> {ext} size", (st.get("width"), st.get("height")) == (96, 64), st)
+        n = sh("ffprobe", "-v", "error", "-count_frames", "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", T("anim_g." + ext))
+        check(f"gif -> {ext} 15 frames", n.stdout.strip() == "15", n.stdout)
+for ext in ("gif", "webp"):
+    if oc(T("anim_g.webm"), T("anim_b." + ext)) and ext == "gif":
+        n = sh("ffprobe", "-v", "error", "-count_frames", "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", T("anim_b.gif"))
+        check("webm -> gif 15 frames", n.stdout.strip() == "15", n.stdout)
+
 print(f"{total - fails}/{total} checks passed")
 sys.exit(1 if fails else 0)

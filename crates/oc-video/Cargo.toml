@@ -14,3 +14,5 @@ workspace = true
 oc-core = { path = "../oc-core" }
 oc-container = { path = "../oc-container" }
 oc-subtitle = { path = "../oc-subtitle" }
+oc-image = { path = "../oc-image" }
+oc-vp8 = { path = "../oc-vp8" }

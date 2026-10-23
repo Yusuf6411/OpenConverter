@@ -53,7 +53,13 @@ pub fn to_track(media: &Media, si: usize) -> Option<Track> {
                 };
                 let t = |ns: i64| {
                     let cs = (ns.max(0) / NS_PER_MS + 5) / 10;
-                    format!("{}:{:02}:{:02}.{:02}", cs / 360_000, cs / 6000 % 60, cs / 100 % 60, cs % 100)
+                    format!(
+                        "{}:{:02}:{:02}.{:02}",
+                        cs / 360_000,
+                        cs / 6000 % 60,
+                        cs / 100 % 60,
+                        cs % 100
+                    )
                 };
                 text.push_str(&format!(
                     "Dialogue: {layer},{},{},{rest}\n",
@@ -84,7 +90,10 @@ pub fn from_track(track: &Track, target: &str) -> (Stream, Vec<Packet>) {
         let mut lines = events.lines();
         let format = lines.next().unwrap_or("");
         s.private = format!("{head}[Events]\n{format}\n").into_bytes();
-        for (i, l) in lines.filter_map(|l| l.strip_prefix("Dialogue: ")).enumerate() {
+        for (i, l) in lines
+            .filter_map(|l| l.strip_prefix("Dialogue: "))
+            .enumerate()
+        {
             let f: Vec<&str> = l.splitn(10, ',').collect();
             if f.len() < 10 {
                 continue;
@@ -97,7 +106,11 @@ pub fn from_track(track: &Track, target: &str) -> (Stream, Vec<Packet>) {
                 duration: (cue.end_ms - cue.start_ms).max(0) * NS_PER_MS,
                 key: true,
                 discard_end: 0,
-                data: format!("{i},{},{},{},{},{},{},{},{}", f[0], f[3], f[4], f[5], f[6], f[7], f[8], f[9]).into_bytes(),
+                data: format!(
+                    "{i},{},{},{},{},{},{},{},{}",
+                    f[0], f[3], f[4], f[5], f[6], f[7], f[8], f[9]
+                )
+                .into_bytes(),
             });
         }
     } else {

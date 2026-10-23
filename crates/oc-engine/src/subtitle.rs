@@ -256,7 +256,12 @@ pub fn parse(from: FormatId, text: &str, notes: &mut Notes) -> Track {
     }
 }
 
-pub fn convert(from: FormatId, to: FormatId, data: &[u8], opts: &Options) -> Result<(Vec<u8>, Notes)> {
+pub fn convert(
+    from: FormatId,
+    to: FormatId,
+    data: &[u8],
+    opts: &Options,
+) -> Result<(Vec<u8>, Notes)> {
     let mut notes = Notes::new();
     let text = decode(data, opts, &mut notes)?;
     let track = parse(from, &text, &mut notes);
@@ -265,7 +270,13 @@ pub fn convert(from: FormatId, to: FormatId, data: &[u8], opts: &Options) -> Res
 }
 
 /// Apply the timing options to `track` and write it as `to`.
-pub fn finish(mut track: Track, from: FormatId, to: FormatId, opts: &Options, notes: &mut Notes) -> Result<Vec<u8>> {
+pub fn finish(
+    mut track: Track,
+    from: FormatId,
+    to: FormatId,
+    opts: &Options,
+    notes: &mut Notes,
+) -> Result<Vec<u8>> {
     let (ff, ft) = (
         opts.float("fps_from").unwrap_or(0.0),
         opts.float("fps_to").unwrap_or(0.0),
