@@ -24,8 +24,8 @@ pub struct Global {
     pub quant_lf: u32,
     pub ctx: BlockCtx,
     colour_factor: u32,
-    base_x: f32,
-    base_b: f32,
+    pub base_x: f32,
+    pub base_b: f32,
     x_factor_lf: i32,
     b_factor_lf: i32,
 }
@@ -198,6 +198,8 @@ pub fn channel_shifts(ju: [u32; 3]) -> [(usize, usize); 3] {
 pub struct State {
     shifts: [(usize, usize); 3],
     subsampled: bool,
+    /// The LF image came from an LF frame rather than from this frame's own LfCoeff.
+    external_lf: bool,
     /// Frame size in 8x8 blocks.
     bw: usize,
     bh: usize,
@@ -252,6 +254,7 @@ impl State {
         Ok(Self {
             shifts,
             subsampled: fh.jpeg_upsampling != [0; 3],
+            external_lf: false,
             bw,
             bh,
             lf_q: std::array::from_fn(|_| vec![0; bw * bh]),
@@ -265,6 +268,25 @@ impl State {
             naturals: BLOCK_SIZES.iter().map(|&s| natural_order(s)).collect(),
             tables: Tables::new(),
         })
+    }
+
+    /// Take the LF image from an LF frame (already dequantised, in X, Y, B order).
+    pub fn set_external_lf(&mut self, p: &crate::render::Planes) -> Result<()> {
+        if p.ch.len() < 3 || !p.xyb {
+            return Err(bad("LF frame is not an XYB image"));
+        }
+        let (w, h) = (p.w, p.h);
+        if w > self.bw || h > self.bh || self.shifts.iter().any(|s| *s != (0, 0)) {
+            return Err(bad("LF frame does not match the frame"));
+        }
+        for c in 0..3 {
+            for y in 0..h {
+                let d = y * self.bw;
+                self.lf[c][d..d + w].copy_from_slice(&p.ch[c][y * w..(y + 1) * w]);
+            }
+        }
+        self.external_lf = true;
+        Ok(())
     }
 
     /// Read the quantised LF image of LF group `g` (the LfCoeff bundle).
@@ -499,7 +521,11 @@ impl State {
                     let thr = &ctx.lf_thresholds[c];
                     lf_idx *= thr.len() + 1;
                     let (hs, vs) = self.shifts[c];
-                    let q = self.lf_q[c][((y0 + y) >> vs) * self.bw + ((x0 + x) >> hs)];
+                    let q = if self.external_lf {
+                        0
+                    } else {
+                        self.lf_q[c][((y0 + y) >> vs) * self.bw + ((x0 + x) >> hs)]
+                    };
                     lf_idx += thr.iter().filter(|&&t| q > t).count();
                 }
                 let hf_idx = ctx
@@ -665,7 +691,7 @@ impl State {
         }
 
         // LF: chroma from luma, then adaptive smoothing
-        if !self.subsampled {
+        if !self.subsampled && !self.external_lf {
             let kx =
                 global.base_x + (global.x_factor_lf - 128) as f32 / global.colour_factor as f32;
             let kb =
@@ -676,7 +702,10 @@ impl State {
                 lb[i] += kb * ly[i];
             }
         }
-        if fh.flags & crate::header::FLAG_SKIP_ADAPTIVE_LF == 0 && !self.subsampled {
+        if fh.flags & crate::header::FLAG_SKIP_ADAPTIVE_LF == 0
+            && !self.subsampled
+            && !self.external_lf
+        {
             self.smooth_lf(global, lf_raw);
         }
 

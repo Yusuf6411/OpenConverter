@@ -310,7 +310,7 @@ pub struct ImageHeader {
     pub intensity_target: f32,
     pub opsin: Opsin,
     /// Custom upsampling kernels, when the file carries them.
-    pub custom_up_weights: bool,
+    pub up: crate::upsample::Kernels,
 }
 
 fn size_header(br: &mut Br) -> Result<(u32, u32)> {
@@ -439,7 +439,7 @@ impl ImageHeader {
         }
         let default_m = br.bool()?;
         let mut opsin = Opsin::default_matrix();
-        let mut custom_up_weights = false;
+        let mut up = crate::upsample::Kernels::default_kernels();
         if !default_m {
             if xyb_encoded && !br.bool()? {
                 for row in &mut opsin.inv_mat {
@@ -456,11 +456,10 @@ impl ImageHeader {
                 opsin.quant_bias_num = br.f16()?;
             }
             let mask = br.read(3)?;
-            for (bit, count) in [(1, 15), (2, 55), (4, 210)] {
+            for (bit, target) in [(1, &mut up.up2), (2, &mut up.up4), (4, &mut up.up8)] {
                 if mask & bit != 0 {
-                    custom_up_weights = true;
-                    for _ in 0..count {
-                        br.f16()?;
+                    for v in target.iter_mut() {
+                        *v = br.f16()?;
                     }
                 }
             }
@@ -477,7 +476,7 @@ impl ImageHeader {
             colour,
             intensity_target,
             opsin,
-            custom_up_weights,
+            up,
         })
     }
 
@@ -938,6 +937,15 @@ impl FrameHeader {
             v = (v + (1 << s) - 1) >> s;
         }
         v
+    }
+
+    /// Width of the frame's output: the frame width, reduced for LF frames.
+    pub fn out_w(&self) -> u32 {
+        self.sample_dim(self.width, 1)
+    }
+
+    pub fn out_h(&self) -> u32 {
+        self.sample_dim(self.height, 1)
     }
 
     pub fn color_w(&self) -> u32 {

@@ -287,3 +287,137 @@ fn split_pair(v: &mut [Vec<f32>], i: usize, j: usize) -> (&mut Vec<f32>, &Vec<f3
         (&mut b[0], &a[j])
     }
 }
+
+/// Parameters of noise synthesis.
+#[derive(Debug)]
+pub struct Noise {
+    /// Strength as a function of intensity, at eight points.
+    pub lut: [f32; 8],
+    /// The base chroma-from-luma factors for X and B.
+    pub corr: (f32, f32),
+}
+
+const SPLITMIX_STEP: u64 = 0x9E37_79B9_7F4A_7C15;
+
+fn split_mix(z: u64) -> u64 {
+    let z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    let z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// Eight interleaved xorshift128+ generators.
+struct Rng {
+    s0: [u64; 8],
+    s1: [u64; 8],
+}
+
+impl Rng {
+    fn new(seed0: u64, seed1: u64) -> Self {
+        let mut s0 = [0u64; 8];
+        let mut s1 = [0u64; 8];
+        s0[0] = split_mix(seed0.wrapping_add(SPLITMIX_STEP));
+        s1[0] = split_mix(seed1.wrapping_add(SPLITMIX_STEP));
+        for i in 1..8 {
+            s0[i] = split_mix(s0[i - 1]);
+            s1[i] = split_mix(s1[i - 1]);
+        }
+        Self { s0, s1 }
+    }
+
+    /// Sixteen floats in `[1, 2)`.
+    fn next(&mut self) -> [f32; 16] {
+        let mut out = [0f32; 16];
+        for i in 0..8 {
+            let mut a = self.s0[i];
+            let b = self.s1[i];
+            let ret = a.wrapping_add(b);
+            self.s0[i] = b;
+            a ^= a << 23;
+            self.s1[i] = a ^ (b ^ (a >> 18) ^ (b >> 5));
+            out[2 * i] = f32::from_bits(((ret as u32) >> 9) | 0x3f80_0000);
+            out[2 * i + 1] = f32::from_bits((((ret >> 32) as u32) >> 9) | 0x3f80_0000);
+        }
+        out
+    }
+}
+
+/// Add the synthesised noise to the X, Y and B planes of `p` (frame size, before the colour
+/// transform). `visible` and `invisible` seed the generator.
+pub fn add_noise(p: &mut Planes, fh: &FrameHeader, n: &Noise, visible: u64, invisible: u64) {
+    if p.colour != 3 || p.ch.len() < 3 {
+        return;
+    }
+    let (w, h) = (p.w, p.h);
+    let gd = fh.group_dim() as usize;
+    let seed0 = (visible << 32).wrapping_add(invisible);
+    // one random field per colour channel, laid out like the frame
+    let mut field: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0f32; w * h]);
+    for gy in 0..h.div_ceil(gd) {
+        for gx in 0..w.div_ceil(gd) {
+            let (x0, y0) = (gx * gd, gy * gd);
+            let seed1 = ((x0 as u64) << 32).wrapping_add(y0 as u64);
+            let (gw, gh) = (gd.min(w - x0), gd.min(h - y0));
+            let pairs = gw.div_ceil(16);
+            let mut rng = Rng::new(seed0, seed1);
+            for f in &mut field {
+                for y in 0..gh {
+                    for k in 0..pairs {
+                        let v = rng.next();
+                        for (i, &r) in v.iter().enumerate() {
+                            let x = k * 16 + i;
+                            if x < gw {
+                                f[(y0 + y) * w + x0 + x] = r;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // 5x5 high-pass: every sample 0.16, the centre 0.16 - 4
+    let mirror = |i: isize, len: usize| {
+        let len = len as isize;
+        let mut i = i;
+        while i < 0 || i >= len {
+            i = if i < 0 { -i - 1 } else { 2 * len - i - 1 };
+        }
+        i as usize
+    };
+    let conv: [Vec<f32>; 3] = std::array::from_fn(|c| {
+        let src = &field[c];
+        let mut out = vec![0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let mut sum = 0f32;
+                for dy in 0..5isize {
+                    let sy = mirror(y as isize + dy - 2, h);
+                    for dx in 0..5isize {
+                        sum += src[sy * w + mirror(x as isize + dx - 2, w)];
+                    }
+                }
+                out[y * w + x] = sum * 0.16 - src[y * w + x] * 4.0;
+            }
+        }
+        out
+    });
+    let mut lut = [0f32; 9];
+    lut[..8].copy_from_slice(&n.lut);
+    lut[8] = n.lut[7];
+    let (corr_x, corr_b) = n.corr;
+    let [px, py, pb] = &mut p.ch[..3] else { return };
+    for i in 0..w * h {
+        let in_x = px[i] + py[i];
+        let in_y = py[i] - px[i];
+        let sx = (in_x * 3.0).max(0.0);
+        let sy = (in_y * 3.0).max(0.0);
+        let (ix, iy) = ((sx as usize).min(7), (sy as usize).min(7));
+        let (fx, fy) = (sx - ix as f32, sy - iy as f32);
+        let ax = (lut[ix + 1] - lut[ix]) * fx + lut[ix];
+        let ay = (lut[iy + 1] - lut[iy]) * fy + lut[iy];
+        let nx = 0.22 * ax * (0.0078125 * conv[0][i] + 0.9921875 * conv[2][i]);
+        let ny = 0.22 * ay * (0.0078125 * conv[1][i] + 0.9921875 * conv[2][i]);
+        px[i] += corr_x * (nx + ny) + nx - ny;
+        py[i] += nx + ny;
+        pb[i] += corr_b * (nx + ny);
+    }
+}

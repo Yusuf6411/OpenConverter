@@ -70,6 +70,8 @@ pub struct Decoded {
     pub xyb: Option<[Vec<f32>; 3]>,
     /// Patches to add once the frame is reconstructed.
     pub patches: Option<crate::features::Patches>,
+    /// Noise to synthesise once the frame is reconstructed.
+    pub noise: Option<crate::features::Noise>,
     /// Bytes of the codestream this frame occupied.
     pub consumed: usize,
 }
@@ -175,9 +177,15 @@ pub(crate) fn decode_group(
 }
 
 /// Decode one frame starting at `data[0]`. Frames that need the VarDCT path are rejected.
-pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<Decoded> {
+pub fn decode_frame(
+    data: &[u8],
+    img: &ImageHeader,
+    limits: &Limits,
+    lf_frames: &[Option<crate::render::Planes>; 3],
+) -> Result<Decoded> {
     let mut br = Br::new(data);
     let fh = FrameHeader::parse(&mut br, img)?;
+    let lf = lf_frames.get(fh.lf_level as usize).and_then(|p| p.as_ref());
     let toc = Toc::parse(&mut br, &fh)?;
     let header_len = toc.data_start;
     let mut secs = Sections::new(&toc, data)?;
@@ -193,19 +201,13 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
     if fh.flags & FLAG_SPLINES != 0 {
         return Err(unsupported("splines are not supported"));
     }
-    if fh.flags & FLAG_NOISE != 0 {
-        return Err(unsupported("noise synthesis is not supported"));
-    }
-    if fh.upsampling != 1 || fh.ec_upsampling.iter().any(|&u| u != 1) {
-        return Err(unsupported("upsampled frames are not supported"));
-    }
     if fh.do_ycbcr && (fh.modular || img.xyb_encoded || fh.encoded_color_channels != 3) {
         return Err(unsupported("unsupported YCbCr frame"));
     }
     let vard = !fh.modular;
     if vard {
-        if fh.use_lf_frame() || fh.lf_level != 0 {
-            return Err(unsupported("progressive LF frames are not supported"));
+        if fh.use_lf_frame() && lf.is_none() {
+            return Err(bad("frame uses an LF frame that was not decoded"));
         }
         if !img.xyb_encoded && !fh.do_ycbcr {
             return Err(unsupported(
@@ -218,6 +220,15 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
     let mut br = secs.open(0)?;
     let patches = if fh.flags & FLAG_PATCHES != 0 {
         Some(crate::features::Patches::parse(&mut br, img, &fh)?)
+    } else {
+        None
+    };
+    let noise_lut = if fh.flags & FLAG_NOISE != 0 {
+        let mut lut = [0f32; 8];
+        for v in &mut lut {
+            *v = br.read(10)? as f32 / 1024.0;
+        }
+        Some(lut)
     } else {
         None
     };
@@ -253,8 +264,10 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
             infos.push(Chan::info(cw, ch, 0, 0));
         }
     }
-    for e in &img.ec {
-        let shift = e.dim_shift as i32;
+    for (e, &up) in img.ec.iter().zip(&fh.ec_upsampling) {
+        let shift = (up.trailing_zeros() + e.dim_shift)
+            .checked_sub(fh.upsampling.trailing_zeros())
+            .ok_or_else(|| bad("extra channel is upsampled less than the colour channels"))? as i32;
         infos.push(Chan::info(
             cw.div_ceil(1 << shift),
             ch.div_ceil(1 << shift),
@@ -283,9 +296,12 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
         None => None,
     };
     let lf_raw = lf_dequant.map(|v| v * 128.0);
+    if let (Some(vd), true) = (vd.as_mut(), fh.use_lf_frame()) {
+        vd.set_external_lf(lf.ok_or_else(|| bad("missing LF frame"))?)?;
+    }
     for g in 0..num_lf {
         let mut br = secs.open(1 + g)?;
-        if let (Some(vd), Some(gl)) = (vd.as_mut(), global.as_ref()) {
+        if let (Some(vd), Some(gl), false) = (vd.as_mut(), global.as_ref(), fh.use_lf_frame()) {
             vd.read_lf_coeff(
                 &mut br,
                 &fh,
@@ -369,12 +385,17 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
         }
         xyb = Some(planes);
     }
+    let noise = noise_lut.map(|lut| crate::features::Noise {
+        lut,
+        corr: global.as_ref().map_or((0.0, 1.0), |g| (g.base_x, g.base_b)),
+    });
     Ok(Decoded {
         header: fh,
         chans,
         lf_dequant,
         xyb,
         patches,
+        noise,
         consumed,
     })
 }

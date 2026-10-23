@@ -1,7 +1,8 @@
 //! Turning decoded frames into floating-point sample planes and, at the end, into output pixels.
 use crate::colour;
 use crate::frame::{unsupported, Decoded};
-use crate::header::{EcType, ImageHeader};
+use crate::header::{BitDepth, EcType, ImageHeader};
+use crate::upsample::upsample;
 use oc_core::{Note, Notes, Result, Severity};
 
 /// A set of equally sized sample planes: the colour planes (1 or 3) followed by the extra
@@ -28,9 +29,6 @@ pub struct Picture {
 /// The planes of a decoded frame at the frame's size.
 pub fn frame_planes(dec: Decoded, img: &ImageHeader) -> Result<Planes> {
     let fh = &dec.header;
-    if img.bit_depth.exp_bits.is_some() {
-        return Err(unsupported("floating-point samples are not supported"));
-    }
     let (w, h) = (fh.color_w() as usize, fh.color_h() as usize);
     let cc = fh.encoded_color_channels;
     let mut ch: Vec<Vec<f32>>;
@@ -67,10 +65,10 @@ pub fn frame_planes(dec: Decoded, img: &ImageHeader) -> Result<Planes> {
             ch = vec![x, y, b];
             xyb = true;
         } else {
-            let maxv = ((1u64 << img.bit_depth.bits) - 1) as f32;
+            let bd = &img.bit_depth;
             ch = dec.chans[..cc]
                 .iter()
-                .map(|c| c.d.iter().map(|&v| v as f32 / maxv).collect())
+                .map(|c| c.d.iter().map(|&v| sample_to_float(v, bd)).collect())
                 .collect();
             xyb = false;
         }
@@ -82,21 +80,56 @@ pub fn frame_planes(dec: Decoded, img: &ImageHeader) -> Result<Planes> {
     } else {
         cc
     };
+    let color_log = fh.upsampling.trailing_zeros();
+    let (fw, fhh) = (fh.out_w() as usize, fh.out_h() as usize);
+    // Each channel is stored at its own scale; bring them all to the frame's size.
+    let mut sizes = vec![(w, h, color_log); ch.len()];
     for (i, e) in img.ec.iter().enumerate() {
-        let c = &dec.chans[ec_base + i];
-        if c.w != w || c.h != h {
-            return Err(unsupported("extra channels with a different size"));
-        }
-        let maxv = ((1u64 << e.bit_depth.bits.min(32)) - 1) as f32;
-        ch.push(c.d.iter().map(|&v| v as f32 / maxv).collect());
+        let c = dec.chans.get(ec_base + i).ok_or_else(|| unsupported("missing extra channel"))?;
+        ch.push(c.d.iter().map(|&v| sample_to_float(v, &e.bit_depth)).collect());
+        let log = fh.ec_upsampling.get(i).map_or(0, |u| u.trailing_zeros()) + e.dim_shift;
+        sizes.push((c.w, c.h, log));
     }
-    Ok(Planes {
-        w,
-        h,
-        ch,
-        colour,
-        xyb,
-    })
+    for (plane, &(pw, ph, log)) in ch.iter_mut().zip(&sizes) {
+        if log == 0 && pw == fw && ph == fhh {
+            continue;
+        }
+        let (up, uw, uh) = upsample(std::mem::take(plane), pw, ph, log, &img.up);
+        if uw < fw || uh < fhh {
+            return Err(unsupported("channel is smaller than the frame"));
+        }
+        *plane = if uw == fw && uh == fhh {
+            up
+        } else {
+            let mut cropped = Vec::with_capacity(fw * fhh);
+            for y in 0..fhh {
+                cropped.extend_from_slice(&up[y * uw..y * uw + fw]);
+            }
+            cropped
+        };
+    }
+    Ok(Planes { w: fw, h: fhh, ch, colour, xyb })
+}
+
+/// A decoded Modular sample as a float, nominally in 0..=1: integers are scaled by the bit
+/// depth, floating-point samples hold the bits of a small float.
+fn sample_to_float(v: i32, bd: &BitDepth) -> f32 {
+    let Some(exp_bits) = bd.exp_bits else {
+        return v as f32 / ((1u64 << bd.bits.min(32)) - 1) as f32;
+    };
+    let bits = v as u32;
+    let mant_bits = bd.bits - exp_bits - 1;
+    let sign = if bd.bits >= 32 { bits >> 31 } else { (bits >> (bd.bits - 1)) & 1 };
+    let exp = (bits >> mant_bits) & ((1 << exp_bits) - 1);
+    let mant = bits & ((1 << mant_bits) - 1);
+    let bias = (1i32 << (exp_bits - 1)) - 1;
+    let frac = mant as f32 / (1u64 << mant_bits) as f32;
+    let mag = if exp == 0 { frac * 2f32.powi(1 - bias) } else { (1.0 + frac) * 2f32.powi(exp as i32 - bias) };
+    if sign != 0 {
+        -mag
+    } else {
+        mag
+    }
 }
 
 /// JPEG's YCbCr to RGB on planes stored in the order Cb, Y, Cr; the planes hold the AC part

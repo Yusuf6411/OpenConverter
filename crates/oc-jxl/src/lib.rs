@@ -17,6 +17,7 @@ mod frame;
 mod header;
 mod modular;
 mod render;
+mod upsample;
 mod vardct;
 
 use oc_core::{Error, ErrorCode, Limits, Note, Notes, Result, Severity};
@@ -118,23 +119,40 @@ pub fn decode(data: &[u8], limits: &Limits) -> Result<(Picture, Notes)> {
         ));
     }
     let mut slots: [Option<std::rc::Rc<render::Planes>>; 4] = Default::default();
+    let mut frame_idx = 0u64;
+    // decoded LF frames by level - 1 (XYB, before the colour transform)
+    let mut lf_frames: [Option<render::Planes>; 3] = Default::default();
     loop {
         if pos >= cs.len() {
             return Err(Error::truncated(
                 "JPEG XL codestream ends before the first frame",
             ));
         }
-        let mut dec = frame::decode_frame(&cs[pos..], &img, limits)?;
+        let mut dec = frame::decode_frame(&cs[pos..], &img, limits, &lf_frames)?;
+        let this_idx = frame_idx;
+        frame_idx += 1;
         pos += dec.consumed;
         let fh = dec.header.clone();
         let patches = dec.patches.take();
+        let noise = dec.noise.take();
         let mut planes = render::frame_planes(dec, &img)?;
         if let Some(p) = patches {
             p.apply(&mut planes, &slots, &img)?;
         }
+        if let Some(n) = noise {
+            // We stop at the first keyframe, so no visible frame precedes this one.
+            let (visible, invisible) = if fh.is_keyframe() { (1, 0) } else { (0, 1 + this_idx) };
+            features::add_noise(&mut planes, &fh, &n, visible, invisible);
+        }
         let slot = fh.save_as_reference as usize;
         if fh.can_reference() && fh.save_before_ct {
             slots[slot] = Some(std::rc::Rc::new(compose::embed(&planes, &fh, &img)));
+        }
+        if fh.lf_level > 0 {
+            if let Some(slot) = lf_frames.get_mut(fh.lf_level as usize - 1) {
+                *slot = Some(planes);
+            }
+            continue;
         }
         render::to_native(&mut planes, &img);
         if !fh.frame_type.is_normal() {
