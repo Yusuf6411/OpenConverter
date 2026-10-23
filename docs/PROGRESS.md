@@ -80,6 +80,18 @@ Format notes: [formats/containers.md](formats/containers.md), [formats/vp8.md](f
 - [~] M5.11 subtitle burn-in: done in Phase 6a work. `burn_subtitles` on video outputs draws the first text subtitle track (white bold text, black outline, cue alignment 1-9, greedy wrapping) through the SVG renderer and installed fonts, then re-encodes. Not done: ASS styling, positioning and animation (only text and keypad alignment are used), overlapping cues (the first alive one is drawn), bitmap subtitles, choosing a track.
 - No v2.4.0 tag; the next release is v2.5.0.
 
+## Phase 6a: Fonts, raster, SVG, PDF
+Format notes: [formats/fonts.md](formats/fonts.md), [formats/svg.md](formats/svg.md), [formats/pdf.md](formats/pdf.md).
+- [~] M6.1 fonts: `oc-font` (TrueType, CFF, WOFF, system font database, outlines) and font conversion routes. See formats/fonts.md for what is not done.
+- [x] M6.2 `oc-raster`: anti-aliased paths, strokes, clips, gradients, blending.
+- [~] M6.3 SVG render (read only; no SVG export). See formats/svg.md.
+- [~] M6.4 PDF parser with recovery, RC4 and AES decryption, every filter except JPX and JBIG2, text extraction to TXT (Markdown and HTML writers exist in `oc-pdf` and are hooked up in Phase 6b when those formats exist). Not done: metadata, outline and attachment listing.
+- [ ] M6.5 JPEG 2000 and JBIG2: not done (images using them are left out of renders with a note).
+- [~] M6.6 PDF renderer: compared with Poppler on 24 generated files (graphics, gradients, mesh shadings, patterns, transparency, Type 3, annotations, optional content, encrypted and damaged variants).
+- [~] M6.7 PDF writer: pictures to PDF (JPEG passthrough, animation frames as pages), page selection, reorder, rotate, compress, strip metadata, AES-256 encryption, checked with pikepdf. Not done: merge of several inputs (one input per conversion), linearize, PDF/A-2b.
+- [ ] M6.8 PDF UI: the generic option cards show the PDF options (pages, resolution, password); page thumbnails and a page picker are not done.
+- Fuzz target `pdf`. Release v2.5.0 (tagged locally).
+
 ## Known gaps
 - 1.x Python test cases are not ported yet; they are available at tag v1.0.0. Port them as each Rust codec lands (M1.x, M2.x).
 - cargo-deny passes locally (advisories, bans, licenses, sources); the Tauri tree is allowed through named wrappers (ADR-0005).
@@ -89,6 +101,6 @@ Format notes: [formats/containers.md](formats/containers.md), [formats/vp8.md](f
 - [~] M2.8 [COMPATIBILITY.md](COMPATIBILITY.md) is generated from the registry by `tools/gen_compat.py`; screenshots of the UI are in `docs/screenshots/`.
 
 ## Next step
-Phase 6a: raster engine, fonts, SVG, then PDF.
+Phase 6b: Document IR, Markdown, HTML, DOCX/ODT/RTF/EPUB, layout to PDF.
 
 - **Tables (CSV, TSV, JSON, XLSX, ODS)**: `oc-sheet` reads and writes RFC 4180 delimited text (delimiter detection, lenient quotes, BOM, ragged rows padded), flat JSON tables (own strict parser) and, since Phase 3, XLSX and ODS workbooks (M3.5). Engine options mirror 1.x. Fuzz targets `table` and `workbook`.
