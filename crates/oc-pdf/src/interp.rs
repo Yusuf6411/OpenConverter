@@ -949,7 +949,7 @@ impl<'a> Interp<'a> {
                 let gm = Transform::new(fm[0], fm[1], fm[2], fm[3], fm[4], fm[5]).then(&after_tm);
                 let origin = after_tm.apply(Pt::new(0.0, 0.0));
                 let adv = after_tm.apply_vec(Pt::new(ch.width / 1000.0, 0.0)).len();
-                run.glyphs.push(PlacedGlyph { gid: None, to_page: gm, unicode: ch.unicode.clone(), origin, advance: adv, code: ch.code, is_space: ch.is_space });
+                run.glyphs.push(PlacedGlyph { gid: None, to_page: gm, unicode: ch.unicode.clone(), origin, advance: adv, code: ch.code, is_space: ch.is_space && ch.unicode.trim().is_empty() });
                 if visible && self.depth < MAX_DEPTH {
                     let proc_stream = ch.name.as_ref().and_then(|n| font.type3.as_ref().and_then(|t| t.procs.get(n).cloned()));
                     if let (Some(ps), Some(t3)) = (proc_stream, font.type3.as_ref()) {
@@ -971,7 +971,7 @@ impl<'a> Interp<'a> {
                 let to_page = Transform::scale(us, us).then(&Transform::translate(origin_shift.0, origin_shift.1)).then(&after_tm);
                 let origin = to_page.apply(Pt::new(0.0, 0.0));
                 let adv = after_tm.apply_vec(Pt::new(ch.width / 1000.0, 0.0)).len();
-                run.glyphs.push(PlacedGlyph { gid: ch.gid, to_page, unicode: ch.unicode.clone(), origin, advance: adv, code: ch.code, is_space: ch.is_space });
+                run.glyphs.push(PlacedGlyph { gid: ch.gid, to_page, unicode: ch.unicode.clone(), origin, advance: adv, code: ch.code, is_space: ch.is_space && ch.unicode.trim().is_empty() });
             }
             let sc = after_tm.apply_vec(Pt::new(0.0, 1.0)).len();
             run.size = sc;

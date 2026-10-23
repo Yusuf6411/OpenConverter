@@ -19,3 +19,4 @@ pub mod ops;
 pub mod shading;
 pub mod interp;
 pub mod render;
+pub mod text;

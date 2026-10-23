@@ -162,6 +162,19 @@ def stm(d, data):
     if isinstance(data, str): data = data.encode('latin1')
     return b'<< ' + d.encode() + f' /Length {len(data)} >>\nstream\n'.encode() + data + b'\nendstream'
 
+def columns(path):
+    c = canvas.Canvas(path, pagesize=A4)
+    c.setFont('Helvetica-Bold', 20); c.drawString(50, 790, 'Two column article title')
+    words = 'lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua'.split()
+    for col, x in enumerate([50, 330]):
+        c.setFont('Helvetica', 10)
+        y = 750
+        for i in range(30):
+            line = ' '.join(words[(i * 3 + col * 7 + k) % len(words)] for k in range(5))
+            c.drawString(x, y, f'{col}{i:02d} ' + line); y -= 13
+    c.setFont('Helvetica-Oblique', 9); c.drawString(50, 60, 'Footer line across the page')
+    c.save()
+
 def features(out):
     base = {1: b'<< /Type /Catalog /Pages 2 0 R >>', 2: b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>'}
     def page(res, content, extra=''):
@@ -224,7 +237,7 @@ def main():
     os.makedirs(out, exist_ok=True)
     tmp = tempfile.mkdtemp()
     text_std(f'{out}/text_std.pdf'); graphics(f'{out}/graphics.pdf'); gradients(f'{out}/gradients.pdf'); images(f'{out}/images.pdf'); ttf(f'{out}/ttf.pdf')
-    lo_docs(out, tmp); variants(out); features(out)
+    lo_docs(out, tmp); variants(out); features(out); columns(f'{out}/columns.pdf')
     for f in os.listdir(out):
         if f.startswith('_i'): os.remove(f'{out}/{f}')
     print(sorted(os.listdir(out)))

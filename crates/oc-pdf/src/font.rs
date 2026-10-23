@@ -379,7 +379,7 @@ impl PdfFont {
                 }
             }
             self.gids[code] = gid;
-            self.unis[code] = uni.unwrap_or_else(|| if (32..127).contains(&code) && name.is_none() { char::from(code as u8).to_string() } else { String::new() });
+            self.unis[code] = uni.unwrap_or_else(|| if (32..127).contains(&code) && (name.is_none() || self.kind == Kind::Type3) { char::from(code as u8).to_string() } else { String::new() });
         }
         if !self.embedded && (self.name.starts_with("Symbol") || self.name.starts_with("ZapfDingbats")) && !has_encoding {
             // the built-in encodings of these two fonts are not available
@@ -570,6 +570,10 @@ impl PdfFont {
         for code in 0..256 {
             if let Some(n) = &names[code] {
                 self.unis[code] = name_to_unicode(n).unwrap_or_default();
+            }
+            if self.unis[code].is_empty() && (33..127).contains(&code) {
+                // glyph names of a Type 3 font are arbitrary; the code is the best guess
+                self.unis[code] = char::from(code as u8).to_string();
             }
         }
         self.type3 = Some(Type3 { font_matrix: m, procs, resources: pdf.dget_dict(fd, "Resources"), names });
