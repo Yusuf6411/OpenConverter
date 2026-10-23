@@ -84,7 +84,10 @@ pub fn is_ws(b: u8) -> bool {
 }
 
 pub fn is_delim(b: u8) -> bool {
-    matches!(b, b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%')
+    matches!(
+        b,
+        b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%'
+    )
 }
 
 /// A token or keyword that is not an object (`obj`, `endobj`, `R`, content operators ...).
@@ -157,7 +160,8 @@ impl<'a> Lexer<'a> {
             }
             out.push(b);
         }
-        String::from_utf8(out.clone()).unwrap_or_else(|_| out.iter().map(|b| char::from(*b)).collect())
+        String::from_utf8(out.clone())
+            .unwrap_or_else(|_| out.iter().map(|b| char::from(*b)).collect())
     }
 
     fn read_string(&mut self) -> Vec<u8> {
@@ -281,14 +285,22 @@ impl<'a> Lexer<'a> {
         } else {
             match cleaned.parse::<i64>() {
                 Ok(v) => Some(Obj::Int(if neg { -v } else { v })),
-                Err(_) => Some(Obj::Real(cleaned.parse::<f64>().map_or(0.0, |v| if neg { -v } else { v }))),
+                Err(_) => Some(Obj::Real(cleaned.parse::<f64>().map_or(0.0, |v| {
+                    if neg {
+                        -v
+                    } else {
+                        v
+                    }
+                }))),
             }
         }
     }
 
     pub fn next(&mut self) -> Token {
         self.skip_ws();
-        let Some(b) = self.peek() else { return Token::Eof };
+        let Some(b) = self.peek() else {
+            return Token::Eof;
+        };
         match b {
             b'/' => {
                 self.pos += 1;

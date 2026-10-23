@@ -25,27 +25,50 @@ fn canonical(name: &str) -> &str {
 
 /// The filter names and their parameter dictionaries.
 pub fn filter_chain(pdf: &Pdf, d: &Dict) -> Vec<(String, Dict)> {
-    let f = d.get("Filter").or_else(|| d.get("F")).map(|o| pdf.resolve(o)).unwrap_or(Obj::Null);
-    let p = d.get("DecodeParms").or_else(|| d.get("DP")).map(|o| pdf.resolve(o)).unwrap_or(Obj::Null);
+    let f = d
+        .get("Filter")
+        .or_else(|| d.get("F"))
+        .map(|o| pdf.resolve(o))
+        .unwrap_or(Obj::Null);
+    let p = d
+        .get("DecodeParms")
+        .or_else(|| d.get("DP"))
+        .map(|o| pdf.resolve(o))
+        .unwrap_or(Obj::Null);
     let names: Vec<String> = match &f {
         Obj::Name(n) => vec![n.clone()],
-        Obj::Array(a) => a.iter().filter_map(|o| pdf.resolve(o).as_name().map(str::to_string)).collect(),
+        Obj::Array(a) => a
+            .iter()
+            .filter_map(|o| pdf.resolve(o).as_name().map(str::to_string))
+            .collect(),
         _ => Vec::new(),
     };
     let parms: Vec<Dict> = match &p {
         Obj::Dict(d) => vec![d.clone()],
-        Obj::Array(a) => a.iter().map(|o| pdf.resolve(o).as_dict().cloned().unwrap_or_default()).collect(),
+        Obj::Array(a) => a
+            .iter()
+            .map(|o| pdf.resolve(o).as_dict().cloned().unwrap_or_default())
+            .collect(),
         _ => Vec::new(),
     };
     names
         .into_iter()
         .enumerate()
-        .map(|(i, n)| (canonical(&n).to_string(), parms.get(i).cloned().unwrap_or_default()))
+        .map(|(i, n)| {
+            (
+                canonical(&n).to_string(),
+                parms.get(i).cloned().unwrap_or_default(),
+            )
+        })
         .collect()
 }
 
 fn limits() -> Limits {
-    Limits { max_alloc: 1 << 31, max_output: 1 << 31, ..Limits::default() }
+    Limits {
+        max_alloc: 1 << 31,
+        max_output: 1 << 31,
+        ..Limits::default()
+    }
 }
 
 fn flate(data: &[u8]) -> Result<Vec<u8>> {
@@ -54,7 +77,9 @@ fn flate(data: &[u8]) -> Result<Vec<u8>> {
         Ok(v) => Ok(v),
         Err(_) => {
             // missing or damaged zlib header: try raw deflate after the two header bytes, then without
-            if let Ok(r) = oc_compress::inflate::inflate(data.get(2..).unwrap_or_default(), &l, &NoProgress) {
+            if let Ok(r) =
+                oc_compress::inflate::inflate(data.get(2..).unwrap_or_default(), &l, &NoProgress)
+            {
                 return Ok(r.data);
             }
             oc_compress::inflate::inflate(data, &l, &NoProgress)
@@ -149,7 +174,11 @@ fn run_length(data: &[u8]) -> Vec<u8> {
 fn lzw(data: &[u8], early: bool) -> Result<Vec<u8>> {
     use oc_compress::lzw::{decode, Config};
     use oc_io::BitOrder;
-    let cfg = Config { order: BitOrder::MsbFirst, start_bits: 9, early_change: early };
+    let cfg = Config {
+        order: BitOrder::MsbFirst,
+        start_bits: 9,
+        early_change: early,
+    };
     decode(data, cfg, &limits())
 }
 
@@ -159,8 +188,14 @@ fn predictor(data: Vec<u8>, parms: &Dict, pdf: &Pdf) -> Vec<u8> {
         return data;
     }
     let colors = pdf.dget_i64(parms, "Colors").unwrap_or(1).clamp(1, 32) as usize;
-    let bpc = pdf.dget_i64(parms, "BitsPerComponent").unwrap_or(8).clamp(1, 16) as usize;
-    let cols = pdf.dget_i64(parms, "Columns").unwrap_or(1).clamp(1, 1 << 24) as usize;
+    let bpc = pdf
+        .dget_i64(parms, "BitsPerComponent")
+        .unwrap_or(8)
+        .clamp(1, 16) as usize;
+    let cols = pdf
+        .dget_i64(parms, "Columns")
+        .unwrap_or(1)
+        .clamp(1, 1 << 24) as usize;
     let bpp = (colors * bpc).div_ceil(8).max(1);
     let row = (colors * bpc * cols).div_ceil(8);
     if row == 0 {
@@ -191,7 +226,9 @@ fn predictor(data: Vec<u8>, parms: &Dict, pdf: &Pdf) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len());
     let mut prev = vec![0u8; row];
     for chunk in data.chunks(row + 1) {
-        let Some((&ft, body)) = chunk.split_first() else { continue };
+        let Some((&ft, body)) = chunk.split_first() else {
+            continue;
+        };
         let mut cur = body.to_vec();
         cur.resize(row, 0);
         for i in 0..row {
@@ -204,7 +241,11 @@ fn predictor(data: Vec<u8>, parms: &Dict, pdf: &Pdf) -> Vec<u8> {
                 3 => ((u16::from(a) + u16::from(b)) / 2) as u8,
                 4 => {
                     let p = i32::from(a) + i32::from(b) - i32::from(c);
-                    let (pa, pb, pc) = ((p - i32::from(a)).abs(), (p - i32::from(b)).abs(), (p - i32::from(c)).abs());
+                    let (pa, pb, pc) = (
+                        (p - i32::from(a)).abs(),
+                        (p - i32::from(b)).abs(),
+                        (p - i32::from(c)).abs(),
+                    );
                     if pa <= pb && pa <= pc {
                         a
                     } else if pb <= pc {
@@ -225,9 +266,15 @@ fn predictor(data: Vec<u8>, parms: &Dict, pdf: &Pdf) -> Vec<u8> {
 
 /// Decode a stream. With `keep_image`, an image filter ends the chain and is returned with the
 /// data as it stood before that filter.
-pub fn decode_stream(pdf: &Pdf, s: &Stream, keep_image: bool) -> Result<(Vec<u8>, Option<ImageFilter>)> {
+pub fn decode_stream(
+    pdf: &Pdf,
+    s: &Stream,
+    keep_image: bool,
+) -> Result<(Vec<u8>, Option<ImageFilter>)> {
     let mut data = match &pdf.crypt {
-        Some(c) if s.id.0 != 0 && !has_identity_crypt(pdf, &s.dict) => c.decrypt_stream(&s.raw, s.id.0, s.id.1, &s.dict),
+        Some(c) if s.id.0 != 0 && !has_identity_crypt(pdf, &s.dict) => {
+            c.decrypt_stream(&s.raw, s.id.0, s.id.1, &s.dict)
+        }
         _ => s.raw.clone(),
     };
     for (name, parms) in filter_chain(pdf, &s.dict) {
@@ -245,23 +292,39 @@ pub fn decode_stream(pdf: &Pdf, s: &Stream, keep_image: bool) -> Result<(Vec<u8>
                 if keep_image {
                     return Ok((data, Some(ImageFilter { name, parms })));
                 }
-                return Err(Error::new(ErrorCode::UnsupportedVariant, format!("{name} data cannot be used as plain bytes")));
+                return Err(Error::new(
+                    ErrorCode::UnsupportedVariant,
+                    format!("{name} data cannot be used as plain bytes"),
+                ));
             }
-            other => return Err(Error::new(ErrorCode::UnsupportedVariant, format!("unknown stream filter {other}"))),
+            other => {
+                return Err(Error::new(
+                    ErrorCode::UnsupportedVariant,
+                    format!("unknown stream filter {other}"),
+                ))
+            }
         }
     }
     Ok((data, None))
 }
 
 fn has_identity_crypt(pdf: &Pdf, d: &Dict) -> bool {
-    filter_chain(pdf, d).iter().any(|(n, p)| n == "Crypt" && pdf.dget_name(p, "Name").as_deref().is_none_or(|n| n == "Identity"))
+    filter_chain(pdf, d).iter().any(|(n, p)| {
+        n == "Crypt"
+            && pdf
+                .dget_name(p, "Name")
+                .as_deref()
+                .is_none_or(|n| n == "Identity")
+    })
 }
 
 /// A stream's bytes with encryption removed but its filters still applied (what a copy into
 /// another file needs).
 pub fn decrypted_raw(pdf: &Pdf, s: &Stream) -> Vec<u8> {
     match &pdf.crypt {
-        Some(c) if s.id.0 != 0 && !has_identity_crypt(pdf, &s.dict) => c.decrypt_stream(&s.raw, s.id.0, s.id.1, &s.dict),
+        Some(c) if s.id.0 != 0 && !has_identity_crypt(pdf, &s.dict) => {
+            c.decrypt_stream(&s.raw, s.id.0, s.id.1, &s.dict)
+        }
         _ => s.raw.clone(),
     }
 }

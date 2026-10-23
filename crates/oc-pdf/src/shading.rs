@@ -46,13 +46,21 @@ fn bez(p: [P; 4], t: f64) -> P {
 /// A Coons or tensor patch on a 4x4 control net, split into triangles.
 fn patch_triangles(net: &[[P; 4]; 4], col: &[[f32; 3]; 4], out: &mut Vec<[MeshVertex; 3]>) {
     const N: usize = 8;
-    let mut grid = vec![[MeshVertex { p: [0.0; 2], c: [0.0; 3] }; 0]; 0];
+    let mut grid = vec![
+        [MeshVertex {
+            p: [0.0; 2],
+            c: [0.0; 3]
+        }; 0];
+        0
+    ];
     let _ = &mut grid;
     let mut pts = Vec::with_capacity((N + 1) * (N + 1));
     for i in 0..=N {
         let u = i as f64 / N as f64;
         // curves in v for each row of the net, evaluated at u across rows
-        let rows: Vec<P> = (0..4).map(|r| bez([net[r][0], net[r][1], net[r][2], net[r][3]], u)).collect();
+        let rows: Vec<P> = (0..4)
+            .map(|r| bez([net[r][0], net[r][1], net[r][2], net[r][3]], u))
+            .collect();
         for j in 0..=N {
             let v = j as f64 / N as f64;
             // evaluate along the column direction
@@ -106,26 +114,69 @@ pub fn parse(pdf: &Pdf, obj: &Obj, res: &Dict) -> Option<Shading> {
     let st = pdf.dget_i64(&d, "ShadingType")?;
     let cs = ColorSpace::parse(pdf, d.get("ColorSpace")?, res, 0)?;
     let background = pdf.dget_numbers(&d, "Background").map(|b| cs.to_rgb(&b));
-    let bbox = pdf.dget_numbers(&d, "BBox").filter(|b| b.len() >= 4).map(|b| [b[0], b[1], b[2], b[3]]);
+    let bbox = pdf
+        .dget_numbers(&d, "BBox")
+        .filter(|b| b.len() >= 4)
+        .map(|b| [b[0], b[1], b[2], b[3]]);
     let func = d.get("Function").and_then(|f| Function::parse(pdf, f));
-    let domain2 = pdf.dget_numbers(&d, "Domain").filter(|v| v.len() >= 2).map_or([0.0, 1.0], |v| [v[0], v[1]]);
+    let domain2 = pdf
+        .dget_numbers(&d, "Domain")
+        .filter(|v| v.len() >= 2)
+        .map_or([0.0, 1.0], |v| [v[0], v[1]]);
     let extend = pdf
         .dget_array(&d, "Extend")
-        .map(|a| [pdf.resolve(&a[0]).as_bool().unwrap_or(false), a.get(1).map(|x| pdf.resolve(x).as_bool().unwrap_or(false)).unwrap_or(false)])
+        .map(|a| {
+            [
+                pdf.resolve(&a[0]).as_bool().unwrap_or(false),
+                a.get(1)
+                    .map(|x| pdf.resolve(x).as_bool().unwrap_or(false))
+                    .unwrap_or(false),
+            ]
+        })
         .unwrap_or([false, false]);
     match st {
         1 => {
-            let dom = pdf.dget_numbers(&d, "Domain").filter(|v| v.len() >= 4).map_or([0.0, 1.0, 0.0, 1.0], |v| [v[0], v[1], v[2], v[3]]);
-            let m = pdf.dget_numbers(&d, "Matrix").filter(|v| v.len() >= 6).map_or(Transform::IDENTITY, |v| Transform::new(v[0], v[1], v[2], v[3], v[4], v[5]));
-            Some(Shading::FunctionBased { domain: dom, matrix: m, func: func?, cs, background })
+            let dom = pdf
+                .dget_numbers(&d, "Domain")
+                .filter(|v| v.len() >= 4)
+                .map_or([0.0, 1.0, 0.0, 1.0], |v| [v[0], v[1], v[2], v[3]]);
+            let m = pdf
+                .dget_numbers(&d, "Matrix")
+                .filter(|v| v.len() >= 6)
+                .map_or(Transform::IDENTITY, |v| {
+                    Transform::new(v[0], v[1], v[2], v[3], v[4], v[5])
+                });
+            Some(Shading::FunctionBased {
+                domain: dom,
+                matrix: m,
+                func: func?,
+                cs,
+                background,
+            })
         }
         2 => {
             let c = pdf.dget_numbers(&d, "Coords").filter(|v| v.len() >= 4)?;
-            Some(Shading::Axial { coords: [c[0], c[1], c[2], c[3]], domain: domain2, func, extend, cs, background, bbox })
+            Some(Shading::Axial {
+                coords: [c[0], c[1], c[2], c[3]],
+                domain: domain2,
+                func,
+                extend,
+                cs,
+                background,
+                bbox,
+            })
         }
         3 => {
             let c = pdf.dget_numbers(&d, "Coords").filter(|v| v.len() >= 6)?;
-            Some(Shading::Radial { coords: [c[0], c[1], c[2], c[3], c[4], c[5]], domain: domain2, func, extend, cs, background, bbox })
+            Some(Shading::Radial {
+                coords: [c[0], c[1], c[2], c[3], c[4], c[5]],
+                domain: domain2,
+                func,
+                extend,
+                cs,
+                background,
+                bbox,
+            })
         }
         4..=7 => {
             let Obj::Stream(s) = &o else { return None };
@@ -144,7 +195,10 @@ pub fn parse(pdf: &Pdf, obj: &Obj, res: &Dict) -> Option<Shading> {
             let read_pt = |br: &mut Bits| -> Option<P> {
                 let x = f64::from(br.read(bpco)?) / maxco;
                 let y = f64::from(br.read(bpco)?) / maxco;
-                Some([dec[0] + x * (dec[1] - dec[0]), dec[2] + y * (dec[3] - dec[2])])
+                Some([
+                    dec[0] + x * (dec[1] - dec[0]),
+                    dec[2] + y * (dec[3] - dec[2]),
+                ])
             };
             let to_c = |comps: &[f64]| -> [f32; 3] {
                 if func.is_some() {
@@ -167,14 +221,20 @@ pub fn parse(pdf: &Pdf, obj: &Obj, res: &Dict) -> Option<Shading> {
                     let mut vs: Vec<MeshVertex> = Vec::new();
                     let mut pending: Vec<MeshVertex> = Vec::new();
                     while let Some(flag) = br.read(bpf) {
-                        let (Some(p), Some(c)) = (read_pt(&mut br), read_col(&mut br)) else { break };
+                        let (Some(p), Some(c)) = (read_pt(&mut br), read_col(&mut br)) else {
+                            break;
+                        };
                         br.align();
                         let v = MeshVertex { p, c };
                         match flag {
                             0 => {
                                 pending.push(v);
                                 if pending.len() == 3 {
-                                    tris.push([pending[0].clone(), pending[1].clone(), pending[2].clone()]);
+                                    tris.push([
+                                        pending[0].clone(),
+                                        pending[1].clone(),
+                                        pending[2].clone(),
+                                    ]);
                                     vs = pending.clone();
                                     pending.clear();
                                 }
@@ -262,7 +322,10 @@ pub fn parse(pdf: &Pdf, obj: &Obj, res: &Dict) -> Option<Shading> {
                             b.extend_from_slice(&pts[..12]);
                             c4.copy_from_slice(&cols[..4]);
                         } else {
-                            let (Some(pn), Some(pc)) = (prev_net_boundary(&prev_net), prev_col) else { continue };
+                            let (Some(pn), Some(pc)) = (prev_net_boundary(&prev_net), prev_col)
+                            else {
+                                continue;
+                            };
                             let (e0, e1, e2, e3, k0, k1) = match f {
                                 1 => (pn[3], pn[4], pn[5], pn[6], pc[1], pc[2]),
                                 2 => (pn[6], pn[7], pn[8], pn[9], pc[2], pc[3]),
@@ -275,7 +338,14 @@ pub fn parse(pdf: &Pdf, obj: &Obj, res: &Dict) -> Option<Shading> {
                             c4[2] = cols[0];
                             c4[3] = cols[1];
                         }
-                        let net = coons_net(&b, if st == 7 { pts.get(npts - 4..).map(<[P]>::to_vec) } else { None });
+                        let net = coons_net(
+                            &b,
+                            if st == 7 {
+                                pts.get(npts - 4..).map(<[P]>::to_vec)
+                            } else {
+                                None
+                            },
+                        );
                         let mut flat = [[0.0; 2]; 16];
                         for r in 0..4 {
                             for c in 0..4 {
@@ -293,7 +363,12 @@ pub fn parse(pdf: &Pdf, obj: &Obj, res: &Dict) -> Option<Shading> {
                     }
                 }
             }
-            Some(Shading::Mesh { triangles: tris, func, cs, background })
+            Some(Shading::Mesh {
+                triangles: tris,
+                func,
+                cs,
+                background,
+            })
         }
         _ => None,
     }
@@ -340,14 +415,30 @@ fn coons_net(b: &[P], inner: Option<Vec<P>>) -> [[P; 4]; 4] {
             n[2][1] = q[3];
         }
         _ => {
-            let f = |a: usize, c: usize, e: usize, g: usize, h: usize, i: usize, j: usize, k: usize| -> P {
+            let f = |a: usize,
+                     c: usize,
+                     e: usize,
+                     g: usize,
+                     h: usize,
+                     i: usize,
+                     j: usize,
+                     k: usize|
+             -> P {
                 let _ = (a, c, e, g, h, i, j, k);
                 [0.0, 0.0]
             };
             let _ = f;
             let p = |r: usize, c: usize, n: &[[P; 4]; 4]| n[r][c];
             let calc = |n: &[[P; 4]; 4], k: usize| -> P {
-                let (i, j) = if k == 0 { (1, 1) } else if k == 1 { (1, 2) } else if k == 2 { (2, 2) } else { (2, 1) };
+                let (i, j) = if k == 0 {
+                    (1, 1)
+                } else if k == 1 {
+                    (1, 2)
+                } else if k == 2 {
+                    (2, 2)
+                } else {
+                    (2, 1)
+                };
                 // formulas from the PDF reference (4.6.3)
                 let get = |r: usize, c: usize| p(r, c, n);
                 let comb = |terms: &[(f64, P)]| -> P {
@@ -359,10 +450,46 @@ fn coons_net(b: &[P], inner: Option<Vec<P>>) -> [[P; 4]; 4] {
                     [o[0] / 9.0, o[1] / 9.0]
                 };
                 match (i, j) {
-                    (1, 1) => comb(&[(-4.0, get(0, 0)), (6.0, get(0, 1)), (6.0, get(1, 0)), (-2.0, get(0, 3)), (-2.0, get(3, 0)), (3.0, get(3, 1)), (3.0, get(1, 3)), (-1.0, get(3, 3))]),
-                    (1, 2) => comb(&[(-4.0, get(0, 3)), (6.0, get(0, 2)), (6.0, get(1, 3)), (-2.0, get(0, 0)), (-2.0, get(3, 3)), (3.0, get(3, 2)), (3.0, get(1, 0)), (-1.0, get(3, 0))]),
-                    (2, 1) => comb(&[(-4.0, get(3, 0)), (6.0, get(3, 1)), (6.0, get(2, 0)), (-2.0, get(3, 3)), (-2.0, get(0, 0)), (3.0, get(0, 1)), (3.0, get(2, 3)), (-1.0, get(0, 3))]),
-                    _ => comb(&[(-4.0, get(3, 3)), (6.0, get(3, 2)), (6.0, get(2, 3)), (-2.0, get(3, 0)), (-2.0, get(0, 3)), (3.0, get(0, 2)), (3.0, get(2, 0)), (-1.0, get(0, 0))]),
+                    (1, 1) => comb(&[
+                        (-4.0, get(0, 0)),
+                        (6.0, get(0, 1)),
+                        (6.0, get(1, 0)),
+                        (-2.0, get(0, 3)),
+                        (-2.0, get(3, 0)),
+                        (3.0, get(3, 1)),
+                        (3.0, get(1, 3)),
+                        (-1.0, get(3, 3)),
+                    ]),
+                    (1, 2) => comb(&[
+                        (-4.0, get(0, 3)),
+                        (6.0, get(0, 2)),
+                        (6.0, get(1, 3)),
+                        (-2.0, get(0, 0)),
+                        (-2.0, get(3, 3)),
+                        (3.0, get(3, 2)),
+                        (3.0, get(1, 0)),
+                        (-1.0, get(3, 0)),
+                    ]),
+                    (2, 1) => comb(&[
+                        (-4.0, get(3, 0)),
+                        (6.0, get(3, 1)),
+                        (6.0, get(2, 0)),
+                        (-2.0, get(3, 3)),
+                        (-2.0, get(0, 0)),
+                        (3.0, get(0, 1)),
+                        (3.0, get(2, 3)),
+                        (-1.0, get(0, 3)),
+                    ]),
+                    _ => comb(&[
+                        (-4.0, get(3, 3)),
+                        (6.0, get(3, 2)),
+                        (6.0, get(2, 3)),
+                        (-2.0, get(3, 0)),
+                        (-2.0, get(0, 3)),
+                        (3.0, get(0, 2)),
+                        (3.0, get(2, 0)),
+                        (-1.0, get(0, 0)),
+                    ]),
                 }
             };
             let a = calc(&n, 0);

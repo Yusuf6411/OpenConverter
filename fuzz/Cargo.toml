@@ -20,6 +20,7 @@ oc-video = { path = "../crates/oc-video" }
 oc-font = { path = "../crates/oc-font" }
 oc-raster = { path = "../crates/oc-raster" }
 oc-svg = { path = "../crates/oc-svg" }
+oc-pdf = { path = "../crates/oc-pdf" }
 oc-sheet = { path = "../crates/oc-sheet" }
 oc-archive = { path = "../crates/oc-archive" }
 oc-audio = { path = "../crates/oc-audio" }
@@ -320,6 +321,13 @@ doc = false
 [[bin]]
 name = "svg"
 path = "fuzz_targets/svg.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pdf"
+path = "fuzz_targets/pdf.rs"
 test = false
 doc = false
 bench = false

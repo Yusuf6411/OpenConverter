@@ -85,14 +85,21 @@ pub fn name_to_unicode(name: &str) -> Option<String> {
     if let Some(h) = name.strip_prefix("uni") {
         if h.len() >= 4 && h.len() % 4 == 0 {
             let s: Option<String> = (0..h.len() / 4)
-                .map(|i| u32::from_str_radix(h.get(i * 4..i * 4 + 4)?, 16).ok().and_then(char::from_u32))
+                .map(|i| {
+                    u32::from_str_radix(h.get(i * 4..i * 4 + 4)?, 16)
+                        .ok()
+                        .and_then(char::from_u32)
+                })
                 .collect();
             return s;
         }
     }
     if let Some(h) = name.strip_prefix('u') {
         if (4..=6).contains(&h.len()) {
-            return u32::from_str_radix(h, 16).ok().and_then(char::from_u32).map(String::from);
+            return u32::from_str_radix(h, 16)
+                .ok()
+                .and_then(char::from_u32)
+                .map(String::from);
         }
     }
     if name.contains('_') {
@@ -112,7 +119,10 @@ fn base_encoding(name: &str) -> Option<&'static [&'static str; 256]> {
 }
 
 fn strip_subset(name: &str) -> &str {
-    if name.len() > 7 && name.as_bytes().get(6) == Some(&b'+') && name[..6].bytes().all(|b| b.is_ascii_uppercase()) {
+    if name.len() > 7
+        && name.as_bytes().get(6) == Some(&b'+')
+        && name[..6].bytes().all(|b| b.is_ascii_uppercase())
+    {
         &name[7..]
     } else {
         name
@@ -125,12 +135,42 @@ fn families_for(base: &str, flags: i64) -> Vec<String> {
     let fam = n.split(['-', ',']).next().unwrap_or(&n).to_string();
     f.push(fam.clone());
     let push = |f: &mut Vec<String>, xs: &[&str]| f.extend(xs.iter().map(|s| (*s).to_string()));
-    if fam.contains("arial") || fam.contains("helvetica") || fam.contains("calibri") || fam.contains("verdana") || fam.contains("tahoma") {
-        push(&mut f, &["arial", "helvetica", "liberation sans", "dejavu sans"]);
-    } else if fam.contains("times") || fam.contains("georgia") || fam.contains("palatino") || fam.contains("garamond") || fam.contains("cambria") || fam.contains("bookman") {
-        push(&mut f, &["times new roman", "times", "liberation serif", "dejavu serif"]);
+    if fam.contains("arial")
+        || fam.contains("helvetica")
+        || fam.contains("calibri")
+        || fam.contains("verdana")
+        || fam.contains("tahoma")
+    {
+        push(
+            &mut f,
+            &["arial", "helvetica", "liberation sans", "dejavu sans"],
+        );
+    } else if fam.contains("times")
+        || fam.contains("georgia")
+        || fam.contains("palatino")
+        || fam.contains("garamond")
+        || fam.contains("cambria")
+        || fam.contains("bookman")
+    {
+        push(
+            &mut f,
+            &[
+                "times new roman",
+                "times",
+                "liberation serif",
+                "dejavu serif",
+            ],
+        );
     } else if fam.contains("courier") || fam.contains("consolas") || fam.contains("mono") {
-        push(&mut f, &["courier new", "courier", "liberation mono", "dejavu sans mono"]);
+        push(
+            &mut f,
+            &[
+                "courier new",
+                "courier",
+                "liberation mono",
+                "dejavu sans mono",
+            ],
+        );
     } else if fam == "symbol" {
         push(&mut f, &["symbol", "standard symbols ps", "dejavu sans"]);
     } else if fam.contains("zapf") || fam.contains("dingbats") {
@@ -148,7 +188,11 @@ fn families_for(base: &str, flags: i64) -> Vec<String> {
 /// Wrap a bare CFF table in a minimal OpenType file so `oc_font` can read it.
 fn wrap_cff(cff: &[u8]) -> Option<Font> {
     let c = oc_font::cff::Cff::parse(cff)?;
-    let upem = if c.font_matrix[0].abs() > 1e-9 { (1.0 / c.font_matrix[0].abs()).round().clamp(16.0, 65535.0) as u16 } else { 1000 };
+    let upem = if c.font_matrix[0].abs() > 1e-9 {
+        (1.0 / c.font_matrix[0].abs()).round().clamp(16.0, 65535.0) as u16
+    } else {
+        1000
+    };
     let n = c.num_glyphs().min(65535) as u16;
     let mut head = vec![0u8; 54];
     head[0..4].copy_from_slice(&[0, 1, 0, 0]);
@@ -158,15 +202,25 @@ fn wrap_cff(cff: &[u8]) -> Option<Font> {
     maxp[0..4].copy_from_slice(&0x0000_5000u32.to_be_bytes());
     maxp[4..6].copy_from_slice(&n.to_be_bytes());
     let hhea = vec![0u8; 36];
-    let mut tables = vec![(*b"CFF ", cff.to_vec()), (*b"head", head), (*b"hhea", hhea), (*b"maxp", maxp), (*b"hmtx", vec![0u8; 4])];
+    let mut tables = vec![
+        (*b"CFF ", cff.to_vec()),
+        (*b"head", head),
+        (*b"hhea", hhea),
+        (*b"maxp", maxp),
+        (*b"hmtx", vec![0u8; 4]),
+    ];
     let bytes = oc_font::build::build_sfnt(*b"OTTO", &mut tables);
     Font::parse(&bytes).ok()
 }
 
 fn load_program(pdf: &Pdf, desc: &Dict) -> Option<Font> {
     for key in ["FontFile2", "FontFile3", "FontFile"] {
-        let Obj::Stream(s) = pdf.dget(desc, key) else { continue };
-        let Ok((data, _)) = crate::filter::decode_stream(pdf, &s, false) else { continue };
+        let Obj::Stream(s) = pdf.dget(desc, key) else {
+            continue;
+        };
+        let Ok((data, _)) = crate::filter::decode_stream(pdf, &s, false) else {
+            continue;
+        };
         if key == "FontFile" {
             continue; // Type 1: not read
         }
@@ -198,7 +252,10 @@ impl PdfFont {
         let base_name = pdf.dget_name(fd, "BaseFont").unwrap_or_default();
         let name = strip_subset(&base_name).to_string();
         let to_unicode = match pdf.dget(fd, "ToUnicode") {
-            Obj::Stream(s) => crate::filter::decode_stream(pdf, &s, false).ok().map(|d| CMap::parse(&d.0)).filter(CMap::has_unicode),
+            Obj::Stream(s) => crate::filter::decode_stream(pdf, &s, false)
+                .ok()
+                .map(|d| CMap::parse(&d.0))
+                .filter(CMap::has_unicode),
             _ => None,
         };
         let mut f = PdfFont {
@@ -242,8 +299,15 @@ impl PdfFont {
         let flags = pdf.dget_i64(desc, "Flags").unwrap_or(0);
         self.missing_width = pdf.dget_f64(desc, "MissingWidth").unwrap_or(0.0);
         let lname = self.name.to_lowercase();
-        self.bold_hint = lname.contains("bold") || lname.contains("black") || lname.contains("heavy") || flags & (1 << 18) != 0 || pdf.dget_f64(desc, "FontWeight").is_some_and(|w| w >= 700.0);
-        self.italic_hint = lname.contains("italic") || lname.contains("oblique") || flags & (1 << 6) != 0 || pdf.dget_f64(desc, "ItalicAngle").is_some_and(|a| a != 0.0);
+        self.bold_hint = lname.contains("bold")
+            || lname.contains("black")
+            || lname.contains("heavy")
+            || flags & (1 << 18) != 0
+            || pdf.dget_f64(desc, "FontWeight").is_some_and(|w| w >= 700.0);
+        self.italic_hint = lname.contains("italic")
+            || lname.contains("oblique")
+            || flags & (1 << 6) != 0
+            || pdf.dget_f64(desc, "ItalicAngle").is_some_and(|a| a != 0.0);
         flags
     }
 
@@ -255,14 +319,23 @@ impl PdfFont {
             self.unit_scale = 1.0 / f64::from(found.font.units_per_em);
             self.program = Some(found.font);
             self.substituted = true;
-            let msg = format!("font {} is not embedded; {} was used instead", self.name, found.family);
+            let msg = format!(
+                "font {} is not embedded; {} was used instead",
+                self.name, found.family
+            );
             if !notes.contains(&msg) {
                 notes.push(msg);
             }
         }
     }
 
-    fn load_simple(&mut self, pdf: &Pdf, fd: &Dict, fonts: Option<&FontDb>, notes: &mut Vec<String>) {
+    fn load_simple(
+        &mut self,
+        pdf: &Pdf,
+        fd: &Dict,
+        fonts: Option<&FontDb>,
+        notes: &mut Vec<String>,
+    ) {
         let desc = pdf.dget_dict(fd, "FontDescriptor").unwrap_or_default();
         let flags = self.descriptor_info(pdf, &desc);
         let symbolic = flags & 4 != 0 && flags & 32 == 0;
@@ -275,7 +348,10 @@ impl PdfFont {
         } else {
             self.substitute(fonts, flags, notes);
             if self.program.is_none() {
-                notes.push(format!("font {} could not be found; its text is not drawn", self.name));
+                notes.push(format!(
+                    "font {} could not be found; its text is not drawn",
+                    self.name
+                ));
             }
         }
         // encoding: base + differences
@@ -304,7 +380,10 @@ impl PdfFont {
         }
         let has_encoding = !matches!(enc, Obj::Null);
         let builtin: HashMap<u8, u16> = match &self.program {
-            Some(p) if self.embedded && p.is_cff => p.cff_table().map(|c| c.builtin_encoding()).unwrap_or_default(),
+            Some(p) if self.embedded && p.is_cff => p
+                .cff_table()
+                .map(|c| c.builtin_encoding())
+                .unwrap_or_default(),
             _ => HashMap::new(),
         };
         let std14 = !self.embedded;
@@ -341,7 +420,13 @@ impl PdfFont {
                     gid = name
                         .as_ref()
                         .and_then(|n| cff_names.get(n).copied())
-                        .or_else(|| if name.is_none() || !has_encoding { builtin.get(&(code as u8)).copied() } else { None });
+                        .or_else(|| {
+                            if name.is_none() || !has_encoding {
+                                builtin.get(&(code as u8)).copied()
+                            } else {
+                                None
+                            }
+                        });
                     if gid.is_none() && p.glyph_for_char('A').is_some() {
                         if let Some(u) = uni.as_ref().and_then(|u| u.chars().next()) {
                             gid = p.glyph_for_char(u);
@@ -369,19 +454,35 @@ impl PdfFont {
                         try_cmaps.push(p.glyph_for_code(0, 3, c as u32));
                     }
                     gid = try_cmaps.into_iter().flatten().find(|g| *g != 0);
-                    if gid.is_none() && !p.has_cmap(3, 1) && !p.has_cmap(3, 0) && !p.has_cmap(1, 0) {
+                    if gid.is_none() && !p.has_cmap(3, 1) && !p.has_cmap(3, 0) && !p.has_cmap(1, 0)
+                    {
                         gid = Some(code as u16).filter(|g| *g < p.num_glyphs);
                     }
                 } else {
                     // substitute font: by Unicode
-                    let c = uni.as_ref().and_then(|u| u.chars().next()).or_else(|| if code >= 32 && code != 127 { char::from_u32(code as u32) } else { None });
+                    let c = uni.as_ref().and_then(|u| u.chars().next()).or_else(|| {
+                        if code >= 32 && code != 127 {
+                            char::from_u32(code as u32)
+                        } else {
+                            None
+                        }
+                    });
                     gid = c.and_then(|c| p.glyph_for_char(c));
                 }
             }
             self.gids[code] = gid;
-            self.unis[code] = uni.unwrap_or_else(|| if (32..127).contains(&code) && (name.is_none() || self.kind == Kind::Type3) { char::from(code as u8).to_string() } else { String::new() });
+            self.unis[code] = uni.unwrap_or_else(|| {
+                if (32..127).contains(&code) && (name.is_none() || self.kind == Kind::Type3) {
+                    char::from(code as u8).to_string()
+                } else {
+                    String::new()
+                }
+            });
         }
-        if !self.embedded && (self.name.starts_with("Symbol") || self.name.starts_with("ZapfDingbats")) && !has_encoding {
+        if !self.embedded
+            && (self.name.starts_with("Symbol") || self.name.starts_with("ZapfDingbats"))
+            && !has_encoding
+        {
             // the built-in encodings of these two fonts are not available
             self.gids.iter_mut().for_each(|g| *g = None);
             notes.push(format!("font {} uses a built-in symbol encoding that is not available; its text is not drawn", self.name));
@@ -405,16 +506,28 @@ impl PdfFont {
         }
     }
 
-    fn load_composite(&mut self, pdf: &Pdf, fd: &Dict, fonts: Option<&FontDb>, notes: &mut Vec<String>) {
+    fn load_composite(
+        &mut self,
+        pdf: &Pdf,
+        fd: &Dict,
+        fonts: Option<&FontDb>,
+        notes: &mut Vec<String>,
+    ) {
         let enc = pdf.dget(fd, "Encoding");
         let cmap = match &enc {
-            Obj::Name(n) if n == "Identity-H" || n == "Identity-V" => CMap::identity(n.ends_with('V')),
+            Obj::Name(n) if n == "Identity-H" || n == "Identity-V" => {
+                CMap::identity(n.ends_with('V'))
+            }
             Obj::Name(n) => {
-                notes.push(format!("the predefined CMap {n} is not available; codes are read as two-byte CIDs"));
+                notes.push(format!(
+                    "the predefined CMap {n} is not available; codes are read as two-byte CIDs"
+                ));
                 CMap::identity(n.ends_with('V'))
             }
             Obj::Stream(s) => {
-                let mut c = crate::filter::decode_stream(pdf, s, false).map(|d| CMap::parse(&d.0)).unwrap_or_default();
+                let mut c = crate::filter::decode_stream(pdf, s, false)
+                    .map(|d| CMap::parse(&d.0))
+                    .unwrap_or_default();
                 if c.codespaces.is_empty() {
                     c.codespaces.push((2, 0, 0xFFFF));
                 }
@@ -428,7 +541,11 @@ impl PdfFont {
         self.vertical = cmap.vertical;
         self.cmap = Some(cmap);
         let desc_fonts = pdf.dget_array(fd, "DescendantFonts").unwrap_or_default();
-        let cid = desc_fonts.first().map(|o| pdf.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
+        let cid = desc_fonts
+            .first()
+            .map(|o| pdf.resolve(o))
+            .and_then(|o| o.as_dict().cloned())
+            .unwrap_or_default();
         self.dw = pdf.dget_f64(&cid, "DW").unwrap_or(1000.0);
         if let Some(w) = pdf.dget_array(&cid, "W") {
             let mut i = 0;
@@ -445,7 +562,11 @@ impl PdfFont {
                     }
                     Some(o2) => {
                         let c2 = o2.as_i64().unwrap_or(0).max(0) as u32;
-                        let x = w.get(i + 2).map(|o| pdf.resolve(o)).and_then(|o| o.as_f64()).unwrap_or(0.0);
+                        let x = w
+                            .get(i + 2)
+                            .map(|o| pdf.resolve(o))
+                            .and_then(|o| o.as_f64())
+                            .unwrap_or(0.0);
                         for c in c1..=c2.min(c1.saturating_add(70000)) {
                             self.cid_widths.insert(c, x);
                         }
@@ -466,7 +587,8 @@ impl PdfFont {
                 let c1 = pdf.resolve(&w[i]).as_i64().unwrap_or(0).max(0) as u32;
                 match w.get(i + 1).map(|o| pdf.resolve(o)) {
                     Some(Obj::Array(a)) => {
-                        let v: Vec<f64> = a.iter().filter_map(|o| pdf.resolve(o).as_f64()).collect();
+                        let v: Vec<f64> =
+                            a.iter().filter_map(|o| pdf.resolve(o).as_f64()).collect();
                         for (k, t) in v.chunks_exact(3).enumerate() {
                             self.w2.insert(c1 + k as u32, (t[0], t[1], t[2]));
                         }
@@ -474,7 +596,12 @@ impl PdfFont {
                     }
                     Some(o2) => {
                         let c2 = o2.as_i64().unwrap_or(0).max(0) as u32;
-                        let g = |k: usize| w.get(i + k).map(|o| pdf.resolve(o)).and_then(|o| o.as_f64()).unwrap_or(0.0);
+                        let g = |k: usize| {
+                            w.get(i + k)
+                                .map(|o| pdf.resolve(o))
+                                .and_then(|o| o.as_f64())
+                                .unwrap_or(0.0)
+                        };
                         for c in c1..=c2.min(c1.saturating_add(70000)) {
                             self.w2.insert(c, (g(2), g(3), g(4)));
                         }
@@ -494,7 +621,11 @@ impl PdfFont {
         match pdf.dget(&cid, "CIDToGIDMap") {
             Obj::Stream(s) => {
                 if let Ok((d, _)) = crate::filter::decode_stream(pdf, &s, false) {
-                    self.cid_to_gid = Some(d.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect());
+                    self.cid_to_gid = Some(
+                        d.chunks_exact(2)
+                            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                            .collect(),
+                    );
                 }
             }
             _ => {}
@@ -522,13 +653,18 @@ impl PdfFont {
             self.substitute(fonts, flags, notes);
             // without an embedded program, characters can only be drawn through Unicode
             if self.program.is_none() {
-                notes.push(format!("font {} could not be found; its text is not drawn", self.name));
+                notes.push(format!(
+                    "font {} could not be found; its text is not drawn",
+                    self.name
+                ));
             }
         }
     }
 
     fn load_type3(&mut self, pdf: &Pdf, fd: &Dict) {
-        let fm = pdf.dget_numbers(fd, "FontMatrix").unwrap_or_else(|| vec![0.001, 0.0, 0.0, 0.001, 0.0, 0.0]);
+        let fm = pdf
+            .dget_numbers(fd, "FontMatrix")
+            .unwrap_or_else(|| vec![0.001, 0.0, 0.0, 0.001, 0.0, 0.0]);
         let mut m = [0.001, 0.0, 0.0, 0.001, 0.0, 0.0];
         for (i, v) in fm.iter().take(6).enumerate() {
             m[i] = *v;
@@ -546,7 +682,10 @@ impl PdfFont {
         let mut names: Vec<Option<String>> = vec![None; 256];
         let enc = pdf.dget(fd, "Encoding");
         if let Obj::Dict(d) = &enc {
-            if let Some(n) = pdf.dget_name(d, "BaseEncoding").and_then(|n| base_encoding(&n)) {
+            if let Some(n) = pdf
+                .dget_name(d, "BaseEncoding")
+                .and_then(|n| base_encoding(&n))
+            {
                 for (i, nm) in n.iter().enumerate() {
                     if *nm != ".notdef" {
                         names[i] = Some((*nm).to_string());
@@ -576,7 +715,12 @@ impl PdfFont {
                 self.unis[code] = char::from(code as u8).to_string();
             }
         }
-        self.type3 = Some(Type3 { font_matrix: m, procs, resources: pdf.dget_dict(fd, "Resources"), names });
+        self.type3 = Some(Type3 {
+            font_matrix: m,
+            procs,
+            resources: pdf.dget_dict(fd, "Resources"),
+            names,
+        });
     }
 
     /// The characters in a string shown with this font.
@@ -586,12 +730,22 @@ impl PdfFont {
                 .iter()
                 .map(|&b| {
                     let code = usize::from(b);
-                    let mut w = if code as i64 >= self.first_char { self.widths.get((code as i64 - self.first_char) as usize).copied() } else { None };
+                    let mut w = if code as i64 >= self.first_char {
+                        self.widths
+                            .get((code as i64 - self.first_char) as usize)
+                            .copied()
+                    } else {
+                        None
+                    };
                     if w.is_none() && self.kind == Kind::Simple {
                         w = if self.missing_width > 0.0 || self.embedded {
                             Some(self.missing_width)
                         } else {
-                            self.program.as_ref().and_then(|p| self.gids[code].map(|g| f64::from(p.advance(g)) * 1000.0 / f64::from(p.units_per_em)))
+                            self.program.as_ref().and_then(|p| {
+                                self.gids[code].map(|g| {
+                                    f64::from(p.advance(g)) * 1000.0 / f64::from(p.units_per_em)
+                                })
+                            })
                         };
                     }
                     let uni = self
@@ -612,7 +766,9 @@ impl PdfFont {
                 })
                 .collect(),
             Kind::Composite => {
-                let Some(cm) = &self.cmap else { return Vec::new() };
+                let Some(cm) = &self.cmap else {
+                    return Vec::new();
+                };
                 cm.codes(bytes)
                     .into_iter()
                     .map(|(code, len)| {
@@ -623,13 +779,29 @@ impl PdfFont {
                             .to_unicode
                             .as_ref()
                             .and_then(|m| m.unicode(code))
-                            .or_else(|| gid.and_then(|g| self.gid_unicode.get(&g)).map(|c| c.to_string()))
+                            .or_else(|| {
+                                gid.and_then(|g| self.gid_unicode.get(&g))
+                                    .map(|c| c.to_string())
+                            })
                             .unwrap_or_default();
                         let vertical = self.vertical.then(|| {
-                            let (w1, vx, vy) = self.w2.get(&cid).copied().unwrap_or((self.dw2.1, w / 2.0, self.dw2.0));
+                            let (w1, vx, vy) = self.w2.get(&cid).copied().unwrap_or((
+                                self.dw2.1,
+                                w / 2.0,
+                                self.dw2.0,
+                            ));
                             (w1, vx, vy)
                         });
-                        CharInfo { code, nbytes: len, width: w, gid, unicode: uni, is_space: len == 1 && code == 32, name: None, vertical }
+                        CharInfo {
+                            code,
+                            nbytes: len,
+                            width: w,
+                            gid,
+                            unicode: uni,
+                            is_space: len == 1 && code == 32,
+                            name: None,
+                            vertical,
+                        }
                     })
                     .collect()
             }
@@ -641,7 +813,11 @@ impl PdfFont {
         if !self.embedded {
             // a stand-in font: find the character through the code read as Unicode when the
             // font offers a ToUnicode map
-            let u = self.to_unicode.as_ref().and_then(|m| m.unicode(code)).and_then(|s| s.chars().next())?;
+            let u = self
+                .to_unicode
+                .as_ref()
+                .and_then(|m| m.unicode(code))
+                .and_then(|s| s.chars().next())?;
             return p.glyph_for_char(u);
         }
         if let Some(map) = &self.cid_to_gid {

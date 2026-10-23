@@ -10,11 +10,17 @@ fn main() {
                 if d.starts_with(&[0xFF, 0xD8]) {
                     srcs.push(oc_pdf::writer::Source::Jpeg(d, None));
                 } else {
-                    let (img, _) = oc_image::png::decode(&d, &oc_core::Limits::default(), &oc_core::NoProgress).expect("png");
+                    let (img, _) = oc_image::png::decode(
+                        &d,
+                        &oc_core::Limits::default(),
+                        &oc_core::NoProgress,
+                    )
+                    .expect("png");
                     srcs.push(oc_pdf::writer::Source::Raster(img));
                 }
             }
-            let out = oc_pdf::writer::images_to_pdf(srcs, &oc_pdf::writer::ImageOptions::default()).expect("write");
+            let out = oc_pdf::writer::images_to_pdf(srcs, &oc_pdf::writer::ImageOptions::default())
+                .expect("write");
             std::fs::write(&a[2], out).expect("write");
         }
         "edit" => {
@@ -22,8 +28,16 @@ fn main() {
             pdf.authenticate(b"");
             let n = pdf.pages().len();
             let pages = oc_pdf::edit::parse_pages(&a[4], n).expect("pages");
-            let edit = oc_pdf::edit::Edit { rotate: a[5].parse().unwrap_or(0), compress: true, encrypt: a.get(6).map(|p| (p.as_bytes().to_vec(), p.as_bytes().to_vec())), ..Default::default() };
-            let out = oc_pdf::edit::assemble(&[oc_pdf::edit::Part { pdf: &pdf, pages }], &edit).expect("assemble");
+            let edit = oc_pdf::edit::Edit {
+                rotate: a[5].parse().unwrap_or(0),
+                compress: true,
+                encrypt: a
+                    .get(6)
+                    .map(|p| (p.as_bytes().to_vec(), p.as_bytes().to_vec())),
+                ..Default::default()
+            };
+            let out = oc_pdf::edit::assemble(&[oc_pdf::edit::Part { pdf: &pdf, pages }], &edit)
+                .expect("assemble");
             for n in &out.notes {
                 eprintln!("note: {n}");
             }

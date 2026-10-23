@@ -48,7 +48,9 @@ fn find_last(data: &[u8], needle: &[u8]) -> Option<usize> {
     if data.len() < needle.len() {
         return None;
     }
-    (0..=data.len() - needle.len()).rev().find(|&i| data.get(i..i + needle.len()) == Some(needle))
+    (0..=data.len() - needle.len())
+        .rev()
+        .find(|&i| data.get(i..i + needle.len()) == Some(needle))
 }
 
 fn find_from(data: &[u8], needle: &[u8], from: usize) -> Option<usize> {
@@ -61,8 +63,14 @@ fn find_from(data: &[u8], needle: &[u8], from: usize) -> Option<usize> {
 impl Pdf {
     pub fn open(mut data: Vec<u8>) -> Result<Pdf> {
         let head = data.get(..data.len().min(2048)).unwrap_or_default();
-        let hdr = find_from(head, b"%PDF-", 0).ok_or_else(|| Error::corrupt("not a PDF file (no %PDF- header)"))?;
-        let version = String::from_utf8_lossy(data.get(hdr + 5..(hdr + 8).min(data.len())).unwrap_or_default()).trim().to_string();
+        let hdr = find_from(head, b"%PDF-", 0)
+            .ok_or_else(|| Error::corrupt("not a PDF file (no %PDF- header)"))?;
+        let version = String::from_utf8_lossy(
+            data.get(hdr + 5..(hdr + 8).min(data.len()))
+                .unwrap_or_default(),
+        )
+        .trim()
+        .to_string();
         if hdr > 0 {
             data.drain(..hdr);
         }
@@ -89,10 +97,18 @@ impl Pdf {
     }
 
     fn setup_encryption(&mut self) -> Result<()> {
-        let Some(enc) = self.trailer.get("Encrypt").cloned() else { return Ok(()) };
-        let enc_num = if let Obj::Ref(n, _) = enc { Some(n) } else { None };
+        let Some(enc) = self.trailer.get("Encrypt").cloned() else {
+            return Ok(());
+        };
+        let enc_num = if let Obj::Ref(n, _) = enc {
+            Some(n)
+        } else {
+            None
+        };
         let edict = self.resolve(&enc);
-        let Some(d) = edict.as_dict().cloned() else { return Ok(()) };
+        let Some(d) = edict.as_dict().cloned() else {
+            return Ok(());
+        };
         let id0 = self
             .trailer
             .get("ID")
@@ -174,7 +190,10 @@ impl Pdf {
             if let Some(Obj::Int(x)) = trailer.get("XRefStm") {
                 let _ = self.read_xref_section(*x as usize);
             }
-            next = trailer.get("Prev").and_then(Obj::as_i64).map(|p| p.max(0) as usize);
+            next = trailer
+                .get("Prev")
+                .and_then(Obj::as_i64)
+                .map(|p| p.max(0) as usize);
         }
         if first {
             return Err(Error::corrupt("no cross-reference data"));
@@ -195,14 +214,22 @@ impl Pdf {
             }
         }
         // an xref stream
-        let (_, _, obj) = self.parse_indirect_at(save, true).ok_or_else(|| Error::corrupt("bad xref stream"))?;
-        let Obj::Stream(s) = obj else { return Err(Error::corrupt("xref is not a stream")) };
+        let (_, _, obj) = self
+            .parse_indirect_at(save, true)
+            .ok_or_else(|| Error::corrupt("bad xref stream"))?;
+        let Obj::Stream(s) = obj else {
+            return Err(Error::corrupt("xref is not a stream"));
+        };
         let data = crate::filter::decode_stream(self, &s, false)?.0;
         let dict = s.dict.clone();
         let w: Vec<usize> = dict
             .get("W")
             .and_then(Obj::as_array)
-            .map(|a| a.iter().map(|o| o.as_i64().unwrap_or(0).clamp(0, 8) as usize).collect())
+            .map(|a| {
+                a.iter()
+                    .map(|o| o.as_i64().unwrap_or(0).clamp(0, 8) as usize)
+                    .collect()
+            })
             .unwrap_or_default();
         if w.len() < 3 {
             return Err(Error::corrupt("bad xref stream /W"));
@@ -221,13 +248,17 @@ impl Pdf {
         for pair in index.chunks(2) {
             let (start, count) = (pair[0], pair.get(1).copied().unwrap_or(0));
             for k in 0..count.max(0) {
-                let Some(r) = data.get(pos..pos + rec) else { break };
+                let Some(r) = data.get(pos..pos + rec) else {
+                    break;
+                };
                 pos += rec;
                 let field = |a: usize, b: usize, default: u64| -> u64 {
                     if b == a {
                         return default;
                     }
-                    r[a..b].iter().fold(0u64, |acc, x| (acc << 8) | u64::from(*x))
+                    r[a..b]
+                        .iter()
+                        .fold(0u64, |acc, x| (acc << 8) | u64::from(*x))
                 };
                 let t = field(0, w[0], 1);
                 let f2 = field(w[0], w[0] + w[1], 0);
@@ -238,7 +269,9 @@ impl Pdf {
                         self.xref.entry(num).or_insert(Entry::Offset(f2 as usize));
                     }
                     2 => {
-                        self.xref.entry(num).or_insert(Entry::InStream(f2 as u32, f3 as u32));
+                        self.xref
+                            .entry(num)
+                            .or_insert(Entry::InStream(f2 as u32, f3 as u32));
                     }
                     _ => {}
                 }
@@ -259,9 +292,16 @@ impl Pdf {
                         let a = lx.next();
                         let b = lx.next();
                         let c = lx.next();
-                        if let (Token::Obj(Obj::Int(off)), Token::Obj(Obj::Int(_gen)), Token::Keyword(t)) = (a, b, c) {
+                        if let (
+                            Token::Obj(Obj::Int(off)),
+                            Token::Obj(Obj::Int(_gen)),
+                            Token::Keyword(t),
+                        ) = (a, b, c)
+                        {
                             if t == b"n" && off > 0 {
-                                self.xref.entry((start + k) as u32).or_insert(Entry::Offset(off as usize));
+                                self.xref
+                                    .entry((start + k) as u32)
+                                    .or_insert(Entry::Offset(off as usize));
                             }
                         } else {
                             return Err(Error::corrupt("bad xref entry"));
@@ -293,12 +333,17 @@ impl Pdf {
         let n = data.len();
         let mut i = 0usize;
         while i < n {
-            let Some(p) = find_from(&data, b"obj", i) else { break };
+            let Some(p) = find_from(&data, b"obj", i) else {
+                break;
+            };
             i = p + 3;
             if p >= 3 && data.get(p - 3..p) == Some(b"end") {
                 continue;
             }
-            if data.get(p + 3).is_some_and(|b| !(is_ws(*b) || is_delim(*b))) {
+            if data
+                .get(p + 3)
+                .is_some_and(|b| !(is_ws(*b) || is_delim(*b)))
+            {
                 continue;
             }
             // walk back over "gen" and "num"
@@ -325,7 +370,10 @@ impl Pdf {
             if ns == ne {
                 continue;
             }
-            let num: u32 = std::str::from_utf8(data.get(ns..ne).unwrap_or_default()).ok().and_then(|s| s.parse().ok()).unwrap_or(u32::MAX);
+            let num: u32 = std::str::from_utf8(data.get(ns..ne).unwrap_or_default())
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(u32::MAX);
             if num == u32::MAX {
                 continue;
             }
@@ -363,7 +411,9 @@ impl Pdf {
         for stm in objstms {
             if let Some(list) = self.load_objstm(stm) {
                 for (idx, (num, _)) in list.iter().enumerate() {
-                    self.xref.entry(*num).or_insert(Entry::InStream(stm, idx as u32));
+                    self.xref
+                        .entry(*num)
+                        .or_insert(Entry::InStream(stm, idx as u32));
                 }
             }
         }
@@ -385,9 +435,15 @@ impl Pdf {
     /// Parse `n g obj ... endobj` at `off`; `skip_decrypt` leaves strings as they are.
     pub fn parse_indirect_at(&self, off: usize, skip_decrypt: bool) -> Option<(u32, u16, Obj)> {
         let mut lx = Lexer::new(&self.data, off);
-        let Token::Obj(Obj::Int(num)) = lx.next() else { return None };
-        let Token::Obj(Obj::Int(gen)) = lx.next() else { return None };
-        let Token::Keyword(k) = lx.next() else { return None };
+        let Token::Obj(Obj::Int(num)) = lx.next() else {
+            return None;
+        };
+        let Token::Obj(Obj::Int(gen)) = lx.next() else {
+            return None;
+        };
+        let Token::Keyword(k) = lx.next() else {
+            return None;
+        };
         if k != b"obj" {
             return None;
         }
@@ -403,7 +459,10 @@ impl Pdf {
                     if self.data.get(p) == Some(&b'\n') {
                         p += 1;
                     }
-                    let len = d.get("Length").map(|l| self.resolve_busy(l, num)).and_then(|l| l.as_i64());
+                    let len = d
+                        .get("Length")
+                        .map(|l| self.resolve_busy(l, num))
+                        .and_then(|l| l.as_i64());
                     let mut end = None;
                     if let Some(l) = len.filter(|l| *l >= 0) {
                         let e = p + l as usize;
@@ -427,7 +486,11 @@ impl Pdf {
                         e2
                     });
                     let raw = self.data.get(p..end).unwrap_or_default().to_vec();
-                    obj = Obj::Stream(Arc::new(Stream { dict: d.clone(), raw, id: (num, gen) }));
+                    obj = Obj::Stream(Arc::new(Stream {
+                        dict: d.clone(),
+                        raw,
+                        id: (num, gen),
+                    }));
                 }
             }
         }
@@ -454,14 +517,29 @@ impl Pdf {
         if let Some(v) = self.objstm.borrow().get(&stm) {
             return Some(v.clone());
         }
-        let Obj::Stream(s) = self.get(stm) else { return None };
+        let Obj::Stream(s) = self.get(stm) else {
+            return None;
+        };
         let data = crate::filter::decode_stream(self, &s, false).ok()?.0;
-        let n = s.dict.get("N").map(|o| self.resolve(o)).and_then(|o| o.as_i64())?.clamp(0, 1_000_000) as usize;
-        let first = s.dict.get("First").map(|o| self.resolve(o)).and_then(|o| o.as_i64())?.max(0) as usize;
+        let n = s
+            .dict
+            .get("N")
+            .map(|o| self.resolve(o))
+            .and_then(|o| o.as_i64())?
+            .clamp(0, 1_000_000) as usize;
+        let first = s
+            .dict
+            .get("First")
+            .map(|o| self.resolve(o))
+            .and_then(|o| o.as_i64())?
+            .max(0) as usize;
         let mut lx = Lexer::new(&data, 0);
         let mut pairs = Vec::new();
         for _ in 0..n {
-            let (Token::Obj(Obj::Int(num)), Token::Obj(Obj::Int(off))) = (lx.next(), lx.next()) else { break };
+            let (Token::Obj(Obj::Int(num)), Token::Obj(Obj::Int(off))) = (lx.next(), lx.next())
+            else {
+                break;
+            };
             pairs.push((num as u32, off.max(0) as usize));
         }
         let mut out = Vec::with_capacity(pairs.len());
@@ -535,7 +613,8 @@ impl Pdf {
         self.dget(d, key).as_array().map(<[Obj]>::to_vec)
     }
     pub fn dget_numbers(&self, d: &Dict, key: &str) -> Option<Vec<f64>> {
-        self.dget_array(d, key).map(|a| a.iter().filter_map(|o| self.resolve(o).as_f64()).collect())
+        self.dget_array(d, key)
+            .map(|a| a.iter().filter_map(|o| self.resolve(o).as_f64()).collect())
     }
 
     pub fn catalog_dict(&self) -> Option<Dict> {
@@ -557,7 +636,9 @@ impl Pdf {
 
     pub fn pages(&self) -> Vec<PageInfo> {
         let mut out = Vec::new();
-        let Some(cat) = self.catalog_dict() else { return out };
+        let Some(cat) = self.catalog_dict() else {
+            return out;
+        };
         let mut seen = HashSet::new();
         if let Some(Obj::Ref(root, _)) = cat.get("Pages") {
             self.walk_pages(*root, &Dict::new(), &mut out, &mut seen, 0);
@@ -577,7 +658,14 @@ impl Pdf {
         out
     }
 
-    fn walk_pages(&self, num: u32, inherited: &Dict, out: &mut Vec<PageInfo>, seen: &mut HashSet<u32>, depth: u32) {
+    fn walk_pages(
+        &self,
+        num: u32,
+        inherited: &Dict,
+        out: &mut Vec<PageInfo>,
+        seen: &mut HashSet<u32>,
+        depth: u32,
+    ) {
         if depth > 64 || !seen.insert(num) || out.len() > 200_000 {
             return;
         }
@@ -589,7 +677,8 @@ impl Pdf {
             }
         }
         let kids = d.get("Kids").map(|k| self.resolve(k));
-        let is_pages = d.get("Type").and_then(Obj::as_name) == Some("Pages") || (kids.is_some() && d.get("Type").is_none());
+        let is_pages = d.get("Type").and_then(Obj::as_name) == Some("Pages")
+            || (kids.is_some() && !d.contains_key("Type"));
         if is_pages {
             if let Some(Obj::Array(kids)) = kids {
                 for k in kids {

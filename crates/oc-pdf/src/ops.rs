@@ -14,7 +14,13 @@ pub enum PaintSrc {
 }
 
 pub enum PatternKind {
-    Tiling { ops: Vec<Op>, bbox: [f64; 4], xstep: f64, ystep: f64, uncolored: bool },
+    Tiling {
+        ops: Vec<Op>,
+        bbox: [f64; 4],
+        xstep: f64,
+        ystep: f64,
+        uncolored: bool,
+    },
     Shading(Arc<Shading>),
 }
 
@@ -56,7 +62,11 @@ pub struct Fx {
 
 impl Default for Fx {
     fn default() -> Self {
-        Fx { alpha: 1.0, blend: Blend::Normal, smask: None }
+        Fx {
+            alpha: 1.0,
+            blend: Blend::Normal,
+            smask: None,
+        }
     }
 }
 
@@ -102,15 +112,46 @@ pub struct TextRun {
 pub enum Op {
     Save,
     Restore,
-    Clip { path: Arc<Path>, rule: FillRule },
-    Fill { path: Arc<Path>, rule: FillRule, paint: PaintSrc, fx: Fx },
-    Stroke { path: Arc<Path>, ctm: Transform, style: StrokeStyle, paint: PaintSrc, fx: Fx },
+    Clip {
+        path: Arc<Path>,
+        rule: FillRule,
+    },
+    Fill {
+        path: Arc<Path>,
+        rule: FillRule,
+        paint: PaintSrc,
+        fx: Fx,
+    },
+    Stroke {
+        path: Arc<Path>,
+        ctm: Transform,
+        style: StrokeStyle,
+        paint: PaintSrc,
+        fx: Fx,
+    },
     Text(Box<TextRun>),
-    Image { image: Arc<ImageData>, ctm: Transform, fx: Fx, stencil_paint: Option<PaintSrc> },
-    Shade { shading: Arc<Shading>, matrix: Transform, fx: Fx },
-    Group { ops: Vec<Op>, fx: Fx, isolated: bool },
+    Image {
+        image: Arc<ImageData>,
+        ctm: Transform,
+        fx: Fx,
+        stencil_paint: Option<PaintSrc>,
+    },
+    Shade {
+        shading: Arc<Shading>,
+        matrix: Transform,
+        fx: Fx,
+    },
+    Group {
+        ops: Vec<Op>,
+        fx: Fx,
+        isolated: bool,
+    },
     /// Marked content boundaries matter for extraction only (ActualText, artifacts).
-    Marked { tag: String, actual_text: Option<String>, begin: bool },
+    Marked {
+        tag: String,
+        actual_text: Option<String>,
+        begin: bool,
+    },
 }
 
 #[derive(Clone)]
@@ -121,10 +162,37 @@ pub struct MeshVertex {
 }
 
 pub enum Shading {
-    Axial { coords: [f64; 4], domain: [f64; 2], func: Option<Function>, extend: [bool; 2], cs: ColorSpace, background: Option<[f32; 3]>, bbox: Option<[f64; 4]> },
-    Radial { coords: [f64; 6], domain: [f64; 2], func: Option<Function>, extend: [bool; 2], cs: ColorSpace, background: Option<[f32; 3]>, bbox: Option<[f64; 4]> },
-    FunctionBased { domain: [f64; 4], matrix: Transform, func: Function, cs: ColorSpace, background: Option<[f32; 3]> },
-    Mesh { triangles: Vec<[MeshVertex; 3]>, func: Option<Function>, cs: ColorSpace, background: Option<[f32; 3]> },
+    Axial {
+        coords: [f64; 4],
+        domain: [f64; 2],
+        func: Option<Function>,
+        extend: [bool; 2],
+        cs: ColorSpace,
+        background: Option<[f32; 3]>,
+        bbox: Option<[f64; 4]>,
+    },
+    Radial {
+        coords: [f64; 6],
+        domain: [f64; 2],
+        func: Option<Function>,
+        extend: [bool; 2],
+        cs: ColorSpace,
+        background: Option<[f32; 3]>,
+        bbox: Option<[f64; 4]>,
+    },
+    FunctionBased {
+        domain: [f64; 4],
+        matrix: Transform,
+        func: Function,
+        cs: ColorSpace,
+        background: Option<[f32; 3]>,
+    },
+    Mesh {
+        triangles: Vec<[MeshVertex; 3]>,
+        func: Option<Function>,
+        cs: ColorSpace,
+        background: Option<[f32; 3]>,
+    },
 }
 
 pub struct Page {

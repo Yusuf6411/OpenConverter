@@ -11,8 +11,8 @@ use sha2::{Sha256, Sha384, Sha512};
 use std::sync::Arc;
 
 const PAD: [u8; 32] = [
-    0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08, 0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80,
-    0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A,
+    0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08,
+    0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80, 0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -80,7 +80,7 @@ pub fn rc4(key: &[u8], data: &[u8]) -> Vec<u8> {
 }
 
 fn aes_cbc_decrypt(key: &[u8], iv: &[u8], data: &[u8], unpad: bool) -> Option<Vec<u8>> {
-    if iv.len() != 16 || data.len() % 16 != 0 {
+    if iv.len() != 16 || !data.len().is_multiple_of(16) {
         return None;
     }
     let mut out = Vec::with_capacity(data.len());
@@ -149,7 +149,12 @@ pub(crate) fn hash_r6(password: &[u8], salt: &[u8], udata: &[u8]) -> Vec<u8> {
             k1.extend_from_slice(&k);
             k1.extend_from_slice(udata);
         }
-        let e = aes128_cbc_encrypt_nopad(k.get(..16).unwrap_or_default(), k.get(16..32).unwrap_or_default(), &k1).unwrap_or_default();
+        let e = aes128_cbc_encrypt_nopad(
+            k.get(..16).unwrap_or_default(),
+            k.get(16..32).unwrap_or_default(),
+            &k1,
+        )
+        .unwrap_or_default();
         let sum: u32 = e.iter().take(16).map(|b| u32::from(*b)).sum();
         k = match sum % 3 {
             0 => Sha256::digest(&e).to_vec(),
@@ -171,11 +176,19 @@ pub(crate) fn hash_r6(password: &[u8], salt: &[u8], udata: &[u8]) -> Vec<u8> {
 impl Crypt {
     pub fn new(pdf: &Pdf, d: &Dict, id0: &[u8], enc_num: Option<u32>) -> Result<Crypt> {
         if pdf.dget_name(d, "Filter").as_deref() != Some("Standard") {
-            return Err(Error::new(ErrorCode::UnsupportedVariant, "the PDF uses a security handler other than the standard one"));
+            return Err(Error::new(
+                ErrorCode::UnsupportedVariant,
+                "the PDF uses a security handler other than the standard one",
+            ));
         }
         let v = pdf.dget_i64(d, "V").unwrap_or(0);
         let r = pdf.dget_i64(d, "R").unwrap_or(2);
-        let bytes = |k: &str| pdf.dget(d, k).as_str().map(<[u8]>::to_vec).unwrap_or_default();
+        let bytes = |k: &str| {
+            pdf.dget(d, k)
+                .as_str()
+                .map(<[u8]>::to_vec)
+                .unwrap_or_default()
+        };
         let mut key_len = (pdf.dget_i64(d, "Length").unwrap_or(40) / 8).clamp(5, 32) as usize;
         let (mut stm, mut strm) = (Method::Rc4, Method::Rc4);
         if v >= 4 {
@@ -224,7 +237,10 @@ impl Crypt {
             encrypt_obj: enc_num,
         };
         if !(1..=6).contains(&r) || !(1..=5).contains(&v) {
-            return Err(Error::new(ErrorCode::UnsupportedVariant, format!("encryption revision {r} (V {v}) is not supported")));
+            return Err(Error::new(
+                ErrorCode::UnsupportedVariant,
+                format!("encryption revision {r} (V {v}) is not supported"),
+            ));
         }
         c.authenticate(b"");
         Ok(c)
@@ -241,7 +257,11 @@ impl Crypt {
     fn file_key_r234(&self, pw: &[u8]) -> Vec<u8> {
         let padded = Self::pad(pw);
         let p = (self.p as u32).to_le_bytes();
-        let extra: &[u8] = if self.r >= 4 && !self.encrypt_metadata { &[0xFF; 4] } else { &[] };
+        let extra: &[u8] = if self.r >= 4 && !self.encrypt_metadata {
+            &[0xFF; 4]
+        } else {
+            &[]
+        };
         let mut h = md5(&[&padded, &self.o, &p, &self.id0, extra]);
         let n = if self.r == 2 { 5 } else { self.key_len };
         if self.r >= 3 {
@@ -318,23 +338,37 @@ impl Crypt {
                 hash_r6(p, salt, u)
             }
         };
-        let (Some(uh), Some(uvs), Some(uks)) = (self.u.get(..32), self.u.get(32..40), self.u.get(40..48)) else {
+        let (Some(uh), Some(uvs), Some(uks)) =
+            (self.u.get(..32), self.u.get(32..40), self.u.get(40..48))
+        else {
             return false;
         };
         if hash(pw, uvs, &[]) == uh {
             let ik = hash(pw, uks, &[]);
-            if let Some(k) = aes_cbc_decrypt(&ik, &[0u8; 16], self.ue.get(..32).unwrap_or_default(), false) {
+            if let Some(k) = aes_cbc_decrypt(
+                &ik,
+                &[0u8; 16],
+                self.ue.get(..32).unwrap_or_default(),
+                false,
+            ) {
                 self.key = k;
                 self.authenticated = true;
                 self.owner = false;
                 return true;
             }
         }
-        if let (Some(oh), Some(ovs), Some(oks)) = (self.o.get(..32), self.o.get(32..40), self.o.get(40..48)) {
+        if let (Some(oh), Some(ovs), Some(oks)) =
+            (self.o.get(..32), self.o.get(32..40), self.o.get(40..48))
+        {
             let u48 = self.u.get(..48).unwrap_or_default();
             if hash(pw, ovs, u48) == oh {
                 let ik = hash(pw, oks, u48);
-                if let Some(k) = aes_cbc_decrypt(&ik, &[0u8; 16], self.oe.get(..32).unwrap_or_default(), false) {
+                if let Some(k) = aes_cbc_decrypt(
+                    &ik,
+                    &[0u8; 16],
+                    self.oe.get(..32).unwrap_or_default(),
+                    false,
+                ) {
                     self.key = k;
                     self.authenticated = true;
                     self.owner = true;
@@ -391,11 +425,23 @@ impl Crypt {
     pub fn decrypt_strings(&self, o: Obj, num: u32, gen: u16) -> Obj {
         match o {
             Obj::Str(s) => Obj::Str(self.decrypt_bytes(self.strm, &s, num, gen)),
-            Obj::Array(a) => Obj::Array(a.into_iter().map(|x| self.decrypt_strings(x, num, gen)).collect()),
-            Obj::Dict(d) => Obj::Dict(d.into_iter().map(|(k, v)| (k, self.decrypt_strings(v, num, gen))).collect()),
+            Obj::Array(a) => Obj::Array(
+                a.into_iter()
+                    .map(|x| self.decrypt_strings(x, num, gen))
+                    .collect(),
+            ),
+            Obj::Dict(d) => Obj::Dict(
+                d.into_iter()
+                    .map(|(k, v)| (k, self.decrypt_strings(v, num, gen)))
+                    .collect(),
+            ),
             Obj::Stream(s) => {
                 let mut st = (*s).clone();
-                st.dict = st.dict.into_iter().map(|(k, v)| (k, self.decrypt_strings(v, num, gen))).collect();
+                st.dict = st
+                    .dict
+                    .into_iter()
+                    .map(|(k, v)| (k, self.decrypt_strings(v, num, gen)))
+                    .collect();
                 Obj::Stream(Arc::new(st))
             }
             o => o,
@@ -418,14 +464,20 @@ pub fn random_bytes(n: usize) -> Vec<u8> {
     for (i, b) in out.iter_mut().enumerate() {
         let mut h = state.build_hasher();
         h.write_usize(i);
-        h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+        h.write_u128(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos()),
+        );
         *b = h.finish().to_le_bytes()[i % 8];
     }
     out
 }
 
 fn aes256_cbc_encrypt(key: &[u8], iv: &[u8], data: &[u8], pad: bool) -> Vec<u8> {
-    let Ok(c) = aes::Aes256::new_from_slice(key) else { return Vec::new() };
+    let Ok(c) = aes::Aes256::new_from_slice(key) else {
+        return Vec::new();
+    };
     let mut buf = data.to_vec();
     if pad {
         let n = 16 - buf.len() % 16;

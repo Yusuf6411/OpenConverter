@@ -1,9 +1,9 @@
 //! PDF to PDF: choosing, ordering and rotating pages, merging files, recompressing, removing
 //! metadata and encrypting. The result is a new file made of copies of what the pages use.
+use crate::crypt::Encryptor;
 use crate::doc::{PageInfo, Pdf};
 use crate::filter::{decode_stream, decrypted_raw, filter_chain};
 use crate::object::{Dict, Obj, Stream};
-use crate::crypt::Encryptor;
 use crate::writer::{dict, name, now_secs, pdf_date, text_string, Builder};
 use oc_core::{Error, ErrorCode, Result};
 use std::collections::{HashMap, HashSet};
@@ -29,11 +29,14 @@ pub fn parse_pages(spec: &str, total: usize) -> Result<Vec<usize>> {
         if t.eq_ignore_ascii_case("last") {
             return Ok(total);
         }
-        t.parse::<usize>().map_err(|_| bad(format!("'{t}' is not a page number")))
+        t.parse::<usize>()
+            .map_err(|_| bad(format!("'{t}' is not a page number")))
     };
     let check = |n: usize| -> Result<usize> {
         if n == 0 || n > total {
-            Err(bad(format!("page {n} does not exist (the file has {total} pages)")))
+            Err(bad(format!(
+                "page {n} does not exist (the file has {total} pages)"
+            )))
         } else {
             Ok(n - 1)
         }
@@ -115,7 +118,9 @@ impl<'a> Copier<'a> {
     }
 
     fn copy_dict(&mut self, b: &mut Builder, d: &Dict, depth: u32) -> Dict {
-        d.iter().map(|(k, v)| (k.clone(), self.copy(b, v, depth + 1))).collect()
+        d.iter()
+            .map(|(k, v)| (k.clone(), self.copy(b, v, depth + 1)))
+            .collect()
     }
 
     fn copy_stream(&mut self, b: &mut Builder, s: &Arc<Stream>, depth: u32) -> Obj {
@@ -125,9 +130,15 @@ impl<'a> Copier<'a> {
         let mut data = decrypted_raw(self.pdf, s);
         if self.compress {
             let chain = filter_chain(self.pdf, &s.dict);
-            let plain_flate = chain.len() == 1 && chain[0].0 == "FlateDecode" && !chain[0].1.contains_key("Predictor");
+            let plain_flate = chain.len() == 1
+                && chain[0].0 == "FlateDecode"
+                && !chain[0].1.contains_key("Predictor");
             if chain.is_empty() || plain_flate {
-                let probe = Stream { dict: s.dict.clone(), raw: data.clone(), id: (0, 0) };
+                let probe = Stream {
+                    dict: s.dict.clone(),
+                    raw: data.clone(),
+                    id: (0, 0),
+                };
                 if let Ok((plain, None)) = decode_stream(self.pdf, &probe, false) {
                     let z = oc_compress::zlib::compress(&plain, 9);
                     if z.len() < data.len() || chain.is_empty() {
@@ -138,7 +149,11 @@ impl<'a> Copier<'a> {
                 }
             }
         }
-        Obj::Stream(Arc::new(Stream { dict: d, raw: data, id: (0, 0) }))
+        Obj::Stream(Arc::new(Stream {
+            dict: d,
+            raw: data,
+            id: (0, 0),
+        }))
     }
 
     fn drain(&mut self, b: &mut Builder) {
@@ -187,7 +202,12 @@ pub fn assemble(parts: &[Part], edit: &Edit) -> Result<Assembled> {
         // page objects first so links between the chosen pages can be kept
         let mut new_pages = Vec::new();
         for &i in &part.pages {
-            let info = infos.get(i).ok_or_else(|| Error::new(ErrorCode::InvalidOptions, format!("page {} does not exist", i + 1)))?;
+            let info = infos.get(i).ok_or_else(|| {
+                Error::new(
+                    ErrorCode::InvalidOptions,
+                    format!("page {} does not exist", i + 1),
+                )
+            })?;
             let n = b.reserve();
             c.page_map.entry(info.num).or_insert(n);
             new_pages.push((n, info));
@@ -202,14 +222,18 @@ pub fn assemble(parts: &[Part], edit: &Edit) -> Result<Assembled> {
             }
             d.insert("Type".into(), name("Page"));
             d.insert("Parent".into(), Obj::Ref(pages_node, 0));
-            let rot = (part.pdf.dget_i64(&info.dict, "Rotate").unwrap_or(0) + edit.rotate).rem_euclid(360);
+            let rot = (part.pdf.dget_i64(&info.dict, "Rotate").unwrap_or(0) + edit.rotate)
+                .rem_euclid(360);
             if rot != 0 {
                 d.insert("Rotate".into(), Obj::Int(rot));
             } else {
                 d.remove("Rotate");
             }
             if !d.contains_key("MediaBox") {
-                d.insert("MediaBox".into(), Obj::Array([0, 0, 612, 792].iter().map(|v| Obj::Int(*v)).collect()));
+                d.insert(
+                    "MediaBox".into(),
+                    Obj::Array([0, 0, 612, 792].iter().map(|v| Obj::Int(*v)).collect()),
+                );
             }
             b.set(*n, Obj::Dict(d));
             kids.push(Obj::Ref(*n, 0));
@@ -226,12 +250,21 @@ pub fn assemble(parts: &[Part], edit: &Edit) -> Result<Assembled> {
         }
         if let Some(cat) = part.pdf.catalog_dict() {
             let all = part.pages.len() == infos.len();
-            for k in ["Outlines", "AcroForm", "Names", "StructTreeRoot", "PageLabels"] {
+            for k in [
+                "Outlines",
+                "AcroForm",
+                "Names",
+                "StructTreeRoot",
+                "PageLabels",
+            ] {
                 if cat.contains_key(k) && (!all || parts.len() > 1 || k == "StructTreeRoot") {
                     lost_structure = true;
                 }
             }
-            if cat.contains_key("AcroForm") || cat.contains_key("Names") || cat.contains_key("Outlines") {
+            if cat.contains_key("AcroForm")
+                || cat.contains_key("Names")
+                || cat.contains_key("Outlines")
+            {
                 lost_structure = true;
             }
         }
@@ -240,8 +273,18 @@ pub fn assemble(parts: &[Part], edit: &Edit) -> Result<Assembled> {
         notes.push("bookmarks, form fields, attachments and tagged structure are not carried over; the pages keep their look and links between the chosen pages".to_string());
     }
     let count = kids.len() as i64;
-    b.set(pages_node, Obj::Dict(dict(vec![("Type", name("Pages")), ("Kids", Obj::Array(kids)), ("Count", Obj::Int(count))])));
-    let mut cat = dict(vec![("Type", name("Catalog")), ("Pages", Obj::Ref(pages_node, 0))]);
+    b.set(
+        pages_node,
+        Obj::Dict(dict(vec![
+            ("Type", name("Pages")),
+            ("Kids", Obj::Array(kids)),
+            ("Count", Obj::Int(count)),
+        ])),
+    );
+    let mut cat = dict(vec![
+        ("Type", name("Catalog")),
+        ("Pages", Obj::Ref(pages_node, 0)),
+    ]);
     if let Some(x) = xmp {
         cat.insert("Metadata".into(), x);
     }
@@ -259,7 +302,12 @@ pub fn assemble(parts: &[Part], edit: &Edit) -> Result<Assembled> {
     info.insert("Producer".into(), text_string("OpenConverter"));
     info.insert("ModDate".into(), text_string(&pdf_date(now_secs())));
     let info_ref = b.add(Obj::Dict(info));
-    let Obj::Ref(info_num, _) = info_ref else { return Err(Error::new(ErrorCode::InternalError, "info object")) };
+    let Obj::Ref(info_num, _) = info_ref else {
+        return Err(Error::new(ErrorCode::InternalError, "info object"));
+    };
     let enc = edit.encrypt.as_ref().map(|(u, o)| Encryptor::new(u, o, -4));
-    Ok(Assembled { data: b.finish(catalog, Some(info_num), enc.as_ref()), notes })
+    Ok(Assembled {
+        data: b.finish(catalog, Some(info_num), enc.as_ref()),
+        notes,
+    })
 }

@@ -10,6 +10,7 @@ pub mod audio;
 pub mod font;
 pub mod image;
 pub mod isolated;
+pub mod pdf;
 pub mod subtitle;
 pub mod svg;
 pub mod table;
@@ -144,6 +145,7 @@ impl Engine {
         video::register(&mut registry);
         font::register(&mut registry);
         svg::register(&mut registry);
+        pdf::register(&mut registry);
         let packable: Vec<FormatId> = std::iter::once(TXT)
             .chain(image::FORMATS)
             .chain(audio::FORMATS)
@@ -152,6 +154,7 @@ impl Engine {
             .chain(video::FORMATS)
             .chain(font::FORMATS)
             .chain(svg::FORMATS)
+            .chain(pdf::FORMATS)
             .collect();
         archive::register(&mut registry, &packable);
         Self {
@@ -382,6 +385,7 @@ impl Engine {
             .chain([video::FRAMES])
             .chain(font::FORMATS)
             .chain(svg::FORMATS)
+            .chain(pdf::FORMATS)
             .chain(archive::FORMATS)
             .filter_map(|id| self.registry.format(id))
     }
@@ -722,6 +726,43 @@ impl Engine {
             let (out, n) = image::encode(to, &img, &opts, &out_ext)?;
             notes.extend(n);
             (out, "Draw SVG -> Encode picture".to_string())
+        } else if pdf::is_pdf(from) && image::is_image(to) {
+            let (img, n) = pdf::render_first(data, &opts, &self.limits)?;
+            notes.extend(n);
+            let out_ext = req
+                .output
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let mut after = opts.clone();
+            after.set("width", oc_core::options::OptionValue::Int(0));
+            after.set("height", oc_core::options::OptionValue::Int(0));
+            let (img, n) = image::transform(img, &after, &self.limits)?;
+            notes.extend(n);
+            let (out, n) = image::encode(to, &img, &opts, &out_ext)?;
+            notes.extend(n);
+            (out, "Draw page -> Encode picture".to_string())
+        } else if from == pdf::PDF && to == TXT {
+            let (text, n) = pdf::extract_text(data, &opts, &self.limits)?;
+            notes.extend(n);
+            let mut o = opts.clone();
+            o.set(
+                "from_encoding",
+                oc_core::options::OptionValue::Text("utf-8".into()),
+            );
+            let (out, n) = convert_text(text.as_bytes(), &o)?;
+            notes.extend(n);
+            (out, "Extract text -> encode text".to_string())
+        } else if from == pdf::PDF && to == pdf::PAGES {
+            let out = pdf::pages_zip(data, &opts, &opts, &self.limits, progress, &mut notes)?;
+            (out, "Draw pages -> Pack ZIP".to_string())
+        } else if from == pdf::PDF && to == pdf::PDF {
+            let out = pdf::rewrite(data, &opts, &opts, &self.limits, &mut notes)?;
+            (out, "Read PDF -> Write PDF".to_string())
+        } else if image::is_image(from) && to == pdf::PDF {
+            let out = pdf::from_image(from, data, &opts, &self.limits, progress, &mut notes)?;
+            (out, "Decode picture -> Write PDF".to_string())
         } else if font::is_font(from) && image::is_image(to) {
             let (img, n) = font::specimen(from, data, &opts, &self.limits)?;
             notes.extend(n);

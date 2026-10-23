@@ -9,9 +9,21 @@ pub enum ColorSpace {
     Gray,
     Rgb,
     Cmyk,
-    Lab { white: [f64; 3], range: [f64; 4] },
-    Indexed { base: Arc<ColorSpace>, hival: usize, table: Arc<Vec<u8>> },
-    Tint { n: usize, alt: Arc<ColorSpace>, func: Option<Arc<Function>>, none: bool },
+    Lab {
+        white: [f64; 3],
+        range: [f64; 4],
+    },
+    Indexed {
+        base: Arc<ColorSpace>,
+        hival: usize,
+        table: Arc<Vec<u8>>,
+    },
+    Tint {
+        n: usize,
+        alt: Arc<ColorSpace>,
+        func: Option<Arc<Function>>,
+        none: bool,
+    },
     Pattern(Option<Arc<ColorSpace>>),
 }
 
@@ -106,7 +118,9 @@ impl ColorSpace {
     pub fn default_decode(&self, bpc: usize) -> Vec<f64> {
         match self {
             ColorSpace::Indexed { .. } => vec![0.0, ((1u64 << bpc.min(16)) - 1) as f64],
-            ColorSpace::Lab { range, .. } => vec![0.0, 100.0, range[0], range[1], range[2], range[3]],
+            ColorSpace::Lab { range, .. } => {
+                vec![0.0, 100.0, range[0], range[1], range[2], range[3]]
+            }
             c => (0..c.n_components()).flat_map(|_| [0.0, 1.0]).collect(),
         }
     }
@@ -118,14 +132,24 @@ impl ColorSpace {
                 let v = clamp01(g(0)) as f32;
                 [v, v, v]
             }
-            ColorSpace::Rgb => [clamp01(g(0)) as f32, clamp01(g(1)) as f32, clamp01(g(2)) as f32],
+            ColorSpace::Rgb => [
+                clamp01(g(0)) as f32,
+                clamp01(g(1)) as f32,
+                clamp01(g(2)) as f32,
+            ],
             ColorSpace::Cmyk => cmyk_to_rgb(g(0), g(1), g(2), g(3)),
             ColorSpace::Lab { white, range } => {
                 let l = g(0).clamp(0.0, 100.0);
                 let a = g(1).clamp(range[0], range[1]);
                 let b = g(2).clamp(range[2], range[3]);
                 let t1 = (l + 16.0) / 116.0;
-                let f = |t: f64| if t >= 6.0 / 29.0 { t * t * t } else { (108.0 / 841.0) * (t - 4.0 / 29.0) };
+                let f = |t: f64| {
+                    if t >= 6.0 / 29.0 {
+                        t * t * t
+                    } else {
+                        (108.0 / 841.0) * (t - 4.0 / 29.0)
+                    }
+                };
                 let x = f(t1 + a / 500.0) * white[0];
                 let y = f(t1) * white[1];
                 let z = f(t1 - b / 200.0) * white[2];
@@ -142,7 +166,11 @@ impl ColorSpace {
                 let r = 3.240_449 * x - 1.537_136 * y - 0.498_531 * z;
                 let gg = -0.969_265 * x + 1.876_011 * y + 0.041_556 * z;
                 let bb = 0.055_643 * x - 0.204_026 * y + 1.057_229 * z;
-                [srgb_gamma(r) as f32, srgb_gamma(gg) as f32, srgb_gamma(bb) as f32]
+                [
+                    srgb_gamma(r) as f32,
+                    srgb_gamma(gg) as f32,
+                    srgb_gamma(bb) as f32,
+                ]
             }
             ColorSpace::Indexed { base, hival, table } => {
                 let i = (g(0).round().max(0.0) as usize).min(*hival);
@@ -156,7 +184,9 @@ impl ColorSpace {
                     .collect();
                 base.to_rgb(&comps)
             }
-            ColorSpace::Tint { alt, func, none, .. } => {
+            ColorSpace::Tint {
+                alt, func, none, ..
+            } => {
                 if *none {
                     return [1.0, 1.0, 1.0];
                 }
@@ -201,19 +231,37 @@ impl ColorSpace {
                     "DeviceCMYK" | "CMYK" => Some(ColorSpace::Cmyk),
                     "Lab" => {
                         let d = pdf.resolve(a.get(1)?).as_dict()?.clone();
-                        let w = pdf.dget_numbers(&d, "WhitePoint").unwrap_or_else(|| vec![0.9505, 1.0, 1.089]);
-                        let r = pdf.dget_numbers(&d, "Range").unwrap_or_else(|| vec![-100.0, 100.0, -100.0, 100.0]);
+                        let w = pdf
+                            .dget_numbers(&d, "WhitePoint")
+                            .unwrap_or_else(|| vec![0.9505, 1.0, 1.089]);
+                        let r = pdf
+                            .dget_numbers(&d, "Range")
+                            .unwrap_or_else(|| vec![-100.0, 100.0, -100.0, 100.0]);
                         Some(ColorSpace::Lab {
-                            white: [w.first().copied().unwrap_or(0.9505), w.get(1).copied().unwrap_or(1.0), w.get(2).copied().unwrap_or(1.089)],
-                            range: [r.first().copied().unwrap_or(-100.0), r.get(1).copied().unwrap_or(100.0), r.get(2).copied().unwrap_or(-100.0), r.get(3).copied().unwrap_or(100.0)],
+                            white: [
+                                w.first().copied().unwrap_or(0.9505),
+                                w.get(1).copied().unwrap_or(1.0),
+                                w.get(2).copied().unwrap_or(1.089),
+                            ],
+                            range: [
+                                r.first().copied().unwrap_or(-100.0),
+                                r.get(1).copied().unwrap_or(100.0),
+                                r.get(2).copied().unwrap_or(-100.0),
+                                r.get(3).copied().unwrap_or(100.0),
+                            ],
                         })
                     }
                     "ICCBased" => {
                         let s = pdf.resolve(a.get(1)?);
                         let d = s.as_dict()?;
                         let n = pdf.dget_i64(d, "N").unwrap_or(3);
-                        if let Some(alt) = d.get("Alternate").and_then(|alt| Self::parse(pdf, alt, res, depth + 1)) {
-                            if alt.n_components() as i64 == n && !matches!(alt, ColorSpace::Pattern(_)) {
+                        if let Some(alt) = d
+                            .get("Alternate")
+                            .and_then(|alt| Self::parse(pdf, alt, res, depth + 1))
+                        {
+                            if alt.n_components() as i64 == n
+                                && !matches!(alt, ColorSpace::Pattern(_))
+                            {
                                 return Some(alt);
                             }
                         }
@@ -232,23 +280,40 @@ impl ColorSpace {
                             Obj::Stream(s) => crate::filter::decode_stream(pdf, s, false).ok()?.0,
                             _ => return None,
                         };
-                        Some(ColorSpace::Indexed { base: Arc::new(base), hival, table: Arc::new(table) })
+                        Some(ColorSpace::Indexed {
+                            base: Arc::new(base),
+                            hival,
+                            table: Arc::new(table),
+                        })
                     }
                     "Separation" => {
                         let name = pdf.resolve(a.get(1)?);
                         let alt = Self::parse(pdf, a.get(2)?, res, depth + 1)?;
                         let func = Function::parse(pdf, a.get(3)?).map(Arc::new);
-                        Some(ColorSpace::Tint { n: 1, alt: Arc::new(alt), func, none: name.as_name() == Some("None") })
+                        Some(ColorSpace::Tint {
+                            n: 1,
+                            alt: Arc::new(alt),
+                            func,
+                            none: name.as_name() == Some("None"),
+                        })
                     }
                     "DeviceN" => {
                         let names = pdf.resolve(a.get(1)?);
                         let n = names.as_array()?.len();
                         let alt = Self::parse(pdf, a.get(2)?, res, depth + 1)?;
                         let func = Function::parse(pdf, a.get(3)?).map(Arc::new);
-                        Some(ColorSpace::Tint { n, alt: Arc::new(alt), func, none: false })
+                        Some(ColorSpace::Tint {
+                            n,
+                            alt: Arc::new(alt),
+                            func,
+                            none: false,
+                        })
                     }
                     "Pattern" => {
-                        let base = a.get(1).and_then(|b| Self::parse(pdf, b, res, depth + 1)).map(Arc::new);
+                        let base = a
+                            .get(1)
+                            .and_then(|b| Self::parse(pdf, b, res, depth + 1))
+                            .map(Arc::new);
                         Some(ColorSpace::Pattern(base))
                     }
                     _ => None,

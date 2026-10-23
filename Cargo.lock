@@ -2230,6 +2230,7 @@ dependencies = [
  "oc-core",
  "oc-font",
  "oc-image",
+ "oc-pdf",
  "oc-raster",
  "oc-sheet",
  "oc-subtitle",

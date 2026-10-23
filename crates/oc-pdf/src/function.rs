@@ -47,8 +47,10 @@ pub enum Ps {
 }
 
 const OPS: &[&str] = &[
-    "abs", "add", "atan", "ceiling", "cos", "cvi", "cvr", "div", "exp", "floor", "idiv", "ln", "log", "mod", "mul", "neg", "round", "sin", "sqrt", "sub",
-    "truncate", "and", "bitshift", "eq", "false", "ge", "gt", "le", "lt", "ne", "not", "or", "true", "xor", "copy", "dup", "exch", "index", "pop", "roll",
+    "abs", "add", "atan", "ceiling", "cos", "cvi", "cvr", "div", "exp", "floor", "idiv", "ln",
+    "log", "mod", "mul", "neg", "round", "sin", "sqrt", "sub", "truncate", "and", "bitshift", "eq",
+    "false", "ge", "gt", "le", "lt", "ne", "not", "or", "true", "xor", "copy", "dup", "exch",
+    "index", "pop", "roll",
 ];
 
 fn parse_ps(tokens: &mut std::iter::Peekable<std::vec::IntoIter<String>>, depth: u32) -> Vec<Ps> {
@@ -140,52 +142,173 @@ fn ps_op(op: &str, st: &mut Vec<f64>) {
     let pop = |st: &mut Vec<f64>| st.pop().unwrap_or(0.0);
     let b2f = |b: bool| if b { 1.0 } else { 0.0 };
     match op {
-        "abs" => { let a = pop(st); st.push(a.abs()) }
-        "add" => { let b = pop(st); let a = pop(st); st.push(a + b) }
-        "sub" => { let b = pop(st); let a = pop(st); st.push(a - b) }
-        "mul" => { let b = pop(st); let a = pop(st); st.push(a * b) }
-        "div" => { let b = pop(st); let a = pop(st); st.push(if b == 0.0 { 0.0 } else { a / b }) }
-        "idiv" => { let b = pop(st) as i64; let a = pop(st) as i64; st.push(if b == 0 { 0.0 } else { (a / b) as f64 }) }
-        "mod" => { let b = pop(st) as i64; let a = pop(st) as i64; st.push(if b == 0 { 0.0 } else { (a % b) as f64 }) }
-        "neg" => { let a = pop(st); st.push(-a) }
+        "abs" => {
+            let a = pop(st);
+            st.push(a.abs())
+        }
+        "add" => {
+            let b = pop(st);
+            let a = pop(st);
+            st.push(a + b)
+        }
+        "sub" => {
+            let b = pop(st);
+            let a = pop(st);
+            st.push(a - b)
+        }
+        "mul" => {
+            let b = pop(st);
+            let a = pop(st);
+            st.push(a * b)
+        }
+        "div" => {
+            let b = pop(st);
+            let a = pop(st);
+            st.push(if b == 0.0 { 0.0 } else { a / b })
+        }
+        "idiv" => {
+            let b = pop(st) as i64;
+            let a = pop(st) as i64;
+            st.push(if b == 0 { 0.0 } else { (a / b) as f64 })
+        }
+        "mod" => {
+            let b = pop(st) as i64;
+            let a = pop(st) as i64;
+            st.push(if b == 0 { 0.0 } else { (a % b) as f64 })
+        }
+        "neg" => {
+            let a = pop(st);
+            st.push(-a)
+        }
         "atan" => {
             let den = pop(st);
             let num = pop(st);
             let mut d = num.atan2(den).to_degrees();
-            if d < 0.0 { d += 360.0 }
+            if d < 0.0 {
+                d += 360.0
+            }
             st.push(d)
         }
-        "ceiling" => { let a = pop(st); st.push(a.ceil()) }
-        "floor" => { let a = pop(st); st.push(a.floor()) }
-        "round" => { let a = pop(st); st.push((a + 0.5).floor()) }
-        "truncate" | "cvi" => { let a = pop(st); st.push(a.trunc()) }
+        "ceiling" => {
+            let a = pop(st);
+            st.push(a.ceil())
+        }
+        "floor" => {
+            let a = pop(st);
+            st.push(a.floor())
+        }
+        "round" => {
+            let a = pop(st);
+            st.push((a + 0.5).floor())
+        }
+        "truncate" | "cvi" => {
+            let a = pop(st);
+            st.push(a.trunc())
+        }
         "cvr" => {}
-        "cos" => { let a = pop(st); st.push(a.to_radians().cos()) }
-        "sin" => { let a = pop(st); st.push(a.to_radians().sin()) }
-        "exp" => { let e = pop(st); let b = pop(st); st.push(b.powf(e)) }
-        "ln" => { let a = pop(st); st.push(if a > 0.0 { a.ln() } else { 0.0 }) }
-        "log" => { let a = pop(st); st.push(if a > 0.0 { a.log10() } else { 0.0 }) }
-        "sqrt" => { let a = pop(st); st.push(a.max(0.0).sqrt()) }
-        "and" => { let b = pop(st) as i64; let a = pop(st) as i64; st.push((a & b) as f64) }
-        "or" => { let b = pop(st) as i64; let a = pop(st) as i64; st.push((a | b) as f64) }
-        "xor" => { let b = pop(st) as i64; let a = pop(st) as i64; st.push((a ^ b) as f64) }
-        "not" => { let a = pop(st); st.push(if a == 0.0 || a == 1.0 { 1.0 - a } else { !(a as i64) as f64 }) }
+        "cos" => {
+            let a = pop(st);
+            st.push(a.to_radians().cos())
+        }
+        "sin" => {
+            let a = pop(st);
+            st.push(a.to_radians().sin())
+        }
+        "exp" => {
+            let e = pop(st);
+            let b = pop(st);
+            st.push(b.powf(e))
+        }
+        "ln" => {
+            let a = pop(st);
+            st.push(if a > 0.0 { a.ln() } else { 0.0 })
+        }
+        "log" => {
+            let a = pop(st);
+            st.push(if a > 0.0 { a.log10() } else { 0.0 })
+        }
+        "sqrt" => {
+            let a = pop(st);
+            st.push(a.max(0.0).sqrt())
+        }
+        "and" => {
+            let b = pop(st) as i64;
+            let a = pop(st) as i64;
+            st.push((a & b) as f64)
+        }
+        "or" => {
+            let b = pop(st) as i64;
+            let a = pop(st) as i64;
+            st.push((a | b) as f64)
+        }
+        "xor" => {
+            let b = pop(st) as i64;
+            let a = pop(st) as i64;
+            st.push((a ^ b) as f64)
+        }
+        "not" => {
+            let a = pop(st);
+            st.push(if a == 0.0 || a == 1.0 {
+                1.0 - a
+            } else {
+                !(a as i64) as f64
+            })
+        }
         "bitshift" => {
             let s = pop(st) as i64;
             let a = pop(st) as i64;
-            st.push(if s >= 0 { a.checked_shl(s.min(63) as u32).unwrap_or(0) } else { a >> (-s).min(63) } as f64)
+            st.push(if s >= 0 {
+                a.checked_shl(s.min(63) as u32).unwrap_or(0)
+            } else {
+                a >> (-s).min(63)
+            } as f64)
         }
-        "eq" => { let b = pop(st); let a = pop(st); st.push(b2f(a == b)) }
-        "ne" => { let b = pop(st); let a = pop(st); st.push(b2f(a != b)) }
-        "ge" => { let b = pop(st); let a = pop(st); st.push(b2f(a >= b)) }
-        "gt" => { let b = pop(st); let a = pop(st); st.push(b2f(a > b)) }
-        "le" => { let b = pop(st); let a = pop(st); st.push(b2f(a <= b)) }
-        "lt" => { let b = pop(st); let a = pop(st); st.push(b2f(a < b)) }
+        "eq" => {
+            let b = pop(st);
+            let a = pop(st);
+            st.push(b2f(a == b))
+        }
+        "ne" => {
+            let b = pop(st);
+            let a = pop(st);
+            st.push(b2f(a != b))
+        }
+        "ge" => {
+            let b = pop(st);
+            let a = pop(st);
+            st.push(b2f(a >= b))
+        }
+        "gt" => {
+            let b = pop(st);
+            let a = pop(st);
+            st.push(b2f(a > b))
+        }
+        "le" => {
+            let b = pop(st);
+            let a = pop(st);
+            st.push(b2f(a <= b))
+        }
+        "lt" => {
+            let b = pop(st);
+            let a = pop(st);
+            st.push(b2f(a < b))
+        }
         "true" => st.push(1.0),
         "false" => st.push(0.0),
-        "dup" => { if let Some(a) = st.last().copied() { st.push(a) } }
-        "pop" => { st.pop(); }
-        "exch" => { let n = st.len(); if n >= 2 { st.swap(n - 1, n - 2) } }
+        "dup" => {
+            if let Some(a) = st.last().copied() {
+                st.push(a)
+            }
+        }
+        "pop" => {
+            st.pop();
+        }
+        "exch" => {
+            let n = st.len();
+            if n >= 2 {
+                st.swap(n - 1, n - 2)
+            }
+        }
         "copy" => {
             let n = pop(st).max(0.0) as usize;
             if n <= st.len() && n < 500 {
@@ -229,7 +352,10 @@ impl Function {
         }
         let o = pdf.resolve(o);
         if let Obj::Array(a) = &o {
-            let fs: Vec<Function> = a.iter().filter_map(|x| Self::parse_depth(pdf, x, depth + 1)).collect();
+            let fs: Vec<Function> = a
+                .iter()
+                .filter_map(|x| Self::parse_depth(pdf, x, depth + 1))
+                .collect();
             return (!fs.is_empty()).then_some(Function::Multi(fs));
         }
         if o.as_name() == Some("Identity") {
@@ -242,14 +368,20 @@ impl Function {
             0 => {
                 let Obj::Stream(s) = &o else { return None };
                 let data = crate::filter::decode_stream(pdf, s, false).ok()?.0;
-                let size: Vec<usize> = nums(pdf, &d, "Size").iter().map(|v| (*v as usize).clamp(1, 1 << 16)).collect();
+                let size: Vec<usize> = nums(pdf, &d, "Size")
+                    .iter()
+                    .map(|v| (*v as usize).clamp(1, 1 << 16))
+                    .collect();
                 let bps = pdf.dget_i64(&d, "BitsPerSample")?.clamp(1, 32) as usize;
                 let m = domain.len() / 2;
                 let n_out = range.len() / 2;
                 if m == 0 || n_out == 0 || size.len() != m {
                     return None;
                 }
-                let total = size.iter().try_fold(1usize, |a, b| a.checked_mul(*b))?.checked_mul(n_out)?;
+                let total = size
+                    .iter()
+                    .try_fold(1usize, |a, b| a.checked_mul(*b))?
+                    .checked_mul(n_out)?;
                 if total > 1 << 26 {
                     return None;
                 }
@@ -267,18 +399,54 @@ impl Function {
                 }
                 let encode = {
                     let e = nums(pdf, &d, "Encode");
-                    if e.len() >= 2 * m { e } else { size.iter().flat_map(|s| [0.0, (*s as f64) - 1.0]).collect() }
+                    if e.len() >= 2 * m {
+                        e
+                    } else {
+                        size.iter().flat_map(|s| [0.0, (*s as f64) - 1.0]).collect()
+                    }
                 };
                 let decode = {
                     let e = nums(pdf, &d, "Decode");
-                    if e.len() >= 2 * n_out { e } else { range.clone() }
+                    if e.len() >= 2 * n_out {
+                        e
+                    } else {
+                        range.clone()
+                    }
                 };
-                Some(Function::Sampled { domain, range, size, encode, decode, samples: Arc::new(samples), n_out })
+                Some(Function::Sampled {
+                    domain,
+                    range,
+                    size,
+                    encode,
+                    decode,
+                    samples: Arc::new(samples),
+                    n_out,
+                })
             }
             2 => {
-                let c0 = { let v = nums(pdf, &d, "C0"); if v.is_empty() { vec![0.0] } else { v } };
-                let c1 = { let v = nums(pdf, &d, "C1"); if v.is_empty() { vec![1.0] } else { v } };
-                Some(Function::Exp { domain, range, c0, c1, n: pdf.dget_f64(&d, "N").unwrap_or(1.0) })
+                let c0 = {
+                    let v = nums(pdf, &d, "C0");
+                    if v.is_empty() {
+                        vec![0.0]
+                    } else {
+                        v
+                    }
+                };
+                let c1 = {
+                    let v = nums(pdf, &d, "C1");
+                    if v.is_empty() {
+                        vec![1.0]
+                    } else {
+                        v
+                    }
+                };
+                Some(Function::Exp {
+                    domain,
+                    range,
+                    c0,
+                    c1,
+                    n: pdf.dget_f64(&d, "N").unwrap_or(1.0),
+                })
             }
             3 => {
                 let funcs: Vec<Function> = pdf
@@ -289,7 +457,13 @@ impl Function {
                 if funcs.is_empty() {
                     return None;
                 }
-                Some(Function::Stitch { domain, range, funcs, bounds: nums(pdf, &d, "Bounds"), encode: nums(pdf, &d, "Encode") })
+                Some(Function::Stitch {
+                    domain,
+                    range,
+                    funcs,
+                    bounds: nums(pdf, &d, "Bounds"),
+                    encode: nums(pdf, &d, "Encode"),
+                })
             }
             4 => {
                 let Obj::Stream(s) = &o else { return None };
@@ -299,7 +473,11 @@ impl Function {
                 if it.peek().map(String::as_str) == Some("{") {
                     it.next();
                 }
-                Some(Function::Ps { domain, range, code: Arc::new(parse_ps(&mut it, 0)) })
+                Some(Function::Ps {
+                    domain,
+                    range,
+                    code: Arc::new(parse_ps(&mut it, 0)),
+                })
             }
             _ => None,
         }
@@ -319,26 +497,55 @@ impl Function {
     pub fn eval(&self, input: &[f64]) -> Vec<f64> {
         let clip = |v: Vec<f64>, range: &[f64]| -> Vec<f64> {
             if range.len() >= v.len() * 2 {
-                v.iter().enumerate().map(|(i, x)| x.clamp(range[2 * i], range[2 * i + 1])).collect()
+                v.iter()
+                    .enumerate()
+                    .map(|(i, x)| x.clamp(range[2 * i], range[2 * i + 1]))
+                    .collect()
             } else {
                 v
             }
         };
         match self {
             Function::Identity => input.to_vec(),
-            Function::Multi(fs) => fs.iter().map(|f| f.eval(input).first().copied().unwrap_or(0.0)).collect(),
-            Function::Exp { domain, range, c0, c1, n } => {
+            Function::Multi(fs) => fs
+                .iter()
+                .map(|f| f.eval(input).first().copied().unwrap_or(0.0))
+                .collect(),
+            Function::Exp {
+                domain,
+                range,
+                c0,
+                c1,
+                n,
+            } => {
                 let mut x = input.first().copied().unwrap_or(0.0);
                 if domain.len() >= 2 {
                     x = x.clamp(domain[0], domain[1]);
                 }
                 let p = if *n == 1.0 { x } else { x.powf(*n) };
-                let out: Vec<f64> = c0.iter().zip(c1.iter().chain(std::iter::repeat(&1.0))).map(|(a, b)| a + p * (b - a)).collect();
+                let out: Vec<f64> = c0
+                    .iter()
+                    .zip(c1.iter().chain(std::iter::repeat(&1.0)))
+                    .map(|(a, b)| a + p * (b - a))
+                    .collect();
                 clip(out, range)
             }
-            Function::Stitch { domain, range, funcs, bounds, encode } => {
-                let (d0, d1) = (domain.first().copied().unwrap_or(0.0), domain.get(1).copied().unwrap_or(1.0));
-                let x = input.first().copied().unwrap_or(0.0).clamp(d0.min(d1), d1.max(d0));
+            Function::Stitch {
+                domain,
+                range,
+                funcs,
+                bounds,
+                encode,
+            } => {
+                let (d0, d1) = (
+                    domain.first().copied().unwrap_or(0.0),
+                    domain.get(1).copied().unwrap_or(1.0),
+                );
+                let x = input
+                    .first()
+                    .copied()
+                    .unwrap_or(0.0)
+                    .clamp(d0.min(d1), d1.max(d0));
                 let k = funcs.len();
                 let mut i = 0;
                 while i + 1 < k && i < bounds.len() && x >= bounds[i] {
@@ -346,15 +553,32 @@ impl Function {
                 }
                 let lo = if i == 0 { d0 } else { bounds[i - 1] };
                 let hi = if i < bounds.len() { bounds[i] } else { d1 };
-                let (e0, e1) = (encode.get(2 * i).copied().unwrap_or(0.0), encode.get(2 * i + 1).copied().unwrap_or(1.0));
-                let t = if hi == lo { e0 } else { e0 + (x - lo) * (e1 - e0) / (hi - lo) };
+                let (e0, e1) = (
+                    encode.get(2 * i).copied().unwrap_or(0.0),
+                    encode.get(2 * i + 1).copied().unwrap_or(1.0),
+                );
+                let t = if hi == lo {
+                    e0
+                } else {
+                    e0 + (x - lo) * (e1 - e0) / (hi - lo)
+                };
                 clip(funcs[i].eval(&[t]), range)
             }
-            Function::Ps { domain, range, code } => {
+            Function::Ps {
+                domain,
+                range,
+                code,
+            } => {
                 let mut st: Vec<f64> = input
                     .iter()
                     .enumerate()
-                    .map(|(i, v)| if domain.len() > 2 * i + 1 { v.clamp(domain[2 * i], domain[2 * i + 1]) } else { *v })
+                    .map(|(i, v)| {
+                        if domain.len() > 2 * i + 1 {
+                            v.clamp(domain[2 * i], domain[2 * i + 1])
+                        } else {
+                            *v
+                        }
+                    })
                     .collect();
                 run_ps(code, &mut st, 0);
                 let n = range.len() / 2;
@@ -363,15 +587,31 @@ impl Function {
                 out.resize(n, 0.0);
                 clip(out, range)
             }
-            Function::Sampled { domain, range, size, encode, decode, samples, n_out } => {
+            Function::Sampled {
+                domain,
+                range,
+                size,
+                encode,
+                decode,
+                samples,
+                n_out,
+            } => {
                 let m = size.len();
                 // encoded position per input
                 let mut pos = Vec::with_capacity(m);
                 for i in 0..m {
                     let (d0, d1) = (domain[2 * i], domain[2 * i + 1]);
-                    let x = input.get(i).copied().unwrap_or(0.0).clamp(d0.min(d1), d1.max(d0));
+                    let x = input
+                        .get(i)
+                        .copied()
+                        .unwrap_or(0.0)
+                        .clamp(d0.min(d1), d1.max(d0));
                     let (e0, e1) = (encode[2 * i], encode[2 * i + 1]);
-                    let e = if d1 == d0 { e0 } else { e0 + (x - d0) * (e1 - e0) / (d1 - d0) };
+                    let e = if d1 == d0 {
+                        e0
+                    } else {
+                        e0 + (x - d0) * (e1 - e0) / (d1 - d0)
+                    };
                     pos.push(e.clamp(0.0, (size[i] - 1) as f64));
                 }
                 let mut out = vec![0.0f64; *n_out];
@@ -385,7 +625,11 @@ impl Function {
                         let lo = pos[i].floor();
                         let frac = pos[i] - lo;
                         let hi_bit = (c >> i) & 1 == 1;
-                        let (ii, wi) = if hi_bit { (((lo as usize) + 1).min(size[i] - 1), frac) } else { (lo as usize, 1.0 - frac) };
+                        let (ii, wi) = if hi_bit {
+                            (((lo as usize) + 1).min(size[i] - 1), frac)
+                        } else {
+                            (lo as usize, 1.0 - frac)
+                        };
                         w *= wi;
                         idx += ii * stride;
                         stride *= size[i];

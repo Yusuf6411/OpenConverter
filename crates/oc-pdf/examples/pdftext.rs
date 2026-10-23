@@ -10,8 +10,15 @@ fn main() {
         pdf.authenticate(pw.as_deref().unwrap_or(b""));
     }
     let fonts = oc_font::db::FontDb::system();
-    let set = oc_pdf::interp::Settings { fonts: Some(&fonts), annotations: false };
-    let pages: Vec<oc_pdf::text::PageText> = pdf.pages().iter().map(|p| oc_pdf::text::extract_page(&oc_pdf::interp::interpret_page(&pdf, p, &set))).collect();
+    let set = oc_pdf::interp::Settings {
+        fonts: Some(&fonts),
+        annotations: false,
+    };
+    let pages: Vec<oc_pdf::text::PageText> = pdf
+        .pages()
+        .iter()
+        .map(|p| oc_pdf::text::extract_page(&oc_pdf::interp::interpret_page(&pdf, p, &set)))
+        .collect();
     let out = match mode {
         "md" => oc_pdf::text::to_markdown(&pages),
         "html" => oc_pdf::text::to_html(&pages, "document"),

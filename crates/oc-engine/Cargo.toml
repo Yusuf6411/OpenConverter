@@ -14,6 +14,7 @@ oc-image = { path = "../oc-image" }
 oc-font = { path = "../oc-font" }
 oc-raster = { path = "../oc-raster" }
 oc-svg = { path = "../oc-svg" }
+oc-pdf = { path = "../oc-pdf" }
 oc-compress = { path = "../oc-compress" }
 oc-audio = { path = "../oc-audio" }
 oc-container = { path = "../oc-container" }

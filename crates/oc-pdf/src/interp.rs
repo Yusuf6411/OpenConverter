@@ -6,7 +6,10 @@ use crate::font::{Kind, PdfFont};
 use crate::function::Function;
 use crate::image::decode_image;
 use crate::object::{Dict, Lexer, Obj, Stream, Token};
-use crate::ops::{Fx, ImageData, Op, Page, PaintSrc, PatternKind, PatternPaint, PlacedGlyph, SoftMask, StrokeStyle, TextRun};
+use crate::ops::{
+    Fx, ImageData, Op, Page, PaintSrc, PatternKind, PatternPaint, PlacedGlyph, SoftMask,
+    StrokeStyle, TextRun,
+};
 use crate::shading;
 use oc_font::db::FontDb;
 use oc_raster::{Blend, FillRule, Path, Pt, Transform};
@@ -58,19 +61,43 @@ impl GState {
             stroke_cs: ColorSpace::Gray,
             fill: PaintSrc::Rgb([0.0; 3]),
             stroke: PaintSrc::Rgb([0.0; 3]),
-            style: StrokeStyle { width: 1.0, cap: 0, join: 0, miter: 10.0, dash: Vec::new(), phase: 0.0 },
+            style: StrokeStyle {
+                width: 1.0,
+                cap: 0,
+                join: 0,
+                miter: 10.0,
+                dash: Vec::new(),
+                phase: 0.0,
+            },
             fill_alpha: 1.0,
             stroke_alpha: 1.0,
             blend: Blend::Normal,
             smask: None,
-            text: TextState { font: None, size: 0.0, tc: 0.0, tw: 0.0, th: 1.0, tl: 0.0, rise: 0.0, mode: 0 },
+            text: TextState {
+                font: None,
+                size: 0.0,
+                tc: 0.0,
+                tw: 0.0,
+                th: 1.0,
+                tl: 0.0,
+                rise: 0.0,
+                mode: 0,
+            },
         }
     }
     fn fill_fx(&self) -> Fx {
-        Fx { alpha: self.fill_alpha, blend: self.blend, smask: self.smask.clone() }
+        Fx {
+            alpha: self.fill_alpha,
+            blend: self.blend,
+            smask: self.smask.clone(),
+        }
     }
     fn stroke_fx(&self) -> Fx {
-        Fx { alpha: self.stroke_alpha, blend: self.blend, smask: self.smask.clone() }
+        Fx {
+            alpha: self.stroke_alpha,
+            blend: self.blend,
+            smask: self.smask.clone(),
+        }
     }
 }
 
@@ -90,11 +117,29 @@ struct Interp<'a> {
 
 /// The page box and the matrix from default user space to page space.
 pub fn page_geometry(pdf: &Pdf, page: &PageInfo) -> (f64, f64, Transform) {
-    let boxv = |k: &str| pdf.dget_numbers(&page.dict, k).filter(|v| v.len() >= 4).map(|v| [v[0].min(v[2]), v[1].min(v[3]), v[0].max(v[2]), v[1].max(v[3])]);
-    let media = boxv("MediaBox").filter(|b| b[2] - b[0] > 0.0 && b[3] - b[1] > 0.0).unwrap_or([0.0, 0.0, 612.0, 792.0]);
+    let boxv = |k: &str| {
+        pdf.dget_numbers(&page.dict, k)
+            .filter(|v| v.len() >= 4)
+            .map(|v| {
+                [
+                    v[0].min(v[2]),
+                    v[1].min(v[3]),
+                    v[0].max(v[2]),
+                    v[1].max(v[3]),
+                ]
+            })
+    };
+    let media = boxv("MediaBox")
+        .filter(|b| b[2] - b[0] > 0.0 && b[3] - b[1] > 0.0)
+        .unwrap_or([0.0, 0.0, 612.0, 792.0]);
     let mut b = media;
     if let Some(c) = boxv("CropBox") {
-        let i = [c[0].max(media[0]), c[1].max(media[1]), c[2].min(media[2]), c[3].min(media[3])];
+        let i = [
+            c[0].max(media[0]),
+            c[1].max(media[1]),
+            c[2].min(media[2]),
+            c[3].min(media[3]),
+        ];
         if i[2] - i[0] > 0.5 && i[3] - i[1] > 0.5 {
             b = i;
         }
@@ -102,13 +147,34 @@ pub fn page_geometry(pdf: &Pdf, page: &PageInfo) -> (f64, f64, Transform) {
     // keep absurd sizes in check
     let (bw, bh) = ((b[2] - b[0]).min(14400.0), (b[3] - b[1]).min(14400.0));
     let b = [b[0], b[1], b[0] + bw, b[1] + bh];
-    let rot = pdf.dget_i64(&page.dict, "Rotate").unwrap_or(0).rem_euclid(360) / 90 * 90;
+    let rot = pdf
+        .dget_i64(&page.dict, "Rotate")
+        .unwrap_or(0)
+        .rem_euclid(360)
+        / 90
+        * 90;
     let (x0, y0, x1, y1) = (b[0], b[1], b[2], b[3]);
     match rot {
-        90 => (y1 - y0, x1 - x0, Transform::new(0.0, 1.0, 1.0, 0.0, -y0, -x0)),
-        180 => (x1 - x0, y1 - y0, Transform::new(-1.0, 0.0, 0.0, 1.0, x1, -y0)),
-        270 => (y1 - y0, x1 - x0, Transform::new(0.0, -1.0, -1.0, 0.0, y1, x1)),
-        _ => (x1 - x0, y1 - y0, Transform::new(1.0, 0.0, 0.0, -1.0, -x0, y1)),
+        90 => (
+            y1 - y0,
+            x1 - x0,
+            Transform::new(0.0, 1.0, 1.0, 0.0, -y0, -x0),
+        ),
+        180 => (
+            x1 - x0,
+            y1 - y0,
+            Transform::new(-1.0, 0.0, 0.0, 1.0, x1, -y0),
+        ),
+        270 => (
+            y1 - y0,
+            x1 - x0,
+            Transform::new(0.0, -1.0, -1.0, 0.0, y1, x1),
+        ),
+        _ => (
+            x1 - x0,
+            y1 - y0,
+            Transform::new(1.0, 0.0, 0.0, -1.0, -x0, y1),
+        ),
     }
 }
 
@@ -158,16 +224,39 @@ pub fn interpret_page(pdf: &Pdf, page: &PageInfo, set: &Settings) -> Page {
     }
     let mut notes = it.notes;
     notes.dedup();
-    Page { width, height, ops, notes }
+    Page {
+        width,
+        height,
+        ops,
+        notes,
+    }
 }
 
 fn hidden_groups(pdf: &Pdf) -> HashSet<u32> {
     let mut hidden = HashSet::new();
-    let Some(cat) = pdf.catalog_dict() else { return hidden };
-    let Some(ocp) = pdf.dget_dict(&cat, "OCProperties") else { return hidden };
-    let Some(d) = pdf.dget_dict(&ocp, "D") else { return hidden };
+    let Some(cat) = pdf.catalog_dict() else {
+        return hidden;
+    };
+    let Some(ocp) = pdf.dget_dict(&cat, "OCProperties") else {
+        return hidden;
+    };
+    let Some(d) = pdf.dget_dict(&ocp, "D") else {
+        return hidden;
+    };
     let refs = |key: &str, from: &Dict| -> Vec<u32> {
-        pdf.dget_array(from, key).map(|a| a.iter().filter_map(|o| if let Obj::Ref(n, _) = o { Some(*n) } else { None }).collect()).unwrap_or_default()
+        pdf.dget_array(from, key)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|o| {
+                        if let Obj::Ref(n, _) = o {
+                            Some(*n)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     };
     if pdf.dget_name(&d, "BaseState").as_deref() == Some("OFF") {
         hidden.extend(refs("OCGs", &ocp));
@@ -196,10 +285,30 @@ fn blend_of(pdf: &Pdf, o: &Obj) -> Blend {
     let o = pdf.resolve(o);
     let name = match &o {
         Obj::Name(n) => Some(n.clone()),
-        Obj::Array(a) => a.iter().filter_map(|x| pdf.resolve(x).as_name().map(str::to_string)).next(),
+        Obj::Array(a) => a
+            .iter()
+            .filter_map(|x| pdf.resolve(x).as_name().map(str::to_string))
+            .next(),
         _ => None,
     };
-    name.and_then(|n| Blend::from_name(&n)).filter(|b| !matches!(b, Blend::Clear | Blend::Source | Blend::DestOut | Blend::SourceIn | Blend::SourceOut | Blend::SourceAtop | Blend::DestOver | Blend::DestIn | Blend::DestAtop | Blend::Xor | Blend::Plus)).unwrap_or(Blend::Normal)
+    name.and_then(|n| Blend::from_name(&n))
+        .filter(|b| {
+            !matches!(
+                b,
+                Blend::Clear
+                    | Blend::Source
+                    | Blend::DestOut
+                    | Blend::SourceIn
+                    | Blend::SourceOut
+                    | Blend::SourceAtop
+                    | Blend::DestOver
+                    | Blend::DestIn
+                    | Blend::DestAtop
+                    | Blend::Xor
+                    | Blend::Plus
+            )
+        })
+        .unwrap_or(Blend::Normal)
 }
 
 struct Cats {
@@ -253,36 +362,79 @@ impl<'a> Interp<'a> {
 
     fn color_from(&self, cs: &ColorSpace, st: &[Obj]) -> [f32; 3] {
         let n = cs.n_components();
-        let vals: Vec<f64> = st.iter().filter(|o| o.as_f64().is_some()).map(num).collect();
-        let take = if vals.len() >= n { &vals[vals.len() - n..] } else { &vals[..] };
+        let vals: Vec<f64> = st
+            .iter()
+            .filter(|o| o.as_f64().is_some())
+            .map(num)
+            .collect();
+        let take = if vals.len() >= n {
+            &vals[vals.len() - n..]
+        } else {
+            &vals[..]
+        };
         if take.len() < n {
             return cs.to_rgb(&cs.initial());
         }
         cs.to_rgb(take)
     }
 
-    fn make_pattern(&mut self, name: &str, cats: &Cats, under: [f32; 3], res: &Dict, gs: &GState) -> Option<PaintSrc> {
+    fn make_pattern(
+        &mut self,
+        name: &str,
+        cats: &Cats,
+        under: [f32; 3],
+        res: &Dict,
+        gs: &GState,
+    ) -> Option<PaintSrc> {
         let obj = self.pdf.resolve(cats.pattern.get(name)?);
         let d = obj.as_dict()?.clone();
-        let m = self.pdf.dget_numbers(&d, "Matrix").filter(|v| v.len() >= 6).map_or(Transform::IDENTITY, |v| Transform::new(v[0], v[1], v[2], v[3], v[4], v[5]));
+        let m = self
+            .pdf
+            .dget_numbers(&d, "Matrix")
+            .filter(|v| v.len() >= 6)
+            .map_or(Transform::IDENTITY, |v| {
+                Transform::new(v[0], v[1], v[2], v[3], v[4], v[5])
+            });
         let matrix = m.then(&self.pat_base);
         match self.pdf.dget_i64(&d, "PatternType")? {
             2 => {
                 let sh = shading::parse(self.pdf, d.get("Shading")?, res)?;
-                Some(PaintSrc::Pattern(Arc::new(PatternPaint { matrix, kind: PatternKind::Shading(Arc::new(sh)) }), under))
+                Some(PaintSrc::Pattern(
+                    Arc::new(PatternPaint {
+                        matrix,
+                        kind: PatternKind::Shading(Arc::new(sh)),
+                    }),
+                    under,
+                ))
             }
             1 => {
                 let Obj::Stream(s) = obj else { return None };
                 let bbox = self.pdf.dget_numbers(&d, "BBox").filter(|v| v.len() >= 4)?;
-                let bbox = [bbox[0].min(bbox[2]), bbox[1].min(bbox[3]), bbox[0].max(bbox[2]), bbox[1].max(bbox[3])];
-                let xstep = self.pdf.dget_f64(&d, "XStep").filter(|v| v.abs() > 1e-6).unwrap_or(bbox[2] - bbox[0]);
-                let ystep = self.pdf.dget_f64(&d, "YStep").filter(|v| v.abs() > 1e-6).unwrap_or(bbox[3] - bbox[1]);
+                let bbox = [
+                    bbox[0].min(bbox[2]),
+                    bbox[1].min(bbox[3]),
+                    bbox[0].max(bbox[2]),
+                    bbox[1].max(bbox[3]),
+                ];
+                let xstep = self
+                    .pdf
+                    .dget_f64(&d, "XStep")
+                    .filter(|v| v.abs() > 1e-6)
+                    .unwrap_or(bbox[2] - bbox[0]);
+                let ystep = self
+                    .pdf
+                    .dget_f64(&d, "YStep")
+                    .filter(|v| v.abs() > 1e-6)
+                    .unwrap_or(bbox[3] - bbox[1]);
                 let uncolored = self.pdf.dget_i64(&d, "PaintType") == Some(2);
                 if self.depth >= MAX_DEPTH {
                     return None;
                 }
                 let data = decode_stream(self.pdf, &s, false).ok()?.0;
-                let pres = self.pdf.dget_dict(&d, "Resources").unwrap_or_else(|| res.clone());
+                let pres = self
+                    .pdf
+                    .dget_dict(&d, "Resources")
+                    .unwrap_or_else(|| res.clone());
                 let mut tile = GState::new(Transform::IDENTITY);
                 if uncolored {
                     tile.fill = PaintSrc::Rgb(under);
@@ -296,7 +448,19 @@ impl<'a> Interp<'a> {
                 self.run(&data, &pres, tile, uncolored, &mut ops);
                 self.depth -= 1;
                 self.pat_base = saved;
-                Some(PaintSrc::Pattern(Arc::new(PatternPaint { matrix, kind: PatternKind::Tiling { ops, bbox, xstep, ystep, uncolored } }), under))
+                Some(PaintSrc::Pattern(
+                    Arc::new(PatternPaint {
+                        matrix,
+                        kind: PatternKind::Tiling {
+                            ops,
+                            bbox,
+                            xstep,
+                            ystep,
+                            uncolored,
+                        },
+                    }),
+                    under,
+                ))
             }
             _ => None,
         }
@@ -304,7 +468,11 @@ impl<'a> Interp<'a> {
 
     fn load_font(&mut self, cats: &Cats, name: &str) -> Option<Arc<PdfFont>> {
         let entry = cats.font.get(name)?;
-        let key = if let Obj::Ref(n, _) = entry { Some(*n) } else { None };
+        let key = if let Obj::Ref(n, _) = entry {
+            Some(*n)
+        } else {
+            None
+        };
         if let Some(f) = key.and_then(|k| self.font_cache.get(&k)) {
             return Some(f.clone());
         }
@@ -322,7 +490,14 @@ impl<'a> Interp<'a> {
     }
 
     fn apply_extg(&mut self, cats: &Cats, name: &str, gs: &mut GState, res: &Dict) {
-        let Some(d) = cats.extg.get(name).map(|o| self.pdf.resolve(o)).and_then(|o| o.as_dict().cloned()) else { return };
+        let Some(d) = cats
+            .extg
+            .get(name)
+            .map(|o| self.pdf.resolve(o))
+            .and_then(|o| o.as_dict().cloned())
+        else {
+            return;
+        };
         let pdf = self.pdf;
         for (k, v) in &d {
             let v = pdf.resolve(v);
@@ -335,7 +510,10 @@ impl<'a> Interp<'a> {
                     if let Some(a) = v.as_array() {
                         if a.len() >= 2 {
                             let arr = pdf.resolve(&a[0]);
-                            gs.style.dash = arr.as_array().map(|x| x.iter().map(|o| num(&pdf.resolve(o))).collect()).unwrap_or_default();
+                            gs.style.dash = arr
+                                .as_array()
+                                .map(|x| x.iter().map(|o| num(&pdf.resolve(o))).collect())
+                                .unwrap_or_default();
                             gs.style.phase = num(&pdf.resolve(&a[1]));
                         }
                     }
@@ -346,7 +524,11 @@ impl<'a> Interp<'a> {
                 "Font" => {
                     if let Some(a) = v.as_array() {
                         if a.len() >= 2 {
-                            let key = if let Obj::Ref(n, _) = &a[0] { Some(*n) } else { None };
+                            let key = if let Obj::Ref(n, _) = &a[0] {
+                                Some(*n)
+                            } else {
+                                None
+                            };
                             if let Some(f) = key.and_then(|k| self.font_cache.get(&k).cloned()) {
                                 gs.text.font = Some(f);
                             } else if let Some(fd) = pdf.resolve(&a[0]).as_dict() {
@@ -376,12 +558,17 @@ impl<'a> Interp<'a> {
         if self.depth >= MAX_DEPTH {
             return None;
         }
-        let Obj::Stream(g) = pdf.dget(sm, "G") else { return None };
+        let Obj::Stream(g) = pdf.dget(sm, "G") else {
+            return None;
+        };
         let luminosity = pdf.dget_name(sm, "S").as_deref() != Some("Alpha");
         let mut backdrop = [0.0f32; 3];
         let group = pdf.dget_dict(&g.dict, "Group");
         if let (Some(bc), Some(grp)) = (pdf.dget_numbers(sm, "BC"), group.as_ref()) {
-            let cs = grp.get("CS").and_then(|c| ColorSpace::parse(pdf, c, res, 0)).unwrap_or(ColorSpace::Gray);
+            let cs = grp
+                .get("CS")
+                .and_then(|c| ColorSpace::parse(pdf, c, res, 0))
+                .unwrap_or(ColorSpace::Gray);
             if bc.len() >= cs.n_components() {
                 backdrop = cs.to_rgb(&bc);
             }
@@ -396,24 +583,52 @@ impl<'a> Interp<'a> {
         self.depth += 1;
         self.form(&g, res, &inner, &mut ops, true);
         self.depth -= 1;
-        Some(Arc::new(SoftMask { ops, luminosity, backdrop, transfer }))
+        Some(Arc::new(SoftMask {
+            ops,
+            luminosity,
+            backdrop,
+            transfer,
+        }))
     }
 
     /// Run a form XObject: its matrix, clip and resources, with `gs` as the state it inherits.
-    fn form(&mut self, s: &Arc<Stream>, parent_res: &Dict, gs: &GState, out: &mut Vec<Op>, force_plain: bool) {
+    fn form(
+        &mut self,
+        s: &Arc<Stream>,
+        parent_res: &Dict,
+        gs: &GState,
+        out: &mut Vec<Op>,
+        force_plain: bool,
+    ) {
         let pdf = self.pdf;
         if self.depth >= MAX_DEPTH {
             return;
         }
-        let Ok((data, _)) = decode_stream(pdf, s, false) else { return };
-        let m = pdf.dget_numbers(&s.dict, "Matrix").filter(|v| v.len() >= 6).map_or(Transform::IDENTITY, |v| Transform::new(v[0], v[1], v[2], v[3], v[4], v[5]));
-        let res = pdf.dget_dict(&s.dict, "Resources").unwrap_or_else(|| parent_res.clone());
+        let Ok((data, _)) = decode_stream(pdf, s, false) else {
+            return;
+        };
+        let m = pdf
+            .dget_numbers(&s.dict, "Matrix")
+            .filter(|v| v.len() >= 6)
+            .map_or(Transform::IDENTITY, |v| {
+                Transform::new(v[0], v[1], v[2], v[3], v[4], v[5])
+            });
+        let res = pdf
+            .dget_dict(&s.dict, "Resources")
+            .unwrap_or_else(|| parent_res.clone());
         let mut inner = gs.clone();
         inner.ctm = m.then(&gs.ctm);
-        let group = pdf.dget_dict(&s.dict, "Group").filter(|g| pdf.dget_name(g, "S").as_deref() == Some("Transparency"));
-        let needs_group = !force_plain && group.is_some() && (gs.fill_alpha < 1.0 || gs.blend != Blend::Normal || gs.smask.is_some());
+        let group = pdf
+            .dget_dict(&s.dict, "Group")
+            .filter(|g| pdf.dget_name(g, "S").as_deref() == Some("Transparency"));
+        let needs_group = !force_plain
+            && group.is_some()
+            && (gs.fill_alpha < 1.0 || gs.blend != Blend::Normal || gs.smask.is_some());
         let fx = gs.fill_fx();
-        let isolated = group.as_ref().and_then(|g| pdf.dget(g, "I").as_bool()).unwrap_or(false);
+        let isolated = group
+            .as_ref()
+            .and_then(|g| pdf.dget(g, "I").as_bool())
+            .unwrap_or(false);
         if needs_group {
             inner.fill_alpha = 1.0;
             inner.stroke_alpha = 1.0;
@@ -431,7 +646,10 @@ impl<'a> Interp<'a> {
             p.line_to(b[2], b[3]);
             p.line_to(b[0], b[3]);
             p.close();
-            body.push(Op::Clip { path: Arc::new(p.transform(&inner.ctm)), rule: FillRule::NonZero });
+            body.push(Op::Clip {
+                path: Arc::new(p.transform(&inner.ctm)),
+                rule: FillRule::NonZero,
+            });
         }
         self.depth += 1;
         self.run(&data, &res, inner, false, &mut body);
@@ -439,7 +657,11 @@ impl<'a> Interp<'a> {
         body.push(Op::Restore);
         self.pat_base = saved_pat;
         if needs_group {
-            out.push(Op::Group { ops: body, fx, isolated });
+            out.push(Op::Group {
+                ops: body,
+                fx,
+                isolated,
+            });
         } else {
             out.append(&mut body);
         }
@@ -447,9 +669,13 @@ impl<'a> Interp<'a> {
 
     fn annotations(&mut self, page: &PageInfo, out: &mut Vec<Op>) {
         let pdf = self.pdf;
-        let Some(annots) = pdf.dget_array(&page.dict, "Annots") else { return };
+        let Some(annots) = pdf.dget_array(&page.dict, "Annots") else {
+            return;
+        };
         for a in annots.iter().take(5000) {
-            let Some(d) = pdf.resolve(a).as_dict().cloned() else { continue };
+            let Some(d) = pdf.resolve(a).as_dict().cloned() else {
+                continue;
+            };
             let flags = pdf.dget_i64(&d, "F").unwrap_or(0);
             if flags & (2 | 32) != 0 || pdf.dget_name(&d, "Subtype").as_deref() == Some("Popup") {
                 continue;
@@ -459,12 +685,16 @@ impl<'a> Interp<'a> {
                     continue;
                 }
             }
-            let Some(ap) = pdf.dget_dict(&d, "AP") else { continue };
+            let Some(ap) = pdf.dget_dict(&d, "AP") else {
+                continue;
+            };
             let n = pdf.dget(&ap, "N");
             let stream = match n {
                 Obj::Stream(s) => s,
                 Obj::Dict(states) => {
-                    let Some(name) = pdf.dget_name(&d, "AS") else { continue };
+                    let Some(name) = pdf.dget_name(&d, "AS") else {
+                        continue;
+                    };
                     match pdf.dget(&states, &name) {
                         Obj::Stream(s) => s,
                         _ => continue,
@@ -472,11 +702,32 @@ impl<'a> Interp<'a> {
                 }
                 _ => continue,
             };
-            let Some(rect) = pdf.dget_numbers(&d, "Rect").filter(|v| v.len() >= 4) else { continue };
-            let (rx0, ry0, rx1, ry1) = (rect[0].min(rect[2]), rect[1].min(rect[3]), rect[0].max(rect[2]), rect[1].max(rect[3]));
-            let bbox = pdf.dget_numbers(&stream.dict, "BBox").filter(|v| v.len() >= 4).unwrap_or_else(|| vec![0.0, 0.0, rx1 - rx0, ry1 - ry0]);
-            let m = pdf.dget_numbers(&stream.dict, "Matrix").filter(|v| v.len() >= 6).map_or(Transform::IDENTITY, |v| Transform::new(v[0], v[1], v[2], v[3], v[4], v[5]));
-            let corners = [Pt::new(bbox[0], bbox[1]), Pt::new(bbox[2], bbox[1]), Pt::new(bbox[2], bbox[3]), Pt::new(bbox[0], bbox[3])].map(|p| m.apply(p));
+            let Some(rect) = pdf.dget_numbers(&d, "Rect").filter(|v| v.len() >= 4) else {
+                continue;
+            };
+            let (rx0, ry0, rx1, ry1) = (
+                rect[0].min(rect[2]),
+                rect[1].min(rect[3]),
+                rect[0].max(rect[2]),
+                rect[1].max(rect[3]),
+            );
+            let bbox = pdf
+                .dget_numbers(&stream.dict, "BBox")
+                .filter(|v| v.len() >= 4)
+                .unwrap_or_else(|| vec![0.0, 0.0, rx1 - rx0, ry1 - ry0]);
+            let m = pdf
+                .dget_numbers(&stream.dict, "Matrix")
+                .filter(|v| v.len() >= 6)
+                .map_or(Transform::IDENTITY, |v| {
+                    Transform::new(v[0], v[1], v[2], v[3], v[4], v[5])
+                });
+            let corners = [
+                Pt::new(bbox[0], bbox[1]),
+                Pt::new(bbox[2], bbox[1]),
+                Pt::new(bbox[2], bbox[3]),
+                Pt::new(bbox[0], bbox[3]),
+            ]
+            .map(|p| m.apply(p));
             let (mut bx0, mut by0, mut bx1, mut by1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
             for c in corners {
                 bx0 = bx0.min(c.x);
@@ -485,8 +736,16 @@ impl<'a> Interp<'a> {
                 by1 = by1.max(c.y);
             }
             let (sw, sh) = (bx1 - bx0, by1 - by0);
-            let sx = if sw.abs() > 1e-9 { (rx1 - rx0) / sw } else { 1.0 };
-            let sy = if sh.abs() > 1e-9 { (ry1 - ry0) / sh } else { 1.0 };
+            let sx = if sw.abs() > 1e-9 {
+                (rx1 - rx0) / sw
+            } else {
+                1.0
+            };
+            let sy = if sh.abs() > 1e-9 {
+                (ry1 - ry0) / sh
+            } else {
+                1.0
+            };
             let amat = Transform::new(sx, 0.0, 0.0, sy, rx0 - bx0 * sx, ry0 - by0 * sy);
             let gs = GState::new(amat.then(&self.base));
             let res = Dict::new();
@@ -496,11 +755,25 @@ impl<'a> Interp<'a> {
 
     fn cats(&self, res: &Dict) -> Cats {
         let d = |k: &str| self.pdf.dget_dict(res, k).unwrap_or_default();
-        Cats { font: d("Font"), xobject: d("XObject"), extg: d("ExtGState"), pattern: d("Pattern"), shading: d("Shading"), props: d("Properties") }
+        Cats {
+            font: d("Font"),
+            xobject: d("XObject"),
+            extg: d("ExtGState"),
+            pattern: d("Pattern"),
+            shading: d("Shading"),
+            props: d("Properties"),
+        }
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn run(&mut self, data: &[u8], res: &Dict, gs0: GState, ignore_color0: bool, out: &mut Vec<Op>) {
+    fn run(
+        &mut self,
+        data: &[u8],
+        res: &Dict,
+        gs0: GState,
+        ignore_color0: bool,
+        out: &mut Vec<Op>,
+    ) {
         let pdf = self.pdf;
         let cats = self.cats(res);
         let mut ignore_color = ignore_color0;
@@ -589,8 +862,17 @@ impl<'a> Interp<'a> {
                         "M" => gs.style.miter = nums!(1)[0].max(1.0),
                         "d" => {
                             if st.len() >= 2 {
-                                let arr = st[st.len() - 2].as_array().map(|a| a.iter().map(num).collect::<Vec<f64>>()).unwrap_or_default();
-                                gs.style.dash = if arr.iter().all(|v| *v >= 0.0) && arr.iter().any(|v| *v > 0.0) { arr } else { Vec::new() };
+                                let arr = st[st.len() - 2]
+                                    .as_array()
+                                    .map(|a| a.iter().map(num).collect::<Vec<f64>>())
+                                    .unwrap_or_default();
+                                gs.style.dash = if arr.iter().all(|v| *v >= 0.0)
+                                    && arr.iter().any(|v| *v > 0.0)
+                                {
+                                    arr
+                                } else {
+                                    Vec::new()
+                                };
                                 gs.style.phase = num(&st[st.len() - 1]);
                             }
                         }
@@ -680,14 +962,28 @@ impl<'a> Interp<'a> {
                             let do_stroke = matches!(op, "S" | "s" | "B" | "B*" | "b" | "b*");
                             if !path.is_empty() {
                                 if let (Some(rule), true) = (fill_rule, visible) {
-                                    out.push(Op::Fill { path: Arc::new(path.transform(&gs.ctm)), rule, paint: gs.fill.clone(), fx: gs.fill_fx() });
+                                    out.push(Op::Fill {
+                                        path: Arc::new(path.transform(&gs.ctm)),
+                                        rule,
+                                        paint: gs.fill.clone(),
+                                        fx: gs.fill_fx(),
+                                    });
                                 }
                                 if do_stroke && visible {
-                                    out.push(Op::Stroke { path: Arc::new(path.clone()), ctm: gs.ctm, style: gs.style.clone(), paint: gs.stroke.clone(), fx: gs.stroke_fx() });
+                                    out.push(Op::Stroke {
+                                        path: Arc::new(path.clone()),
+                                        ctm: gs.ctm,
+                                        style: gs.style.clone(),
+                                        paint: gs.stroke.clone(),
+                                        fx: gs.stroke_fx(),
+                                    });
                                 }
                             }
                             if let Some(rule) = pending_clip.take() {
-                                out.push(Op::Clip { path: Arc::new(path.transform(&gs.ctm)), rule });
+                                out.push(Op::Clip {
+                                    path: Arc::new(path.transform(&gs.ctm)),
+                                    rule,
+                                });
                             }
                             path = Path::new();
                             has_cur = false;
@@ -734,10 +1030,18 @@ impl<'a> Interp<'a> {
                         "sc" | "scn" | "SC" | "SCN" => {
                             if !ignore_color {
                                 let fill = op.starts_with('s');
-                                let cs = if fill { gs.fill_cs.clone() } else { gs.stroke_cs.clone() };
+                                let cs = if fill {
+                                    gs.fill_cs.clone()
+                                } else {
+                                    gs.stroke_cs.clone()
+                                };
                                 let paint = if let ColorSpace::Pattern(base) = &cs {
-                                    let under = base.as_ref().map_or([0.0; 3], |b| self.color_from(b, &st));
-                                    st.last().and_then(Obj::as_name).map(str::to_string).and_then(|n| self.make_pattern(&n, &cats, under, res, &gs))
+                                    let under =
+                                        base.as_ref().map_or([0.0; 3], |b| self.color_from(b, &st));
+                                    st.last()
+                                        .and_then(Obj::as_name)
+                                        .map(str::to_string)
+                                        .and_then(|n| self.make_pattern(&n, &cats, under, res, &gs))
                                 } else {
                                     Some(PaintSrc::Rgb(self.color_from(&cs, &st)))
                                 };
@@ -752,8 +1056,16 @@ impl<'a> Interp<'a> {
                         }
                         "sh" => {
                             if let (Some(n), true) = (st.last().and_then(Obj::as_name), visible) {
-                                if let Some(sh) = cats.shading.get(n).and_then(|o| shading::parse(pdf, o, res)) {
-                                    out.push(Op::Shade { shading: Arc::new(sh), matrix: gs.ctm, fx: gs.fill_fx() });
+                                if let Some(sh) = cats
+                                    .shading
+                                    .get(n)
+                                    .and_then(|o| shading::parse(pdf, o, res))
+                                {
+                                    out.push(Op::Shade {
+                                        shading: Arc::new(sh),
+                                        matrix: gs.ctm,
+                                        fx: gs.fill_fx(),
+                                    });
                                 }
                             }
                         }
@@ -764,7 +1076,10 @@ impl<'a> Interp<'a> {
                         }
                         "ET" => {
                             if in_text_clip {
-                                out.push(Op::Clip { path: Arc::new(std::mem::take(&mut text_clip)), rule: FillRule::NonZero });
+                                out.push(Op::Clip {
+                                    path: Arc::new(std::mem::take(&mut text_clip)),
+                                    rule: FillRule::NonZero,
+                                });
                                 in_text_clip = false;
                             }
                         }
@@ -818,11 +1133,18 @@ impl<'a> Interp<'a> {
                             let mut run = TextAcc::default();
                             for it in &items {
                                 match it {
-                                    Obj::Str(s) => self.show_string(s, &mut gs, &mut tm, &mut run, visible, res, out),
+                                    Obj::Str(s) => self.show_string(
+                                        s, &mut gs, &mut tm, &mut run, visible, res, out,
+                                    ),
                                     o if o.as_f64().is_some() => {
                                         let adj = -num(o) / 1000.0 * gs.text.size;
-                                        let vertical = gs.text.font.as_ref().is_some_and(|f| f.is_vertical());
-                                        let t = if vertical { Transform::translate(0.0, adj) } else { Transform::translate(adj * gs.text.th, 0.0) };
+                                        let vertical =
+                                            gs.text.font.as_ref().is_some_and(|f| f.is_vertical());
+                                        let t = if vertical {
+                                            Transform::translate(0.0, adj)
+                                        } else {
+                                            Transform::translate(adj * gs.text.th, 0.0)
+                                        };
                                         tm = t.then(&tm);
                                     }
                                     _ => {}
@@ -869,26 +1191,54 @@ impl<'a> Interp<'a> {
                         "BI" => {
                             let img = self.inline_image(&mut lex, res, &gs);
                             if let (Some(img), true) = (img, visible) {
-                                let ctm = Transform::scale(1.0 / img.width as f64, -1.0 / img.height as f64).then(&Transform::translate(0.0, 1.0)).then(&gs.ctm);
-                                let stencil_paint = if img.stencil && matches!(gs.fill, PaintSrc::Pattern(..)) { Some(gs.fill.clone()) } else { None };
-                                out.push(Op::Image { image: Arc::new(img), ctm, fx: gs.fill_fx(), stencil_paint });
+                                let ctm = Transform::scale(
+                                    1.0 / img.width as f64,
+                                    -1.0 / img.height as f64,
+                                )
+                                .then(&Transform::translate(0.0, 1.0))
+                                .then(&gs.ctm);
+                                let stencil_paint =
+                                    if img.stencil && matches!(gs.fill, PaintSrc::Pattern(..)) {
+                                        Some(gs.fill.clone())
+                                    } else {
+                                        None
+                                    };
+                                out.push(Op::Image {
+                                    image: Arc::new(img),
+                                    ctm,
+                                    fx: gs.fill_fx(),
+                                    stencil_paint,
+                                });
                             }
                         }
                         // ---- marked content ----
                         "BMC" | "BDC" => {
-                            let tag = if op == "BMC" { st.last() } else { st.get(st.len().saturating_sub(2)) }.and_then(Obj::as_name).unwrap_or("").to_string();
+                            let tag = if op == "BMC" {
+                                st.last()
+                            } else {
+                                st.get(st.len().saturating_sub(2))
+                            }
+                            .and_then(Obj::as_name)
+                            .unwrap_or("")
+                            .to_string();
                             let mut hides = false;
                             let mut actual = None;
                             if op == "BDC" {
                                 let props = st.last().map(|o| match o {
-                                    Obj::Name(n) => cats.props.get(n).map(|p| (p.clone(), pdf.resolve(p))),
+                                    Obj::Name(n) => {
+                                        cats.props.get(n).map(|p| (p.clone(), pdf.resolve(p)))
+                                    }
                                     other => Some((other.clone(), other.clone())),
                                 });
                                 if let Some(Some((raw, d))) = props {
                                     if tag == "OC" && !self.oc_visible(&raw) {
                                         hides = true;
                                     }
-                                    if let Some(a) = d.as_dict().and_then(|d| d.get("ActualText")).map(|o| pdf.resolve(o)) {
+                                    if let Some(a) = d
+                                        .as_dict()
+                                        .and_then(|d| d.get("ActualText"))
+                                        .map(|o| pdf.resolve(o))
+                                    {
                                         actual = a.as_str().map(decode_text_string);
                                     }
                                 }
@@ -897,14 +1247,22 @@ impl<'a> Interp<'a> {
                                 hidden += 1;
                             }
                             marks.push((tag.clone(), hides));
-                            out.push(Op::Marked { tag, actual_text: actual, begin: true });
+                            out.push(Op::Marked {
+                                tag,
+                                actual_text: actual,
+                                begin: true,
+                            });
                         }
                         "EMC" => {
                             if let Some((tag, hides)) = marks.pop() {
                                 if hides {
                                     hidden = hidden.saturating_sub(1);
                                 }
-                                out.push(Op::Marked { tag, actual_text: None, begin: false });
+                                out.push(Op::Marked {
+                                    tag,
+                                    actual_text: None,
+                                    begin: false,
+                                });
                             }
                         }
                         _ => {}
@@ -918,16 +1276,34 @@ impl<'a> Interp<'a> {
             out.push(Op::Restore);
         }
         if in_text_clip {
-            out.push(Op::Clip { path: Arc::new(text_clip), rule: FillRule::NonZero });
+            out.push(Op::Clip {
+                path: Arc::new(text_clip),
+                rule: FillRule::NonZero,
+            });
         }
         for (tag, _) in marks.into_iter().rev() {
-            out.push(Op::Marked { tag, actual_text: None, begin: false });
+            out.push(Op::Marked {
+                tag,
+                actual_text: None,
+                begin: false,
+            });
         }
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn show_string(&mut self, s: &[u8], gs: &mut GState, tm: &mut Transform, run: &mut TextAcc, visible: bool, res: &Dict, out: &mut Vec<Op>) {
-        let Some(font) = gs.text.font.clone() else { return };
+    fn show_string(
+        &mut self,
+        s: &[u8],
+        gs: &mut GState,
+        tm: &mut Transform,
+        run: &mut TextAcc,
+        visible: bool,
+        res: &Dict,
+        out: &mut Vec<Op>,
+    ) {
+        let Some(font) = gs.text.font.clone() else {
+            return;
+        };
         let ts = gs.text.clone();
         let vertical = font.is_vertical();
         for ch in font.decode(s) {
@@ -940,24 +1316,43 @@ impl<'a> Interp<'a> {
                 adv_x = 0.0;
                 adv_y = w1 / 1000.0 * ts.size + ts.tc + if ch.is_space { ts.tw } else { 0.0 };
             } else {
-                adv_x = (ch.width / 1000.0 * ts.size + ts.tc + if ch.is_space { ts.tw } else { 0.0 }) * ts.th;
+                adv_x =
+                    (ch.width / 1000.0 * ts.size + ts.tc + if ch.is_space { ts.tw } else { 0.0 })
+                        * ts.th;
                 adv_y = 0.0;
             }
             if font.kind == Kind::Type3 {
                 run.type3 = true;
-                let fm = font.type3.as_ref().map_or([0.001, 0.0, 0.0, 0.001, 0.0, 0.0], |t| t.font_matrix);
+                let fm = font
+                    .type3
+                    .as_ref()
+                    .map_or([0.001, 0.0, 0.0, 0.001, 0.0, 0.0], |t| t.font_matrix);
                 let gm = Transform::new(fm[0], fm[1], fm[2], fm[3], fm[4], fm[5]).then(&after_tm);
                 let origin = after_tm.apply(Pt::new(0.0, 0.0));
                 let adv = after_tm.apply_vec(Pt::new(ch.width / 1000.0, 0.0)).len();
-                run.glyphs.push(PlacedGlyph { gid: None, to_page: gm, unicode: ch.unicode.clone(), origin, advance: adv, code: ch.code, is_space: ch.is_space && ch.unicode.trim().is_empty() });
+                run.glyphs.push(PlacedGlyph {
+                    gid: None,
+                    to_page: gm,
+                    unicode: ch.unicode.clone(),
+                    origin,
+                    advance: adv,
+                    code: ch.code,
+                    is_space: ch.is_space && ch.unicode.trim().is_empty(),
+                });
                 if visible && self.depth < MAX_DEPTH {
-                    let proc_stream = ch.name.as_ref().and_then(|n| font.type3.as_ref().and_then(|t| t.procs.get(n).cloned()));
+                    let proc_stream = ch
+                        .name
+                        .as_ref()
+                        .and_then(|n| font.type3.as_ref().and_then(|t| t.procs.get(n).cloned()));
                     if let (Some(ps), Some(t3)) = (proc_stream, font.type3.as_ref()) {
                         if let Ok((code, _)) = decode_stream(self.pdf, &ps, false) {
                             let pres = t3.resources.clone().unwrap_or_else(|| res.clone());
                             let mut inner = gs.clone();
                             inner.ctm = gm;
-                            inner.text = TextState { font: None, ..ts.clone() };
+                            inner.text = TextState {
+                                font: None,
+                                ..ts.clone()
+                            };
                             self.depth += 1;
                             out.push(Op::Save);
                             self.run(&code, &pres, inner, false, out);
@@ -968,10 +1363,20 @@ impl<'a> Interp<'a> {
                 }
             } else {
                 let us = font.unit_scale;
-                let to_page = Transform::scale(us, us).then(&Transform::translate(origin_shift.0, origin_shift.1)).then(&after_tm);
+                let to_page = Transform::scale(us, us)
+                    .then(&Transform::translate(origin_shift.0, origin_shift.1))
+                    .then(&after_tm);
                 let origin = to_page.apply(Pt::new(0.0, 0.0));
                 let adv = after_tm.apply_vec(Pt::new(ch.width / 1000.0, 0.0)).len();
-                run.glyphs.push(PlacedGlyph { gid: ch.gid, to_page, unicode: ch.unicode.clone(), origin, advance: adv, code: ch.code, is_space: ch.is_space && ch.unicode.trim().is_empty() });
+                run.glyphs.push(PlacedGlyph {
+                    gid: ch.gid,
+                    to_page,
+                    unicode: ch.unicode.clone(),
+                    origin,
+                    advance: adv,
+                    code: ch.code,
+                    is_space: ch.is_space && ch.unicode.trim().is_empty(),
+                });
             }
             let sc = after_tm.apply_vec(Pt::new(0.0, 1.0)).len();
             run.size = sc;
@@ -981,9 +1386,17 @@ impl<'a> Interp<'a> {
 
     fn do_xobject(&mut self, cats: &Cats, name: &str, res: &Dict, gs: &GState, out: &mut Vec<Op>) {
         let pdf = self.pdf;
-        let Some(entry) = cats.xobject.get(name) else { return };
-        let key = if let Obj::Ref(n, _) = entry { Some(*n) } else { None };
-        let Obj::Stream(s) = pdf.resolve(entry) else { return };
+        let Some(entry) = cats.xobject.get(name) else {
+            return;
+        };
+        let key = if let Obj::Ref(n, _) = entry {
+            Some(*n)
+        } else {
+            None
+        };
+        let Obj::Stream(s) = pdf.resolve(entry) else {
+            return;
+        };
         if let Some(oc) = s.dict.get("OC") {
             if !self.oc_visible(oc) {
                 return;
@@ -1017,9 +1430,22 @@ impl<'a> Interp<'a> {
                     }
                 };
                 if let Some(image) = img {
-                    let ctm = Transform::scale(1.0 / image.width as f64, -1.0 / image.height as f64).then(&Transform::translate(0.0, 1.0)).then(&gs.ctm);
-                    let stencil_paint = if image.stencil && matches!(gs.fill, PaintSrc::Pattern(..)) { Some(gs.fill.clone()) } else { None };
-                    out.push(Op::Image { image, ctm, fx: gs.fill_fx(), stencil_paint });
+                    let ctm =
+                        Transform::scale(1.0 / image.width as f64, -1.0 / image.height as f64)
+                            .then(&Transform::translate(0.0, 1.0))
+                            .then(&gs.ctm);
+                    let stencil_paint = if image.stencil && matches!(gs.fill, PaintSrc::Pattern(..))
+                    {
+                        Some(gs.fill.clone())
+                    } else {
+                        None
+                    };
+                    out.push(Op::Image {
+                        image,
+                        ctm,
+                        fx: gs.fill_fx(),
+                        stencil_paint,
+                    });
                 }
             }
             _ => {}
@@ -1052,14 +1478,35 @@ impl<'a> Interp<'a> {
         let begin = lex.pos;
         let data = lex.data;
         let get = |a: &str, b: &str| d.get(a).or_else(|| d.get(b)).cloned();
-        let w = get("W", "Width").and_then(|o| o.as_i64()).unwrap_or(0).max(0) as usize;
-        let h = get("H", "Height").and_then(|o| o.as_i64()).unwrap_or(0).max(0) as usize;
-        let mask = get("IM", "ImageMask").and_then(|o| o.as_bool()).unwrap_or(false);
-        let bpc = if mask { 1 } else { get("BPC", "BitsPerComponent").and_then(|o| o.as_i64()).unwrap_or(8).clamp(1, 16) as usize };
+        let w = get("W", "Width")
+            .and_then(|o| o.as_i64())
+            .unwrap_or(0)
+            .max(0) as usize;
+        let h = get("H", "Height")
+            .and_then(|o| o.as_i64())
+            .unwrap_or(0)
+            .max(0) as usize;
+        let mask = get("IM", "ImageMask")
+            .and_then(|o| o.as_bool())
+            .unwrap_or(false);
+        let bpc = if mask {
+            1
+        } else {
+            get("BPC", "BitsPerComponent")
+                .and_then(|o| o.as_i64())
+                .unwrap_or(8)
+                .clamp(1, 16) as usize
+        };
         let has_filter = get("F", "Filter").is_some_and(|f| !f.is_null());
         let mut end = None;
         if !has_filter && w > 0 && h > 0 {
-            let n = if mask { Some(1) } else { get("CS", "ColorSpace").and_then(|c| ColorSpace::parse(pdf, &c, res, 0)).map(|c| c.n_components()) };
+            let n = if mask {
+                Some(1)
+            } else {
+                get("CS", "ColorSpace")
+                    .and_then(|c| ColorSpace::parse(pdf, &c, res, 0))
+                    .map(|c| c.n_components())
+            };
             if let Some(n) = n {
                 let len = (w * n * bpc).div_ceil(8) * h;
                 if begin + len <= data.len() {
@@ -1073,10 +1520,16 @@ impl<'a> Interp<'a> {
                 let mut i = begin;
                 let mut found = None;
                 while i + 1 < data.len() {
-                    if data[i] == b'E' && data[i + 1] == b'I' && (i == begin || crate::object::is_ws(data[i - 1])) && data.get(i + 2).is_none_or(|b| crate::object::is_ws(*b)) {
+                    if data[i] == b'E'
+                        && data[i + 1] == b'I'
+                        && (i == begin || crate::object::is_ws(data[i - 1]))
+                        && data.get(i + 2).is_none_or(|b| crate::object::is_ws(*b))
+                    {
                         // what follows should look like content-stream text
                         let tail = &data[(i + 2).min(data.len())..(i + 12).min(data.len())];
-                        if tail.iter().all(|b| *b == b'\n' || *b == b'\r' || *b == b'\t' || (32..127).contains(b)) {
+                        if tail.iter().all(|b| {
+                            *b == b'\n' || *b == b'\r' || *b == b'\t' || (32..127).contains(b)
+                        }) {
                             found = Some(i);
                             break;
                         }
@@ -1099,7 +1552,11 @@ impl<'a> Interp<'a> {
                 break;
             }
         }
-        let stream = Stream { dict: d, raw, id: (0, 0) };
+        let stream = Stream {
+            dict: d,
+            raw,
+            id: (0, 0),
+        };
         let fill = match &gs.fill {
             PaintSrc::Rgb(c) => *c,
             PaintSrc::Pattern(_, c) => *c,
@@ -1123,11 +1580,17 @@ struct TextAcc {
 /// A PDF text string (PDFDocEncoding or UTF-16BE with a byte order mark) as a `String`.
 pub fn decode_text_string(b: &[u8]) -> String {
     if b.starts_with(&[0xFE, 0xFF]) {
-        let units: Vec<u16> = b[2..].chunks_exact(2).map(|c| u16::from(c[0]) << 8 | u16::from(c[1])).collect();
+        let units: Vec<u16> = b[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from(c[0]) << 8 | u16::from(c[1]))
+            .collect();
         return String::from_utf16_lossy(&units);
     }
     if b.starts_with(&[0xFF, 0xFE]) {
-        let units: Vec<u16> = b[2..].chunks_exact(2).map(|c| u16::from(c[1]) << 8 | u16::from(c[0])).collect();
+        let units: Vec<u16> = b[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from(c[1]) << 8 | u16::from(c[0]))
+            .collect();
         return String::from_utf16_lossy(&units);
     }
     if b.starts_with(&[0xEF, 0xBB, 0xBF]) {
