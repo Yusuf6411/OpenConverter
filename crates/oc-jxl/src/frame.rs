@@ -70,6 +70,8 @@ pub struct Decoded {
     pub lf_dequant: [f32; 3],
     /// X, Y and B planes of a VarDCT frame, after the restoration filters.
     pub xyb: Option<[Vec<f32>; 3]>,
+    /// Patches to add once the frame is reconstructed.
+    pub patches: Option<crate::features::Patches>,
     /// Bytes of the codestream this frame occupied.
     pub consumed: usize,
 }
@@ -173,9 +175,6 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
     }
     let max_samples = (pixels * (fh.encoded_color_channels + img.ec.len()) as u64 + (1 << 16)).min(limits.max_alloc / 4);
 
-    if fh.flags & FLAG_PATCHES != 0 {
-        return Err(unsupported("patches are not supported"));
-    }
     if fh.flags & FLAG_SPLINES != 0 {
         return Err(unsupported("splines are not supported"));
     }
@@ -203,6 +202,7 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
 
     // LfGlobal
     let mut br = secs.open(0)?;
+    let patches = if fh.flags & FLAG_PATCHES != 0 { Some(crate::features::Patches::parse(&mut br, img, &fh)?) } else { None };
     let mut lf_dequant = [1.0 / 32.0, 1.0 / 4.0, 1.0 / 2.0];
     if !br.bool()? {
         for v in &mut lf_dequant {
@@ -313,7 +313,7 @@ pub fn decode_frame(data: &[u8], img: &ImageHeader, limits: &Limits) -> Result<D
         }
         xyb = Some(planes);
     }
-    Ok(Decoded { header: fh, chans, lf_dequant, xyb, consumed })
+    Ok(Decoded { header: fh, chans, lf_dequant, xyb, patches, consumed })
 }
 
 /// Parse a frame's header and table of contents and report how many bytes it occupies.

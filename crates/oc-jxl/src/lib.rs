@@ -5,9 +5,12 @@
 #![forbid(unsafe_code)]
 
 mod bits;
+mod colour;
+mod compose;
 mod dct;
 mod dequant;
 mod entropy;
+mod features;
 mod filter;
 mod frame;
 mod header;
@@ -106,17 +109,38 @@ pub fn decode(data: &[u8], limits: &Limits) -> Result<(Picture, Notes)> {
     if img.animation.is_some() {
         notes.push(Note::new(Severity::Loss, "animation_flattened", "only the first frame of the animation is decoded"));
     }
+    let mut slots: [Option<std::rc::Rc<render::Planes>>; 4] = Default::default();
     loop {
         if pos >= cs.len() {
             return Err(Error::truncated("JPEG XL codestream ends before the first frame"));
         }
-        let (fh, len) = frame::frame_extent(&cs[pos..], &img)?;
+        let mut dec = frame::decode_frame(&cs[pos..], &img, limits)?;
+        pos += dec.consumed;
+        let fh = dec.header.clone();
+        let patches = dec.patches.take();
+        let mut planes = render::frame_planes(dec, &img)?;
+        if let Some(p) = patches {
+            p.apply(&mut planes, &slots, &img)?;
+        }
+        let slot = fh.save_as_reference as usize;
+        if fh.can_reference() && fh.save_before_ct {
+            slots[slot] = Some(std::rc::Rc::new(compose::embed(&planes, &fh, &img)));
+        }
+        render::to_native(&mut planes, &img);
         if !fh.frame_type.is_normal() {
-            pos += len;
+            // reference-only frames are not blended onto anything
+            if fh.can_reference() && !fh.save_before_ct {
+                slots[slot] = Some(std::rc::Rc::new(compose::embed(&planes, &fh, &img)));
+            }
             continue;
         }
-        let dec = frame::decode_frame(&cs[pos..], &img, limits)?;
-        let pic = render::render(&dec, &img, &mut notes)?;
-        return Ok((pic, notes));
+        let canvas = compose::compose(planes, &fh, &img, &slots)?;
+        if fh.can_reference() && !fh.save_before_ct {
+            slots[slot] = Some(std::rc::Rc::new(canvas.clone()));
+        }
+        if fh.is_keyframe() {
+            let pic = render::finish(canvas, &img, &mut notes)?;
+            return Ok((pic, notes));
+        }
     }
 }

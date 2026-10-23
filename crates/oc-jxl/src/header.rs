@@ -275,6 +275,8 @@ pub struct ImageHeader {
     pub ec: Vec<ExtraChannel>,
     pub xyb_encoded: bool,
     pub colour: Colour,
+    /// Peak luminance in nits that the sample value 1.0 corresponds to for HDR content.
+    pub intensity_target: f32,
     pub opsin: Opsin,
     /// Custom upsampling kernels, when the file carries them.
     pub custom_up_weights: bool,
@@ -348,6 +350,7 @@ impl ImageHeader {
         let mut bit_depth = BitDepth { bits: 8, exp_bits: None };
         let mut ec = Vec::new();
         let mut xyb_encoded = true;
+        let mut intensity_target = 255.0f32;
         let mut colour = Colour::default_srgb();
         if !all_default {
             let extra_fields = br.bool()?;
@@ -381,6 +384,7 @@ impl ImageHeader {
             colour = Colour::parse(br)?;
             if extra_fields && !br.bool()? {
                 let intensity = br.f16()?;
+                intensity_target = intensity;
                 let min_nits = br.f16()?;
                 let relative = br.bool()?;
                 let linear_below = br.f16()?;
@@ -423,7 +427,7 @@ impl ImageHeader {
                 }
             }
         }
-        Ok(Self { width, height, orientation, preview, animation, bit_depth, ec, xyb_encoded, colour, opsin, custom_up_weights })
+        Ok(Self { width, height, orientation, preview, animation, bit_depth, ec, xyb_encoded, colour, intensity_target, opsin, custom_up_weights })
     }
 
     pub fn is_grey(&self) -> bool {
@@ -795,6 +799,16 @@ impl FrameHeader {
         }
         let _ = unsupported;
         Ok(h)
+    }
+
+    /// Whether this frame is one that is displayed.
+    pub fn is_keyframe(&self) -> bool {
+        self.frame_type.is_normal() && (self.is_last || self.duration != 0)
+    }
+
+    /// Whether the frame is stored in a reference slot for later frames.
+    pub fn can_reference(&self) -> bool {
+        !self.is_last && (self.duration == 0 || self.save_as_reference != 0) && self.frame_type != FrameType::Lf
     }
 
     pub fn use_lf_frame(&self) -> bool {
