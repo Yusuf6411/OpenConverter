@@ -18,6 +18,8 @@ oc-image = { path = "../crates/oc-image" }
 oc-vp8 = { path = "../crates/oc-vp8" }
 oc-sheet = { path = "../crates/oc-sheet" }
 oc-archive = { path = "../crates/oc-archive" }
+oc-audio = { path = "../crates/oc-audio" }
+oc-container = { path = "../crates/oc-container" }
 
 # Not part of the main workspace: fuzzing needs a nightly toolchain.
 [workspace]
@@ -241,5 +243,47 @@ doc = false
 [[bin]]
 name = "workbook"
 path = "fuzz_targets/workbook.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "flac"
+path = "fuzz_targets/flac.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "vorbis"
+path = "fuzz_targets/vorbis.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "mp3"
+path = "fuzz_targets/mp3.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "alac"
+path = "fuzz_targets/alac.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "opus"
+path = "fuzz_targets/opus.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "matroska"
+path = "fuzz_targets/matroska.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "audio_wav_aiff"
+path = "fuzz_targets/audio_wav_aiff.rs"
 test = false
 doc = false

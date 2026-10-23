@@ -255,6 +255,36 @@ if np is not None:
     except OSError:
         print("skip libmpg123 not installed")
 
+# ---- 2d. Opus, ALAC and Matroska: ffmpeg (libopus, alac) must decode our files, and we read theirs
+try:
+    src48 = os.path.join(tmp, "src48.wav")
+    ff("-f", "lavfi", "-i", "sine=f=440:d=1.5:r=48000", "-ac", "2", src48)
+    for name, opts in [("opus", ["bitrate=96", "rate_mode=cbr"]), ("opus", ["bitrate=48", "rate_mode=vbr", "frame_ms=10"]), ("mka", ["codec=opus"]), ("mka", ["codec=flac"]),
+                       ("mka", ["codec=vorbis"]), ("mka", ["codec=pcm"]), ("weba", ["codec=opus"]), ("weba", ["codec=vorbis"]), ("m4a", [])]:
+        dst = os.path.join(tmp, "o_" + "_".join(opts).replace("=", "") + "." + name)
+        oc(src48, dst, *opts)
+        r = sh("ffmpeg", "-v", "error", "-i", dst, "-f", "null", "-", check=False)
+        check(f"{name} {' '.join(opts)}: ffmpeg decodes without errors", r.returncode == 0 and not r.stderr.strip(), r.stderr[:200])
+        r = sh("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", dst)
+        check(f"{name} {' '.join(opts)}: duration {r.stdout.strip()} s", abs(float(r.stdout) - 1.5) < 0.05, r.stdout)
+    # ffmpeg-made files read by us
+    for ext, enc in [("mka", ["-c:a", "libopus"]), ("mka", ["-c:a", "flac"]), ("webm", ["-c:a", "libvorbis"]), ("mka", ["-c:a", "pcm_s24le"]), ("mka", ["-c:a", "libmp3lame"]), ("opus", ["-c:a", "libopus"])]:
+        f = os.path.join(tmp, "ff_" + enc[1] + "." + ext)
+        ff("-i", src48, *enc, f)
+        dst = os.path.join(tmp, "back_" + enc[1] + ".wav")
+        oc(f, dst, "bit_depth=16")
+        a = oc_float(dst, 2).reshape(-1)
+        b = pcm(f, "f32le", ("-ac", "2")) and None
+        ref = os.path.join(tmp, "ref.raw")
+        ff("-i", f, "-ac", "2", "-f", "f32le", ref)
+        import numpy as np
+        r = np.frombuffer(open(ref, "rb").read(), "<f4")
+        k = min(len(a), len(r))
+        err = float(np.abs(a[:k] - r[:k]).max()) if k else 1.0
+        check(f"read ffmpeg {enc[1]} in .{ext} (max difference {err:.1e}, {len(a)} vs {len(r)} samples)", abs(len(a) - len(r)) <= 2400 and err < 0.01)
+except Exception as e:
+    check("opus/alac/matroska", False, str(e)[:300])
+
 # ---- 3. processing
 try:
     dst = os.path.join(tmp, "rs.wav")
