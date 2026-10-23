@@ -20,6 +20,7 @@ pub mod id3;
 pub mod m4a;
 pub mod mp3;
 pub mod ogg;
+pub mod opus;
 pub mod tags;
 pub mod vorbis;
 pub mod wav;

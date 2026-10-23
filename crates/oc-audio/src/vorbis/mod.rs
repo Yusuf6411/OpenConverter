@@ -10,7 +10,7 @@ use crate::{check_samples, ogg, Audio, Samples};
 use oc_core::{Error, ErrorCode, Limits, Note, Notes, Result, Severity};
 
 /// Vorbis channel order to WAVEFORMAT order (indices into the Vorbis frame), and the mask.
-fn layout(ch: usize) -> (Vec<usize>, u32) {
+pub(crate) fn layout(ch: usize) -> (Vec<usize>, u32) {
     match ch {
         3 => (vec![0, 2, 1], 0x7),
         5 => (vec![0, 2, 1, 3, 4], 0x37),

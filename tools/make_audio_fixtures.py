@@ -67,3 +67,19 @@ alac_make("alac_51_16.m4a", 48000, "5.1", 0.3, "s16p")
 
 ff(*mp3_src(44100, "stereo", 0.4), "-c:a", "alac", "-sample_fmt", "s16p", os.path.join(out, "alac_stereo_16.caf"))
 ff("-i", os.path.join(out, "alac_stereo_16.caf"), "-f", "s32le", "-acodec", "pcm_s32le", os.path.join(out, "alac_stereo_16.caf.pcm"))
+
+
+# ---- Opus: libopus encodes (CELT-only, low-delay application) with libopus's own float decode
+def opus_make(name, rate, layout, secs, extra=()):
+    path = os.path.join(out, name)
+    ff(*mp3_src(rate, layout, secs), "-c:a", "libopus", "-application", "lowdelay", *extra, path)
+    ff("-c:a", "libopus", "-i", path, "-f", "f32le", "-acodec", "pcm_f32le", path + ".pcm")
+
+
+opus_make("opus_celt_mono_20ms.opus", 48000, "mono", 0.4, ["-frame_duration", "20", "-b:a", "48k"])
+opus_make("opus_celt_stereo_20ms.opus", 48000, "stereo", 0.4, ["-frame_duration", "20", "-b:a", "96k"])
+opus_make("opus_celt_stereo_10ms.opus", 48000, "stereo", 0.4, ["-frame_duration", "10", "-b:a", "64k"])
+opus_make("opus_celt_stereo_5ms.opus", 48000, "stereo", 0.3, ["-frame_duration", "5", "-b:a", "128k"])
+opus_make("opus_celt_mono_2_5ms.opus", 48000, "mono", 0.3, ["-frame_duration", "2.5", "-b:a", "64k"])
+opus_make("opus_celt_stereo_60ms.opus", 48000, "stereo", 0.5, ["-frame_duration", "60", "-b:a", "64k"])
+opus_make("opus_celt_stereo_vbr_wb.opus", 16000, "stereo", 0.4, ["-frame_duration", "20", "-b:a", "32k", "-cutoff", "8000"])
