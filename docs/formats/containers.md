@@ -21,12 +21,13 @@ All video containers meet in one packet-level model, `oc_video::Media`: streams 
 - **Pictures**: any decodable video to GIF, animated WebP and APNG, and back.
 
 ## Checked
+- Ogg video (Theora with Vorbis) is read ([theora](theora.md)); it can be copied into Matroska or decoded.
 - MPEG-TS written here decodes to the same frames and samples in ffmpeg as the source, and passes `-err_detect explode`; FLV, M2TS, MPEG-TS from ffmpeg and PS built by a test script read back to the same pictures.
 - Fragmented MP4 decodes identically to the plain file and passes strict decoding.
 - Fuzz target `video` (readers, plus writers fed with whatever the readers accept).
 
 ## Not done
-- Ogg video (needs Theora), AVI OpenDML (files over 1 GB), MPEG-1/2 video and MP2 audio, DTS, E-AC-3 in TS, AV1 and VP9 inside FLV, MP4 chapters and cover art.
+- AVI OpenDML (files over 1 GB), MPEG-1/2 video and MP2 audio, DTS, E-AC-3 in TS, AV1 and VP9 inside FLV, MP4 chapters and cover art.
 - MPEG-PS times: a picture that begins inside a PES packet without its own time stamp gets one interpolated from its neighbours; with B-frames the presentation order of those pictures can be wrong.
 - Colour matrices and pixel format conversion (everything is 8-bit 4:2:0 once decoded; MJPEG to YUV goes through RGB).
 - Muxers for FLV and MPEG-PS.

@@ -12,7 +12,7 @@ use oc_core::{
 use oc_image::anim::Animation;
 use oc_video::frames;
 use oc_video::pic::Picture;
-use oc_video::{avi, codec, flv, mkv, mp4, ps, subs, ts, y4m, Kind, Media, Packet};
+use oc_video::{avi, codec, flv, mkv, mp4, ogv, ps, subs, ts, y4m, Kind, Media, Packet};
 
 pub const MP4: FormatId = FormatId("mp4");
 pub const MOV: FormatId = FormatId("mov");
@@ -22,12 +22,13 @@ pub const AVI: FormatId = FormatId("avi");
 pub const Y4M: FormatId = FormatId("y4m");
 pub const TS: FormatId = FormatId("ts");
 pub const FLV: FormatId = FormatId("flv");
+pub const OGV: FormatId = FormatId("ogv");
 pub const PS: FormatId = FormatId("mpeg-ps");
 /// A ZIP of numbered picture files, one per video frame.
 pub const FRAMES: FormatId = FormatId("frames.zip");
 pub const MEDIA_IR: FormatId = FormatId("media-ir");
 
-pub const FORMATS: [FormatId; 9] = [MP4, MOV, MKV, WEBM, AVI, Y4M, TS, FLV, PS];
+pub const FORMATS: [FormatId; 10] = [MP4, MOV, MKV, WEBM, AVI, Y4M, TS, FLV, PS, OGV];
 
 fn frames_options() -> OptionSchema {
     let keep = [
@@ -72,7 +73,7 @@ fn frames_options() -> OptionSchema {
 
 /// Containers this build only reads.
 fn read_only(id: FormatId) -> bool {
-    id == FLV || id == PS
+    id == FLV || id == PS || id == OGV
 }
 
 pub fn is_video(id: FormatId) -> bool {
@@ -306,6 +307,14 @@ pub fn register(registry: &mut Registry) {
             "Adobe FLV (read only; H.264/H.265, AAC, MP3, PCM)",
         ),
         (
+            OGV,
+            "Ogg video",
+            &["ogv"],
+            &["video/ogg"],
+            vec![Sniffer { offset: 0, magic: b"OggS", confidence: 30 }],
+            "Ogg (RFC 3533) with Theora I video and Vorbis audio (read only)",
+        ),
+        (
             PS,
             "MPEG program stream",
             &["mpg", "mpeg", "vob", "ps"],
@@ -459,6 +468,9 @@ pub fn detect(data: &[u8]) -> Option<FormatId> {
     if flv::sniff(data) {
         return Some(FLV);
     }
+    if ogv::sniff(data) {
+        return Some(OGV);
+    }
     if ps::sniff(data) {
         return Some(PS);
     }
@@ -481,6 +493,8 @@ pub fn read(from: FormatId, data: &[u8], limits: &Limits) -> Result<Media> {
         ts::read(data, limits)
     } else if from == FLV {
         flv::read(data, limits)
+    } else if from == OGV {
+        ogv::read(data, limits)
     } else if from == PS {
         ps::read(data, limits)
     } else if from == MP4 || from == MOV {
@@ -1649,7 +1663,7 @@ fn anim_over_black(img: &oc_image::Image) -> Vec<u8> {
 
 /// Whether this build can decode a video stream's pictures.
 fn can_decode_video(c: &str) -> bool {
-    matches!(c, codec::MJPEG | codec::RAW | codec::VP8)
+    matches!(c, codec::MJPEG | codec::RAW | codec::VP8 | codec::THEORA)
 }
 
 fn can_decode_audio(c: &str) -> bool {

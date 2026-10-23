@@ -15,9 +15,11 @@ pub mod flv;
 pub mod frames;
 pub mod mkv;
 pub mod mp4;
+pub mod ogv;
 pub mod pic;
 pub mod ps;
 pub mod subs;
+pub mod theora;
 pub mod ts;
 pub mod vp8;
 pub mod y4m;
@@ -39,6 +41,7 @@ pub mod codec {
     pub const VP9: &str = "vp9";
     pub const AV1: &str = "av1";
     pub const MJPEG: &str = "mjpeg";
+    pub const THEORA: &str = "theora";
     pub const MPEG4: &str = "mpeg4";
     /// Uncompressed frames; the stream's `pix_fmt` says how.
     pub const RAW: &str = "rawvideo";

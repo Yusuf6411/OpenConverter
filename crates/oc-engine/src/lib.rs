@@ -991,6 +991,7 @@ impl Engine {
     pub fn detect(&self, data: &[u8], name: &Path) -> Option<FormatId> {
         self.detect_image(data)
             .or_else(|| self.detect_audio(data))
+            .or_else(|| oc_video::ogv::sniff(data).then_some(video::OGV))
             .or_else(|| self.format_for_path(name).filter(|f| !image::is_image(*f)))
             .or_else(|| oc_archive::Format::sniff(data).and_then(archive::id_of))
             // A file of a type we do not know can still be stored in an archive, but a file
@@ -1179,6 +1180,11 @@ impl Engine {
             .filter(|(_, id)| *id != audio::M4A || oc_audio::m4a::sniff(data))
             .filter(|(_, id)| *id != audio::OPUS || oc_audio::opus::sniff(data))
             .filter(|(_, id)| *id != audio::OGG || !oc_audio::opus::sniff(data))
+            // Ogg that carries Theora video is a video file.
+            .filter(|(_, id)| {
+                !matches!(*id, i if i == audio::OGG || i == audio::OPUS)
+                    || !oc_video::ogv::sniff(data)
+            })
             .filter(|(_, id)| {
                 let doc = oc_container::matroska::doc_type(data);
                 match *id {

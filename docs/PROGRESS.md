@@ -66,7 +66,7 @@ Format notes are in [formats/](formats/README.md). Interop checks (ffmpeg, libop
 
 ## Phase 5a: Video containers, remux, subtitles, VP8
 Format notes: [formats/containers.md](formats/containers.md), [formats/vp8.md](formats/vp8.md). Interop checks against ffmpeg and ffprobe (test-time oracles) are in `tools/video_interop.py`.
-- [~] M5.1 Media IR (`oc-video`): MP4/MOV, Matroska/WebM, AVI, Y4M, MPEG-TS/M2TS (read and write), MPEG-PS and FLV (read). Not done: Ogg video (needs Theora), AVI OpenDML, MPEG-1/2 video.
+- [~] M5.1 Media IR (`oc-video`): MP4/MOV, Matroska/WebM, AVI, Y4M, MPEG-TS/M2TS (read and write), MPEG-PS and FLV (read). Ogg video (Theora, Vorbis) was added in v3.0.2. Not done: AVI OpenDML, MPEG-1/2 video.
 - [~] M5.2 Remux planner: stream copy where the target holds the codec, including avcC and hvcC to Annex B and back; encumbered streams are copied only (ADR-0010). Fragmented MP4 output.
 - [~] M5.3 Subtitles: SRT, ASS, WebVTT, tx3g, rewritten between containers. Not done: bitmap subtitles.
 - [~] M5.4 MJPEG and raw video, animated GIF/WebP/APNG as video, image sequences as `.frames.zip`. Not done: loose numbered files on disk.
@@ -107,7 +107,7 @@ Format notes: [formats/documents.md](formats/documents.md). Oracles used at test
 Format notes: [formats/legacy.md](formats/legacy.md). Oracles: Python sqlite3 (`integrity_check`), LibreOffice (wrote the .doc, .ppt and .xls test files).
 - [~] M6.20 SQLite database files read and written as tables (own B-tree reader and writer: overflow pages, varints, 4096-byte pages; every table becomes a sheet). Not done: indexes, views, triggers, WAL files, encrypted databases.
 - [~] M6.21 compound-file (MS-CFB) reader in `oc-archive`; legacy XLS (BIFF8: shared strings across CONTINUE records, dates, numbers, formulas as cached values), DOC (piece table text, fields as links, tables, page breaks, title and author) and PPT (slide text) read-only. Not done: writing these formats, BIFF5, password-protected files (reported as encrypted), pictures, styles.
-- [ ] M6.22 JPEG XL, camera RAW (DNG), WavPack, APE, ProRes, Theora decoding, Brotli encoding and WOFF2 writing: not done (ADR-0013).
+- [ ] M6.22 JPEG XL, camera RAW (DNG), WavPack, APE, ProRes, Theora decoding, Brotli encoding and WOFF2 writing: Brotli, WOFF2, DNG and Theora were done in v3.0.1/v3.0.2; JPEG XL, WavPack, APE and ProRes are not (ADR-0013).
 - Fuzz targets `sqlite`, `xls`, `doc`, `ppt`; `crates/oc-engine/tests/legacy_office.rs` damages LibreOffice-made files; `crates/oc-sheet/tests/sqlite.rs` round-trips 300 tables.
 - Release v2.7.0 (tagged locally).
 
@@ -138,9 +138,10 @@ Speed work against the budgets (ADR-0015), the packaging channels in M8.4, and t
 
 - **Tables (CSV, TSV, JSON, XLSX, ODS)**: `oc-sheet` reads and writes RFC 4180 delimited text (delimiter detection, lenient quotes, BOM, ragged rows padded), flat JSON tables (own strict parser) and, since Phase 3, XLSX and ODS workbooks (M3.5). Engine options mirror 1.x. Fuzz targets `table` and `workbook`.
 
-## Post-3.0.0 (v3.0.1)
+## Post-3.0.0 (v3.0.1 and v3.0.2)
 - Speed pass (PERFORMANCE.md).
 - Brotli encoder and decoder (`oc-compress::brotli`) and WOFF2 reading and writing (`oc-font::woff2`, `build`); WOFF2 collections are read by code that no test file has exercised.
 - Distribution files (`packaging/`).
 - DNG reading ([formats/raw.md](formats/raw.md)), checked only against synthetic files.
-- Not done: JPEG XL, other camera raw formats, WavPack, APE, ProRes, Theora decoding (ADR-0013); the encumbered build (ADR-0010).
+- Theora decoding (`oc-theora`, [formats/theora.md](formats/theora.md)), bit-exact with ffmpeg on nine libtheora streams, and Ogg video reading.
+- Not done: JPEG XL, other camera raw formats, WavPack, APE, ProRes (ADR-0013); the encumbered build (ADR-0010).

@@ -29,6 +29,7 @@ fuzz_target!(|data: &[u8]| {
         miter_limit: 4.0,
         dash: vec![num().abs(), num().abs()],
         dash_phase: num(),
+        hairline: true,
     };
     c.stroke_path(&p, &ctm, &st, &Paint::Solid([0.0, 0.0, 1.0, 0.5]), Blend::Multiply, 0.5, &clip);
     c.blur(num().abs() / 16.0, 1.0);

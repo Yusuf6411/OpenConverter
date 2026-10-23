@@ -8,7 +8,7 @@ use oc_image::{ops, Depth, Layout};
 
 /// Codecs this build can decode to pictures.
 pub fn can_decode(c: &str) -> bool {
-    matches!(c, codec::MJPEG | codec::RAW | codec::VP8)
+    matches!(c, codec::MJPEG | codec::RAW | codec::VP8 | codec::THEORA)
 }
 
 /// Codecs this build can encode from pictures.
@@ -20,6 +20,7 @@ pub enum Decoder {
     Mjpeg(Limits),
     Raw { pix: String, w: usize, h: usize },
     Vp8(Box<crate::vp8::Vp8Decoder>),
+    Theora(Box<crate::theora::TheoraDecoder>),
 }
 
 impl Decoder {
@@ -31,6 +32,7 @@ impl Decoder {
             codec::MJPEG => Ok(Self::Mjpeg(limits.clone())),
             codec::RAW => Ok(Self::Raw { pix: s.pix_fmt.clone(), w: s.width as usize, h: s.height as usize }),
             codec::VP8 => Ok(Self::Vp8(Box::new(crate::vp8::Vp8Decoder::new(limits.clone())))),
+            codec::THEORA => Ok(Self::Theora(Box::new(crate::theora::TheoraDecoder::new(&s.private, limits)?))),
             other => Err(Error::new(
                 ErrorCode::CodecNotInBuild,
                 format!("{other} video cannot be decoded in this build; it can be copied between containers"),
@@ -53,6 +55,7 @@ impl Decoder {
             }
             Self::Raw { pix, w, h } => Ok(Some(Picture::from_raw(pix, *w, *h, data)?)),
             Self::Vp8(d) => d.decode(data),
+            Self::Theora(d) => d.decode(data),
         }
     }
 }

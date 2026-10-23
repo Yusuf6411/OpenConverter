@@ -1,0 +1,18 @@
+[package]
+name = "oc-theora"
+description = "OpenConverter: Theora I video decoder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+oc-core = { path = "../oc-core" }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+oc-audio = { path = "../oc-audio" }
+oc-checksum = { path = "../oc-checksum" }

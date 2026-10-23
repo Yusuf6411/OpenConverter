@@ -10,7 +10,7 @@ Vector pictures: [svg](svg.md).
 
 Camera raw: [raw](raw.md).
 
-Video: [containers](containers.md), [VP8](vp8.md).
+Video: [containers](containers.md), [VP8](vp8.md), [Theora](theora.md).
 
 Audio: [wav-aiff-caf](wav-aiff-caf.md), [flac](flac.md), [mp3](mp3.md), [vorbis](vorbis.md), [opus](opus.md), [alac](alac.md), [matroska](matroska.md), [tags](tags.md).
 

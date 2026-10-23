@@ -1,5 +1,5 @@
 Name:           openconverter
-Version:        3.0.1
+Version:        3.0.2
 Release:        1%{?dist}
 Summary:        Offline file converter for documents, images, audio, video, fonts and archives
 License:        MIT
@@ -39,5 +39,8 @@ cargo test --release --offline -p oc-cli
 %{_bindir}/openconverter
 
 %changelog
+* Fri Oct 23 2026 OpenConverter maintainers <noreply@example.invalid> - 3.0.2-1
+- Theora decoding, Ogg video, DNG, Brotli and WOFF2 reading
+
 * Fri Oct 23 2026 OpenConverter maintainers <noreply@example.invalid> - 3.0.1-1
 - Initial package
