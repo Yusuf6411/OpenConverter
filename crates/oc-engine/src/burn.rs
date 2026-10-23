@@ -1,6 +1,7 @@
 //! Subtitle burn-in: each cue is drawn once as a transparent overlay (through the SVG renderer
 //! and the installed fonts) and blended onto the frames it covers.
 use oc_core::limits::Limits;
+#![allow(clippy::chunks_exact_to_as_chunks)]
 use oc_core::Notes;
 use oc_subtitle::Track;
 use oc_video::pic::Picture;
