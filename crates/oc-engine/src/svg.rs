@@ -33,6 +33,7 @@ pub fn register(registry: &mut Registry) {
             ..Capabilities::default()
         },
         writer_options: Default::default(),
+        reader_options: Default::default(),
         ownership: Ownership::Own,
         spec: "W3C SVG 1.1 / SVG 2 static subset (drawn by our own rasteriser)",
     });

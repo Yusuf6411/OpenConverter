@@ -66,6 +66,9 @@ pub struct FormatDescriptor {
     pub sniffers: Vec<Sniffer>,
     pub capabilities: Capabilities,
     pub writer_options: OptionSchema,
+    /// Options that shape how this format is read (a page, a password, a resolution); they
+    /// are accepted whatever the target is.
+    pub reader_options: OptionSchema,
     pub ownership: Ownership,
     pub spec: &'static str,
 }

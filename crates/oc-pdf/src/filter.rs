@@ -256,3 +256,12 @@ pub fn decode_stream(pdf: &Pdf, s: &Stream, keep_image: bool) -> Result<(Vec<u8>
 fn has_identity_crypt(pdf: &Pdf, d: &Dict) -> bool {
     filter_chain(pdf, d).iter().any(|(n, p)| n == "Crypt" && pdf.dget_name(p, "Name").as_deref().is_none_or(|n| n == "Identity"))
 }
+
+/// A stream's bytes with encryption removed but its filters still applied (what a copy into
+/// another file needs).
+pub fn decrypted_raw(pdf: &Pdf, s: &Stream) -> Vec<u8> {
+    match &pdf.crypt {
+        Some(c) if s.id.0 != 0 && !has_identity_crypt(pdf, &s.dict) => c.decrypt_stream(&s.raw, s.id.0, s.id.1, &s.dict),
+        _ => s.raw.clone(),
+    }
+}

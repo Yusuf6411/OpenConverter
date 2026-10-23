@@ -328,6 +328,7 @@ pub fn register(registry: &mut Registry) {
             ..Capabilities::default()
         },
         writer_options: frames_options(),
+        reader_options: Default::default(),
         ownership: Ownership::Own,
         spec: "ZIP of numbered PNG or JPEG pictures, one per frame",
     });
@@ -364,6 +365,7 @@ pub fn register(registry: &mut Registry) {
                 ..Capabilities::default()
             },
             writer_options: options_for(id),
+            reader_options: Default::default(),
             ownership: Ownership::Own,
             spec,
         });

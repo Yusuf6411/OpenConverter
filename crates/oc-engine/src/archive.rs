@@ -375,6 +375,7 @@ pub fn register(registry: &mut Registry, others: &[FormatId]) {
             ..Capabilities::default()
         },
         writer_options: OptionSchema::default(),
+        reader_options: Default::default(),
         ownership: Ownership::Own,
         spec: "Any file can be stored in an archive",
     });
@@ -394,6 +395,7 @@ pub fn register(registry: &mut Registry, others: &[FormatId]) {
                 ..Capabilities::default()
             },
             writer_options: schema(s),
+            reader_options: Default::default(),
             ownership: Ownership::Own,
             spec: s.spec,
         });

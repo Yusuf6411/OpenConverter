@@ -587,6 +587,7 @@ pub fn register(registry: &mut Registry) {
                 ..Capabilities::default()
             },
             writer_options,
+            reader_options: Default::default(),
             ownership: Ownership::Own,
             spec,
         });

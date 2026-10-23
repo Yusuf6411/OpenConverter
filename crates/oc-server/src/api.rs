@@ -177,7 +177,7 @@ pub async fn formats(State(app): State<Arc<App>>) -> Json<Value> {
                 "ownership": format!("{:?}", f.ownership).to_uppercase(),
                 "ownership_note": "",
                 "variants_note": f.spec,
-                "read_options": {},
+                "read_options": f.reader_options.specs.iter().map(|s| (s.key.to_string(), option_json(s, &app))).collect::<Map<String, Value>>(),
                 "write_options": opts,
                 "targets": targets,
                 "identity_meaningful": !f.writer_options.specs.is_empty(),
@@ -640,16 +640,11 @@ fn set_state(app: &App, id: &str, f: impl FnOnce(&mut Map<String, Value>)) {
 /// Options for a job: the request's, with the user's saved defaults for what it leaves out.
 fn job_options(
     app: &App,
+    from: Option<FormatId>,
     to: FormatId,
-    out_path: &std::path::Path,
     given: Option<&Value>,
 ) -> R<Vec<(String, oc_core::options::OptionValue)>> {
-    let schema = app
-        .engine
-        .registry()
-        .format(to)
-        .map(|d| d.writer_options.clone())
-        .unwrap_or_default();
+    let schema = app.engine.option_schema(from, to);
     let mut raw: Vec<(String, String)> = Vec::new();
     if let Some(opts) = given {
         let Value::Object(opts) = opts else {
@@ -682,9 +677,10 @@ fn job_options(
             raw.push((key.to_string(), text));
         }
     }
-    let options = app
-        .engine
-        .parse_options(out_path, &raw)
+    let options = raw
+        .iter()
+        .map(|(k, v)| Ok((k.clone(), schema.parse_arg(k, v)?)))
+        .collect::<oc_core::Result<Vec<_>>>()
         .map_err(|e| ApiErr::bad(e.message))?;
     // Re-check the values against ranges now, so a bad one fails the request, not the job.
     schema
@@ -740,7 +736,7 @@ pub async fn create_job(
         .data_dir
         .join("outputs")
         .join(format!("{out_id}.{ext}"));
-    let options = job_options(&app, to, &out_path, body.get("options"))?;
+    let options = job_options(&app, Some(from_id), to, body.get("options"))?;
 
     let job_id = new_id();
     let cancel = CancelToken::new();
@@ -1434,7 +1430,7 @@ pub async fn create_archive(
         .data_dir
         .join("outputs")
         .join(format!("{out_id}.{ext}"));
-    let options = job_options(&app, to, &out_path, body.get("options"))?;
+    let options = job_options(&app, None, to, body.get("options"))?;
 
     // Stage copies under their original names; two uploads called a.txt become a.txt and a (2).txt.
     let stage = app

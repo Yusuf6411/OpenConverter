@@ -178,6 +178,7 @@ fn describe(
             ..Capabilities::default()
         },
         writer_options,
+        reader_options: Default::default(),
         ownership: Ownership::Own,
         spec,
     }

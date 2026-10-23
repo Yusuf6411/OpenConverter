@@ -7,6 +7,18 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+/// The permission flags of the standard security handler that conversions care about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Permission {
+    Print,
+    Modify,
+    /// Copying text and graphics (also what text extraction needs).
+    Copy,
+    Annotate,
+    /// Inserting, rotating and deleting pages.
+    Assemble,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Entry {
     Offset(usize),
@@ -106,6 +118,24 @@ impl Pdf {
         self.cache.borrow_mut().clear();
         self.objstm.borrow_mut().clear();
         ok
+    }
+
+    /// What the document's permission flags allow the current credentials to do; everything when
+    /// there is no encryption or the owner password was used.
+    pub fn permission(&self, p: Permission) -> bool {
+        match &self.crypt {
+            Some(c) if !c.owner => {
+                let bit = match p {
+                    Permission::Print => 3,
+                    Permission::Modify => 4,
+                    Permission::Copy => 5,
+                    Permission::Annotate => 6,
+                    Permission::Assemble => 11,
+                };
+                c.permissions() & (1 << (bit - 1)) != 0
+            }
+            _ => true,
+        }
     }
 
     pub fn is_encrypted(&self) -> bool {

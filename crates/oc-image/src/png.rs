@@ -722,7 +722,12 @@ fn write_metadata(out: &mut Vec<u8>, meta: &crate::image::Metadata, notes: &mut 
     }
 }
 
-/// Filters every row of the image and deflates the result.
+/// Filters every row of the image and deflates the result: the data of a PNG `IDAT`, or of a PDF
+/// `FlateDecode` stream with `/Predictor 15`.
+pub fn deflate_filtered(img: &Image, opts: &EncodeOptions) -> Vec<u8> {
+    compress_rows(img, opts)
+}
+
 fn compress_rows(img: &Image, opts: &EncodeOptions) -> Vec<u8> {
     let rb = img.row_bytes();
     let bpp = img.layout.channels() * img.depth.bytes();

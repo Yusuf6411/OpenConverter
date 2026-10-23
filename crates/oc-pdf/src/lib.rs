@@ -20,3 +20,5 @@ pub mod shading;
 pub mod interp;
 pub mod render;
 pub mod text;
+pub mod writer;
+pub mod edit;

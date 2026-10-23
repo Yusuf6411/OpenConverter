@@ -39,6 +39,8 @@ pub struct Crypt {
     strm: Method,
     key: Vec<u8>,
     pub authenticated: bool,
+    /// Authenticated with the owner password, which lifts the permission restrictions.
+    pub owner: bool,
     pub encrypt_obj: Option<u32>,
 }
 
@@ -131,7 +133,7 @@ fn aes128_cbc_encrypt_nopad(key: &[u8], iv: &[u8], data: &[u8]) -> Option<Vec<u8
 }
 
 /// PDF 2.0 hash (algorithm 2.B) for revision 6.
-fn hash_r6(password: &[u8], salt: &[u8], udata: &[u8]) -> Vec<u8> {
+pub(crate) fn hash_r6(password: &[u8], salt: &[u8], udata: &[u8]) -> Vec<u8> {
     let mut k: Vec<u8> = {
         let mut h = Sha256::new();
         h.update(password);
@@ -218,6 +220,7 @@ impl Crypt {
             strm,
             key: Vec::new(),
             authenticated: false,
+            owner: false,
             encrypt_obj: enc_num,
         };
         if !(1..=6).contains(&r) || !(1..=5).contains(&v) {
@@ -270,6 +273,7 @@ impl Crypt {
         if self.check_user_r234(&k) {
             self.key = k;
             self.authenticated = true;
+            self.owner = false;
             return true;
         }
         // owner password: recover the user password from /O
@@ -294,6 +298,7 @@ impl Crypt {
         if self.check_user_r234(&k) {
             self.key = k;
             self.authenticated = true;
+            self.owner = true;
             return true;
         }
         self.authenticated = false;
@@ -321,6 +326,7 @@ impl Crypt {
             if let Some(k) = aes_cbc_decrypt(&ik, &[0u8; 16], self.ue.get(..32).unwrap_or_default(), false) {
                 self.key = k;
                 self.authenticated = true;
+                self.owner = false;
                 return true;
             }
         }
@@ -331,12 +337,18 @@ impl Crypt {
                 if let Some(k) = aes_cbc_decrypt(&ik, &[0u8; 16], self.oe.get(..32).unwrap_or_default(), false) {
                     self.key = k;
                     self.authenticated = true;
+                    self.owner = true;
                     return true;
                 }
             }
         }
         self.authenticated = false;
         false
+    }
+
+    /// The permission bits (`/P`).
+    pub fn permissions(&self) -> i32 {
+        self.p
     }
 
     fn object_key(&self, num: u32, gen: u16, aes: bool) -> Vec<u8> {
@@ -388,5 +400,112 @@ impl Crypt {
             }
             o => o,
         }
+    }
+}
+
+/// Random bytes from the operating system, with a hashed-time fallback that is only used where
+/// no entropy source can be opened.
+pub fn random_bytes(n: usize) -> Vec<u8> {
+    use std::io::Read;
+    let mut out = vec![0u8; n];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        if f.read_exact(&mut out).is_ok() {
+            return out;
+        }
+    }
+    use std::hash::{BuildHasher, Hasher};
+    let state = std::collections::hash_map::RandomState::new();
+    for (i, b) in out.iter_mut().enumerate() {
+        let mut h = state.build_hasher();
+        h.write_usize(i);
+        h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+        *b = h.finish().to_le_bytes()[i % 8];
+    }
+    out
+}
+
+fn aes256_cbc_encrypt(key: &[u8], iv: &[u8], data: &[u8], pad: bool) -> Vec<u8> {
+    let Ok(c) = aes::Aes256::new_from_slice(key) else { return Vec::new() };
+    let mut buf = data.to_vec();
+    if pad {
+        let n = 16 - buf.len() % 16;
+        buf.extend(std::iter::repeat_n(n as u8, n));
+    }
+    let mut prev = [0u8; 16];
+    prev.copy_from_slice(iv.get(..16).unwrap_or(&[0u8; 16]));
+    let mut out = Vec::with_capacity(buf.len());
+    for blk in buf.chunks_exact(16) {
+        let mut b = GenericArray::clone_from_slice(blk);
+        for (x, p) in b.iter_mut().zip(prev.iter()) {
+            *x ^= *p;
+        }
+        c.encrypt_block(&mut b);
+        prev.copy_from_slice(&b);
+        out.extend_from_slice(&b);
+    }
+    out
+}
+
+/// What encrypting a written file needs: the key, and the `/Encrypt` dictionary that lets a reader
+/// derive it from a password (AES-256, revision 6).
+pub struct Encryptor {
+    key: Vec<u8>,
+    pub dict: Dict,
+}
+
+impl Encryptor {
+    /// `permissions` are the PDF permission bits (all granted when `-4`).
+    pub fn new(user_pw: &[u8], owner_pw: &[u8], permissions: i32) -> Encryptor {
+        let key = random_bytes(32);
+        let user_pw = &user_pw[..user_pw.len().min(127)];
+        let owner_pw = &owner_pw[..owner_pw.len().min(127)];
+        let r = random_bytes(16);
+        let (uvs, uks) = (&r[..8], &r[8..16]);
+        let mut u = hash_r6(user_pw, uvs, &[]);
+        u.extend_from_slice(uvs);
+        u.extend_from_slice(uks);
+        let ue = aes256_cbc_encrypt(&hash_r6(user_pw, uks, &[]), &[0u8; 16], &key, false);
+        let r2 = random_bytes(16);
+        let (ovs, oks) = (&r2[..8], &r2[8..16]);
+        let mut o = hash_r6(owner_pw, ovs, &u);
+        o.extend_from_slice(ovs);
+        o.extend_from_slice(oks);
+        let oe = aes256_cbc_encrypt(&hash_r6(owner_pw, oks, &u), &[0u8; 16], &key, false);
+        let mut perms = Vec::with_capacity(16);
+        perms.extend_from_slice(&permissions.to_le_bytes());
+        perms.extend_from_slice(&[0xFF; 4]);
+        perms.push(b'T');
+        perms.extend_from_slice(b"adb");
+        perms.extend_from_slice(&random_bytes(4));
+        let perms = aes256_cbc_encrypt(&key, &[0u8; 16], &perms, false);
+        let mut cf = Dict::new();
+        let mut std_cf = Dict::new();
+        std_cf.insert("CFM".into(), Obj::Name("AESV3".into()));
+        std_cf.insert("AuthEvent".into(), Obj::Name("DocOpen".into()));
+        std_cf.insert("Length".into(), Obj::Int(32));
+        cf.insert("StdCF".into(), Obj::Dict(std_cf));
+        let mut d = Dict::new();
+        d.insert("Filter".into(), Obj::Name("Standard".into()));
+        d.insert("V".into(), Obj::Int(5));
+        d.insert("R".into(), Obj::Int(6));
+        d.insert("Length".into(), Obj::Int(256));
+        d.insert("CF".into(), Obj::Dict(cf));
+        d.insert("StmF".into(), Obj::Name("StdCF".into()));
+        d.insert("StrF".into(), Obj::Name("StdCF".into()));
+        d.insert("O".into(), Obj::Str(o));
+        d.insert("U".into(), Obj::Str(u));
+        d.insert("OE".into(), Obj::Str(oe));
+        d.insert("UE".into(), Obj::Str(ue));
+        d.insert("Perms".into(), Obj::Str(perms));
+        d.insert("P".into(), Obj::Int(i64::from(permissions)));
+        Encryptor { key, dict: d }
+    }
+
+    /// AES-256-CBC with a random IV in front, as PDF stores encrypted strings and streams.
+    pub fn encrypt(&self, data: &[u8]) -> Vec<u8> {
+        let iv = random_bytes(16);
+        let mut out = iv.clone();
+        out.extend(aes256_cbc_encrypt(&self.key, &iv, data, true));
+        out
     }
 }

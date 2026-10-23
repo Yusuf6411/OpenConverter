@@ -162,13 +162,13 @@ fn convert(engine: &Engine, args: &[String], worker: bool) -> ExitCode {
     };
     // `password` only exists on encrypting writers; ignore the variable elsewhere.
     with_env_secrets(&mut a.raw_options, worker);
-    let options = match engine.parse_options(a.output.as_ref(), &a.raw_options) {
+    let options = match engine.parse_options_for(a.input.as_ref(), a.output.as_ref(), &a.raw_options) {
         Ok(o) => o,
         Err(e) if e.code == ErrorCode::InvalidOptions && !worker => {
             // An unused password variable must not break conversions to formats without one.
             a.raw_options
                 .retain(|(k, _)| k != "password" && k != "source_password");
-            match engine.parse_options(a.output.as_ref(), &a.raw_options) {
+            match engine.parse_options_for(a.input.as_ref(), a.output.as_ref(), &a.raw_options) {
                 Ok(o) => o,
                 Err(e) => return fail(&e),
             }

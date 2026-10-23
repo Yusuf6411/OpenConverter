@@ -124,6 +124,7 @@ impl Engine {
                 ..Capabilities::default()
             },
             writer_options: text_options(),
+            reader_options: Default::default(),
             ownership: Ownership::Own,
             spec: "Unicode 15 / WHATWG Encoding (subset)",
         });
@@ -167,6 +168,41 @@ impl Engine {
         self.registry_formats()
             .find(|f| f.id.0 == name)
             .map(|f| f.id)
+    }
+
+    /// The options a conversion from `from` to `to` accepts: the output format's own, then those
+    /// that only shape how the input is read (a PDF page, its password).
+    pub fn option_schema(&self, from: Option<FormatId>, to: FormatId) -> OptionSchema {
+        let mut schema = self
+            .registry
+            .format(to)
+            .map(|f| f.writer_options.clone())
+            .unwrap_or_default();
+        if let Some(f) = from.and_then(|f| self.registry.format(f)) {
+            for spec in &f.reader_options.specs {
+                if !schema.specs.iter().any(|s| s.key == spec.key) {
+                    schema.specs.push(spec.clone());
+                }
+            }
+        }
+        schema
+    }
+
+    /// Like [`Engine::parse_options`], also accepting the options of the input's format.
+    pub fn parse_options_for(
+        &self,
+        input: &Path,
+        output: &Path,
+        raw: &[(String, String)],
+    ) -> Result<Vec<(String, OptionValue)>> {
+        let fmt = self.format_for_path(output).ok_or_else(|| {
+            Error::new(ErrorCode::UnsupportedFormat, "unknown output file type")
+                .with_detail(output.display().to_string())
+        })?;
+        let schema = self.option_schema(self.format_for_path(input), fmt);
+        raw.iter()
+            .map(|(k, v)| Ok((k.clone(), schema.parse_arg(k, v)?)))
+            .collect()
     }
 
     /// Turn raw `key=value` strings into typed values using the output format's schema.
@@ -375,11 +411,7 @@ impl Engine {
                     .with_detail(req.output.display().to_string()),
             );
         }
-        let schema = &self
-            .registry
-            .format(to)
-            .ok_or_else(|| Error::new(ErrorCode::InternalError, "format vanished"))?
-            .writer_options;
+        let schema = self.option_schema(Some(ext_from), to);
         let opts = schema.validate(&req.options)?;
         progress.check_cancelled()?;
 

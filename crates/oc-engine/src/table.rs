@@ -224,6 +224,7 @@ pub fn register(registry: &mut Registry) {
                 ..Capabilities::default()
             },
             writer_options: options_for(id),
+            reader_options: Default::default(),
             ownership: Ownership::Own,
             spec,
         });
