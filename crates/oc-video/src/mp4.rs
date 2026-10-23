@@ -181,6 +181,10 @@ fn parse_entry(handler: &FourCc, fourcc: &FourCc, body: &[u8]) -> Option<Entry> 
             e.private = get(b"av1C").unwrap_or_default();
         }
         b"jpeg" | b"mjpa" | b"mjpb" => e.codec = codec::MJPEG,
+        b"apco" | b"apcs" | b"apcn" | b"apch" | b"ap4h" | b"ap4x" => {
+            e.codec = codec::PRORES;
+            e.private = fourcc.to_vec();
+        }
         b"mp4v" => {
             let (oti, dsi) = parse_esds(&get(b"esds")?)?;
             e.codec = match oti {
@@ -366,6 +370,7 @@ pub fn allows(codec: &str, mov: bool) -> bool {
     match codec {
         codec::H264 | codec::HEVC | codec::VP8 | codec::VP9 | codec::AV1 | codec::MPEG4 => true,
         codec::MJPEG => true,
+        codec::PRORES => mov,
         codec::AAC | codec::MP3 | codec::OPUS | codec::FLAC => true,
         codec::PCM_S16 | codec::PCM_U8 => mov,
         codec::SRT => true,
@@ -580,6 +585,15 @@ fn sample_entry(s: &Stream, mov: bool, first: Option<&[u8]>) -> Res<Vec<u8>> {
             &vpcc(first.and_then(vp9_info), s.width, s.height, s.fps, false),
         ),
         codec::MJPEG if mov => visual_entry(b"jpeg", s.width, s.height, &[]),
+        codec::PRORES => {
+            let code: [u8; 4] = s
+                .private
+                .get(..4)
+                .and_then(|c| c.try_into().ok())
+                .filter(|c| crate::prores::FOURCCS.contains(&c))
+                .unwrap_or(*b"apch");
+            visual_entry(&code, s.width, s.height, &[])
+        }
         codec::MJPEG | codec::MPEG4 => {
             let oti = if s.codec == codec::MJPEG { 0x6C } else { 0x20 };
             let mut w = BoxWriter::new();

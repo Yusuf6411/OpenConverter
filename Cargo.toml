@@ -12,6 +12,7 @@ members = [
     "crates/oc-audio",
     "crates/oc-vp8",
     "crates/oc-theora",
+    "crates/oc-prores",
     "crates/oc-video",
     "crates/oc-container",
     "crates/oc-archive",

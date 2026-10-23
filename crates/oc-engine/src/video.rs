@@ -256,7 +256,7 @@ pub fn register(registry: &mut Registry) {
             &["mp4", "m4v"],
             &["video/mp4"],
             vec![Sniffer { offset: 4, magic: b"ftyp", confidence: 60 }],
-            "ISO/IEC 14496-12 and 14496-14 (stream copy; VP8/VP9/AV1/MJPEG, AAC, MP3, Opus, FLAC)",
+            "ISO/IEC 14496-12 and 14496-14 (stream copy; VP8/VP9/AV1/MJPEG, ProRes in MOV, AAC, MP3, Opus, FLAC)",
         ),
         (
             MOV,
@@ -1663,7 +1663,10 @@ fn anim_over_black(img: &oc_image::Image) -> Vec<u8> {
 
 /// Whether this build can decode a video stream's pictures.
 fn can_decode_video(c: &str) -> bool {
-    matches!(c, codec::MJPEG | codec::RAW | codec::VP8 | codec::THEORA)
+    matches!(
+        c,
+        codec::MJPEG | codec::RAW | codec::VP8 | codec::THEORA | codec::PRORES
+    )
 }
 
 fn can_decode_audio(c: &str) -> bool {

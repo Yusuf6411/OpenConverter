@@ -17,6 +17,7 @@ oc-xml = { path = "../crates/oc-xml" }
 oc-image = { path = "../crates/oc-image" }
 oc-vp8 = { path = "../crates/oc-vp8" }
 oc-theora = { path = "../crates/oc-theora" }
+oc-prores = { path = "../crates/oc-prores" }
 oc-video = { path = "../crates/oc-video" }
 oc-font = { path = "../crates/oc-font" }
 oc-raster = { path = "../crates/oc-raster" }
@@ -411,5 +412,11 @@ doc = false
 [[bin]]
 name = "theora"
 path = "fuzz_targets/theora.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "prores"
+path = "fuzz_targets/prores.rs"
 test = false
 doc = false

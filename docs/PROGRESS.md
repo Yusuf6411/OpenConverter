@@ -143,5 +143,6 @@ Speed work against the budgets (ADR-0015), the packaging channels in M8.4, and t
 - Brotli encoder and decoder (`oc-compress::brotli`) and WOFF2 reading and writing (`oc-font::woff2`, `build`); WOFF2 collections are read by code that no test file has exercised.
 - Distribution files (`packaging/`).
 - DNG reading ([formats/raw.md](formats/raw.md)), checked only against synthetic files.
+- ProRes decoding (`oc-prores`, [formats/prores.md](formats/prores.md)), matching ffmpeg within one level on 4:2:2, 4:4:4, alpha and interlaced frames.
 - Theora decoding (`oc-theora`, [formats/theora.md](formats/theora.md)), bit-exact with ffmpeg on nine libtheora streams, and Ogg video reading.
 - Not done: JPEG XL, other camera raw formats, WavPack, APE, ProRes (ADR-0013); the encumbered build (ADR-0010).

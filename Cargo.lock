@@ -2292,6 +2292,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "oc-prores"
+version = "3.0.2"
+dependencies = [
+ "oc-core",
+]
+
+[[package]]
 name = "oc-python"
 version = "3.0.2"
 dependencies = [
@@ -2378,6 +2385,7 @@ dependencies = [
  "oc-container",
  "oc-core",
  "oc-image",
+ "oc-prores",
  "oc-subtitle",
  "oc-theora",
  "oc-vp8",

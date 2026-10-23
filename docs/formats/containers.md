@@ -21,6 +21,7 @@ All video containers meet in one packet-level model, `oc_video::Media`: streams 
 - **Pictures**: any decodable video to GIF, animated WebP and APNG, and back.
 
 ## Checked
+- ProRes in MOV/MP4 is copied or decoded ([prores](prores.md)).
 - Ogg video (Theora with Vorbis) is read ([theora](theora.md)); it can be copied into Matroska or decoded.
 - MPEG-TS written here decodes to the same frames and samples in ffmpeg as the source, and passes `-err_detect explode`; FLV, M2TS, MPEG-TS from ffmpeg and PS built by a test script read back to the same pictures.
 - Fragmented MP4 decodes identically to the plain file and passes strict decoding.

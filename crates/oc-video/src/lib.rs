@@ -17,6 +17,7 @@ pub mod mkv;
 pub mod mp4;
 pub mod ogv;
 pub mod pic;
+pub mod prores;
 pub mod ps;
 pub mod subs;
 pub mod theora;
@@ -42,6 +43,8 @@ pub mod codec {
     pub const AV1: &str = "av1";
     pub const MJPEG: &str = "mjpeg";
     pub const THEORA: &str = "theora";
+    /// Apple ProRes; `private` holds the four-character sample-entry code.
+    pub const PRORES: &str = "prores";
     pub const MPEG4: &str = "mpeg4";
     /// Uncompressed frames; the stream's `pix_fmt` says how.
     pub const RAW: &str = "rawvideo";
