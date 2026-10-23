@@ -32,3 +32,4 @@ cargo xtask check-deps                   # no third-party codecs in the tree
 [docs/MASTER_PROMPT.md](docs/MASTER_PROMPT.md) is the plan, [docs/PROGRESS.md](docs/PROGRESS.md) the status, [docs/API.md](docs/API.md) the local API, [docs/DECISIONS.md](docs/DECISIONS.md) the decisions, [docs/formats/](docs/formats/README.md) what each format covers.
 
 Python: see [docs/python.md](docs/python.md).
+Translations: [docs/i18n.md](docs/i18n.md). Performance: [docs/PERFORMANCE.md](docs/PERFORMANCE.md).

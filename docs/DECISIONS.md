@@ -69,3 +69,8 @@ Consequences: the compatibility table does not list these formats; adding one la
 Context: the master prompt names PyO3 and maturin. PyO3's macros expand to `unsafe` code, which `#![forbid(unsafe_code)]` rejects. The own-codec rule covers format and codec code, not the interpreter interface.
 Decision: `oc-python` depends on `pyo3` (abi3-py39) and is the only crate that does; it contains no hand-written `unsafe`. Conversions run in-process (no sandboxed worker), which is documented.
 Consequences: `cargo xtask check-deps` and `cargo deny` still pass; the crate builds as a cdylib with `extension-module`, so it has no Rust unit tests and is tested from Python.
+
+## ADR-0015: Performance misses are recorded, not hidden
+Context: the Phase 8 pass found that most measured operations miss their §17.2 budget, several by more than 4× (Zstandard encode and decode, Inflate, JPEG decode, PNG decode). The codecs are correct and bit-exact against their references; they are scalar, single-threaded and not tuned.
+Decision: ship the numbers in docs/PERFORMANCE.md rather than weaken the budgets. Speed work (SIMD kernels in `oc-simd`, a faster Zstandard match finder, table-driven Inflate, threaded encoders) is the next performance task and needs criterion benchmarks first so that gains and regressions are measurable.
+Consequences: v3.0.0 does not meet the §17.2 targets. Users converting very large files will notice on Zstandard and XZ.

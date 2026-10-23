@@ -16,7 +16,7 @@
       <rect width="32" height="32" rx="7" fill="#2563eb"/>
       <path d="M9 12.5h11.5l-3-3M23 19.5H11.5l3 3" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
-    <h1>OpenConverter</h1>
+    <h1 data-i18n="openconverter">OpenConverter</h1>
     <span class="chip" id="version" title="Version">v…</span>
     <span class="chip offline" title="Everything runs on this computer. No files leave it.">
       <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.5 2.5 4v4c0 3.2 2.3 5.7 5.5 6.5 3.2-.8 5.5-3.3 5.5-6.5V4z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="m5.5 8 1.8 1.8L10.8 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -28,13 +28,13 @@
     <span id="theme-icon" aria-hidden="true"></span><span id="theme-label">System</span>
   </button>
   <button type="button" class="icon-btn" id="settings-open" aria-haspopup="dialog">
-    <span id="settings-icon" aria-hidden="true"></span><span>Settings</span>
+    <span id="settings-icon" aria-hidden="true"></span><span data-i18n="settings">Settings</span>
   </button>
 </header>
 
 <nav class="tabs" role="tablist" aria-label="Sections">
-  <button type="button" class="tab" role="tab" id="tab-convert" aria-controls="panel-convert" aria-selected="true">Convert</button>
-  <button type="button" class="tab" role="tab" id="tab-history" aria-controls="panel-history" aria-selected="false" tabindex="-1">History</button>
+  <button type="button" class="tab" role="tab" id="tab-convert" aria-controls="panel-convert" aria-selected="true" data-i18n="tab_convert">Convert</button>
+  <button type="button" class="tab" role="tab" id="tab-history" aria-controls="panel-history" aria-selected="false" tabindex="-1" data-i18n="tab_history">History</button>
 </nav>
 
 <main>
@@ -42,19 +42,19 @@
     <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-describedby="dz-sub">
       <span id="dz-icon" aria-hidden="true"></span>
       <span class="dz-title">Drop files here or <u>browse</u></span>
-      <span class="dz-sub" id="dz-sub">Images, audio, text, tables, archives and any other files. Nothing leaves this computer.</span>
+      <span class="dz-sub" id="dz-sub" data-i18n="dz_sub">Images, audio, text, tables, archives and any other files. Nothing leaves this computer.</span>
     </div>
     <input type="file" id="file-input" multiple hidden>
 
     <div class="batch" id="batch" hidden>
       <span class="summary" id="batch-summary"></span>
       <label>Set all to
-        <select id="set-all"><option value="">Choose…</option></select>
+        <select id="set-all"><option value="" data-i18n="choose">Choose…</option></select>
       </label>
-      <button type="button" class="btn primary" id="convert-all">Convert all</button>
-      <button type="button" class="btn" id="download-all">Download all</button>
-      <button type="button" class="btn" id="pack-all">Pack into archive…</button>
-      <button type="button" class="btn" id="clear-finished">Clear finished</button>
+      <button type="button" class="btn primary" id="convert-all" data-i18n="convert_all">Convert all</button>
+      <button type="button" class="btn" id="download-all" data-i18n="download_all">Download all</button>
+      <button type="button" class="btn" id="pack-all" data-i18n="pack_all">Pack into archive…</button>
+      <button type="button" class="btn" id="clear-finished" data-i18n="clear_finished">Clear finished</button>
     </div>
 
     <ul class="queue" id="queue" aria-label="Files"></ul>
@@ -62,69 +62,69 @@
 
   <section id="panel-history" role="tabpanel" aria-labelledby="tab-history" hidden>
     <div class="history-head">
-      <h2>Conversion history</h2>
-      <button type="button" class="btn" id="history-refresh">Refresh</button>
-      <button type="button" class="btn danger" id="history-clear">Clear all</button>
+      <h2 data-i18n="conversion_history">Conversion history</h2>
+      <button type="button" class="btn" id="history-refresh" data-i18n="history_refresh">Refresh</button>
+      <button type="button" class="btn danger" id="history-clear" data-i18n="history_clear">Clear all</button>
     </div>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th scope="col">Name</th><th scope="col">Conversion</th><th scope="col">Size</th><th scope="col">Duration</th><th scope="col">Status</th><th scope="col">Time</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr>
+          <tr><th scope="col" data-i18n="name">Name</th><th scope="col" data-i18n="conversion">Conversion</th><th scope="col" data-i18n="size">Size</th><th scope="col" data-i18n="duration">Duration</th><th scope="col" data-i18n="status">Status</th><th scope="col" data-i18n="time">Time</th><th scope="col"><span class="visually-hidden" data-i18n="actions">Actions</span></th></tr>
         </thead>
         <tbody id="history-body"></tbody>
       </table>
     </div>
-    <p class="empty" id="history-empty" hidden>No conversions yet.</p>
+    <p class="empty" id="history-empty" hidden data-i18n="history_empty">No conversions yet.</p>
   </section>
 </main>
 
-<footer>OpenConverter runs entirely on this computer: no uploads to the internet, no telemetry.</footer>
+<footer data-i18n="openconverter_runs_entirely_on_this_comp">OpenConverter runs entirely on this computer: no uploads to the internet, no telemetry.</footer>
 
 <div id="live" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
 
 <dialog id="settings-dialog" aria-labelledby="settings-title">
   <form id="settings-form" method="dialog" novalidate>
     <div class="dialog-body">
-      <h2 id="settings-title">Settings</h2>
+      <h2 id="settings-title" data-i18n="settings_title">Settings</h2>
       <div class="field">
-        <label for="set-theme">Theme</label>
+        <label for="set-theme" data-i18n="theme">Theme</label>
         <select id="set-theme" name="theme">
-          <option value="system">Follow system</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
+          <option value="system" data-i18n="follow_system">Follow system</option>
+          <option value="light" data-i18n="light">Light</option>
+          <option value="dark" data-i18n="dark">Dark</option>
         </select>
       </div>
       <div class="field">
-        <label for="set-quality">Default JPEG quality</label>
+        <label for="set-quality" data-i18n="default_jpeg_quality">Default JPEG quality</label>
         <input type="number" id="set-quality" name="default_jpeg_quality" min="1" max="100" step="1" required aria-describedby="err-default_jpeg_quality">
         <span class="error" id="err-default_jpeg_quality"></span>
       </div>
       <div class="field">
-        <label for="set-level">Default PNG compression level</label>
+        <label for="set-level" data-i18n="default_png_compression_level">Default PNG compression level</label>
         <input type="number" id="set-level" name="default_png_level" min="0" max="9" step="1" required aria-describedby="help-level err-default_png_level">
-        <span class="help" id="help-level">0 = fastest, 9 = smallest.</span>
+        <span class="help" id="help-level" data-i18n="help_level">0 = fastest, 9 = smallest.</span>
         <span class="error" id="err-default_png_level"></span>
       </div>
       <div class="field">
-        <label for="set-bg">Background for transparent areas</label>
+        <label for="set-bg" data-i18n="background_for_transparent_areas">Background for transparent areas</label>
         <input type="color" id="set-bg" name="alpha_background" aria-describedby="help-bg">
-        <span class="help" id="help-bg">Used when a format without transparency (JPEG, PPM…) is chosen.</span>
+        <span class="help" id="help-bg" data-i18n="help_bg">Used when a format without transparency (JPEG, PPM…) is chosen.</span>
       </div>
       <div class="field">
-        <label for="set-retention">Keep files for (hours)</label>
+        <label for="set-retention" data-i18n="keep_files_for_hours">Keep files for (hours)</label>
         <input type="number" id="set-retention" name="retention_hours" min="1" max="8760" step="1" required aria-describedby="err-retention_hours">
         <span class="error" id="err-retention_hours"></span>
       </div>
       <div class="field">
-        <label for="set-maxup">Maximum upload size (MB)</label>
+        <label for="set-maxup" data-i18n="maximum_upload_size_mb">Maximum upload size (MB)</label>
         <input type="number" id="set-maxup" name="max_upload_mb" min="1" max="4096" step="1" required aria-describedby="err-max_upload_mb">
         <span class="error" id="err-max_upload_mb"></span>
       </div>
       <p class="error" id="settings-error" role="alert"></p>
     </div>
     <div class="dialog-actions">
-      <button type="button" class="btn" id="settings-cancel">Cancel</button>
-      <button type="submit" class="btn primary" id="settings-save" value="save">Save</button>
+      <button type="button" class="btn" id="settings-cancel" data-i18n="settings_cancel">Cancel</button>
+      <button type="submit" class="btn primary" id="settings-save" value="save" data-i18n="settings_save">Save</button>
     </div>
   </form>
 </dialog>
@@ -132,12 +132,12 @@
 <dialog id="confirm-dialog" aria-labelledby="confirm-title">
   <form method="dialog">
     <div class="dialog-body">
-      <h2 id="confirm-title">Clear history?</h2>
-      <p id="confirm-text">This removes all entries from the history list. Converted files stay until they expire.</p>
+      <h2 id="confirm-title" data-i18n="confirm_title">Clear history?</h2>
+      <p id="confirm-text" data-i18n="confirm_text">This removes all entries from the history list. Converted files stay until they expire.</p>
     </div>
     <div class="dialog-actions">
-      <button type="submit" class="btn" value="cancel">Cancel</button>
-      <button type="submit" class="btn danger" value="ok" id="confirm-ok">Clear all</button>
+      <button type="submit" class="btn" value="cancel" data-i18n="cancel">Cancel</button>
+      <button type="submit" class="btn danger" value="ok" id="confirm-ok" data-i18n="confirm_ok">Clear all</button>
     </div>
   </form>
 </dialog>

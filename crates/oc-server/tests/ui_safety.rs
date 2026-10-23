@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 //! The UI may not build HTML from strings, run inline scripts, evaluate code or
 //! mention remote addresses (other than the SVG namespace). Content-Security-Policy
 //! backs this up at run time; this keeps the source honest.
@@ -72,4 +73,32 @@ fn ui_source_has_no_unsafe_patterns() {
         }
     }
     assert!(bad.is_empty(), "{bad:#?}");
+}
+
+#[test]
+fn translation_catalogs_match_the_page() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui");
+    let html = std::fs::read_to_string(root.join("index.html")).unwrap();
+    let keys = |text: &str| -> std::collections::BTreeSet<String> {
+        // flat string-to-string JSON written by tools/i18n.py: one `"key": "value"` per line
+        text.lines()
+            .filter_map(|l| l.trim().strip_prefix('"'))
+            .filter_map(|l| l.split_once("\": "))
+            .map(|(k, _)| k.to_string())
+            .collect()
+    };
+    let en = keys(&std::fs::read_to_string(root.join("locales/en.json")).unwrap());
+    let qps = keys(&std::fs::read_to_string(root.join("locales/qps.json")).unwrap());
+    assert!(!en.is_empty());
+    assert_eq!(
+        en, qps,
+        "pseudo-locale out of date: run tools/i18n.py pseudo"
+    );
+    for part in html.split("data-i18n=\"").skip(1) {
+        let key = part.split('"').next().unwrap();
+        assert!(
+            en.contains(key),
+            "index.html uses {key}, missing from en.json"
+        );
+    }
 }

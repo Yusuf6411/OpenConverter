@@ -1,5 +1,6 @@
 // OpenConverter web interface entry point.
 import { api } from "./api.js";
+import { loadLanguage, t } from "./i18n.js";
 import { Card } from "./ui/card.js";
 import { announce, clear, h, icon } from "./ui/dom.js";
 import { friendlyError } from "./ui/format.js";
@@ -10,6 +11,7 @@ import { SettingsDialog } from "./ui/settings.js";
 const STORE_KEY = "oc-queue-v1";
 const THEMES = ["system", "light", "dark"];
 const THEME_LABEL = { system: "System", light: "Light", dark: "Dark" };
+const themeLabel = (theme) => t("theme_" + theme, THEME_LABEL[theme]);
 const THEME_ICON = { system: "monitor", light: "sun", dark: "moon" };
 
 function storageGet(key) {
@@ -32,6 +34,7 @@ class App {
   }
 
   async init() {
+    await loadLanguage();
     document.getElementById("dz-icon").append(icon("upload", 42));
     document.getElementById("settings-icon").append(icon("gear", 18));
     this.applyTheme(document.documentElement.getAttribute("data-theme") || "system", false);
@@ -73,7 +76,7 @@ class App {
     storageSet("oc-theme", theme);
     const btn = document.getElementById("theme-toggle");
     btn.setAttribute("aria-label", "Theme: " + THEME_LABEL[theme] + ". Click to change.");
-    document.getElementById("theme-label").textContent = THEME_LABEL[theme];
+    document.getElementById("theme-label").textContent = themeLabel(theme);
     const holder = document.getElementById("theme-icon");
     clear(holder).append(icon(THEME_ICON[theme], 18));
     if (persist) {

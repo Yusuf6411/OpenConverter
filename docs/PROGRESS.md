@@ -117,6 +117,14 @@ Notes: [python.md](python.md).
 - Fixed while testing: CSV/TSV/JSON table writing recomputed the table width per row, so 80,000 rows took 2.3 s and 400,000 rows minutes; now 0.04 s and 0.25 s.
 - Release v2.8.0 (tagged locally).
 
+## Phase 8: Distribution polish
+- [~] M8.1 translation infrastructure with a pseudo-locale ([i18n.md](i18n.md)); checked in headless Chromium at `/?lang=qps`. Not done: JavaScript-built strings, a language picker, a real community language.
+- [~] M8.2 performance pass ([PERFORMANCE.md](PERFORMANCE.md), ADR-0015): most budgets are missed and recorded; no speed work was done.
+- [~] M8.3 documentation review: README, python.md, i18n.md, formats pages and COMPATIBILITY.md are current for 3.0.0. Two stray wheel files that had been committed by mistake were removed.
+- [ ] M8.4 Flathub, winget, COPR, signed APT and DNF repositories, Windows 11 context menu, macOS signing and notarization, OSS-Fuzz application: not done. They need accounts, credentials or network services that this environment does not have, and none can be tested here.
+- [ ] M8.5 the encumbered build: no decision has been recorded, so it stays off (ADR-0010).
+- Release v3.0.0 (tagged locally).
+
 ## Known gaps
 - 1.x Python test cases are not ported yet; they are available at tag v1.0.0. Port them as each Rust codec lands (M1.x, M2.x).
 - cargo-deny passes locally (advisories, bans, licenses, sources); the Tauri tree is allowed through named wrappers (ADR-0005).
@@ -126,6 +134,6 @@ Notes: [python.md](python.md).
 - [~] M2.8 [COMPATIBILITY.md](COMPATIBILITY.md) is generated from the registry by `tools/gen_compat.py`; screenshots of the UI are in `docs/screenshots/`.
 
 ## Next step
-Phase 8: distribution polish.
+Speed work against the budgets (ADR-0015), the packaging channels in M8.4, and the unfinished items listed per phase above.
 
 - **Tables (CSV, TSV, JSON, XLSX, ODS)**: `oc-sheet` reads and writes RFC 4180 delimited text (delimiter detection, lenient quotes, BOM, ragged rows padded), flat JSON tables (own strict parser) and, since Phase 3, XLSX and ODS workbooks (M3.5). Engine options mirror 1.x. Fuzz targets `table` and `workbook`.
