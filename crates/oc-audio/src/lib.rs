@@ -13,6 +13,7 @@
 
 pub mod aiff;
 pub mod alac;
+pub mod ape;
 pub mod caf;
 pub mod copy;
 pub mod dsp;

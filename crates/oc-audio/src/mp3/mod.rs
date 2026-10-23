@@ -83,51 +83,13 @@ fn parse_xing(h: &Header, frame: &[u8]) -> Option<Xing> {
     Some(x)
 }
 
-fn parse_ape(data: &[u8], tags: &mut Tags) {
-    // APEv2 footer: "APETAGEX" 32 bytes at the end (before an optional ID3v1).
-    let end = if data.len() >= 128 && &data[data.len() - 128..data.len() - 125] == b"TAG" {
-        data.len() - 128
-    } else {
-        data.len()
-    };
-    if end < 32 || &data[end - 32..end - 24] != b"APETAGEX" {
-        return;
-    }
-    let f = &data[end - 32..end];
-    let size = u32::from_le_bytes([f[12], f[13], f[14], f[15]]) as usize;
-    let count = u32::from_le_bytes([f[16], f[17], f[18], f[19]]) as usize;
-    if size < 32 || size > end {
-        return;
-    }
-    let mut p = end - size;
-    for _ in 0..count.min(512) {
-        let Some(h) = data.get(p..p + 8) else { return };
-        let vlen = u32::from_le_bytes([h[0], h[1], h[2], h[3]]) as usize;
-        let flags = u32::from_le_bytes([h[4], h[5], h[6], h[7]]);
-        let rest = &data[p + 8..end];
-        let Some(kend) = rest.iter().position(|&c| c == 0) else {
-            return;
-        };
-        let key = String::from_utf8_lossy(&rest[..kend]).into_owned();
-        let Some(val) = rest.get(kend + 1..kend + 1 + vlen) else {
-            return;
-        };
-        p += 8 + kend + 1 + vlen;
-        if flags & 6 == 0 {
-            for part in String::from_utf8_lossy(val).split('\0') {
-                tags.add(&key, part);
-            }
-        }
-    }
-}
-
 pub fn read(data: &[u8], limits: &Limits) -> Result<(Audio, Notes)> {
     let mut notes = Notes::new();
     let mut tags = Tags::default();
     let mut pictures: Vec<Picture> = Vec::new();
     let start = crate::id3::v2_len(data);
     crate::id3::parse_v2(data, &mut tags, &mut pictures);
-    parse_ape(data, &mut tags);
+    crate::ape::parse(data, &mut tags, &mut pictures);
     let v1 = crate::id3::parse_v1(data, &mut tags);
     let end = if v1 { data.len() - 128 } else { data.len() };
 
