@@ -121,73 +121,6 @@ pub fn blend(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn replace_and_add_cover_the_rectangle() {
-        let mut base = vec![1.0f32; 16];
-        let new = vec![2.0f32; 4];
-        let v = View {
-            data: &new,
-            stride: 2,
-        };
-        let r = Rect {
-            bx: 1,
-            by: 1,
-            nx: 0,
-            ny: 0,
-            w: 2,
-            h: 2,
-        };
-        blend(&mut base, 4, &v, r, Mode::Replace, None, None);
-        assert_eq!(base.iter().filter(|&&x| x == 2.0).count(), 4);
-        blend(&mut base, 4, &v, r, Mode::Add, None, None);
-        assert_eq!(base[5], 4.0);
-        assert_eq!(base[0], 1.0);
-    }
-
-    #[test]
-    fn opaque_new_layer_replaces_the_base() {
-        let mut base = vec![0.25f32; 4];
-        let ba = vec![1.0f32; 4];
-        let new = vec![0.75f32; 4];
-        let na = vec![1.0f32; 4];
-        let r = Rect {
-            bx: 0,
-            by: 0,
-            nx: 0,
-            ny: 0,
-            w: 2,
-            h: 2,
-        };
-        blend(
-            &mut base,
-            2,
-            &View {
-                data: &new,
-                stride: 2,
-            },
-            r,
-            Mode::Blend {
-                clamp: false,
-                swapped: false,
-                premultiplied: false,
-            },
-            Some(&View {
-                data: &ba,
-                stride: 2,
-            }),
-            Some(&View {
-                data: &na,
-                stride: 2,
-            }),
-        );
-        assert!(base.iter().all(|&v| (v - 0.75).abs() < 1e-6));
-    }
-}
-
 // ---------------------------------------------------------------------------------------------
 // Frame composition
 
@@ -382,4 +315,71 @@ pub fn compose(
         out.ch.push(plane);
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replace_and_add_cover_the_rectangle() {
+        let mut base = vec![1.0f32; 16];
+        let new = vec![2.0f32; 4];
+        let v = View {
+            data: &new,
+            stride: 2,
+        };
+        let r = Rect {
+            bx: 1,
+            by: 1,
+            nx: 0,
+            ny: 0,
+            w: 2,
+            h: 2,
+        };
+        blend(&mut base, 4, &v, r, Mode::Replace, None, None);
+        assert_eq!(base.iter().filter(|&&x| x == 2.0).count(), 4);
+        blend(&mut base, 4, &v, r, Mode::Add, None, None);
+        assert_eq!(base[5], 4.0);
+        assert_eq!(base[0], 1.0);
+    }
+
+    #[test]
+    fn opaque_new_layer_replaces_the_base() {
+        let mut base = vec![0.25f32; 4];
+        let ba = vec![1.0f32; 4];
+        let new = vec![0.75f32; 4];
+        let na = vec![1.0f32; 4];
+        let r = Rect {
+            bx: 0,
+            by: 0,
+            nx: 0,
+            ny: 0,
+            w: 2,
+            h: 2,
+        };
+        blend(
+            &mut base,
+            2,
+            &View {
+                data: &new,
+                stride: 2,
+            },
+            r,
+            Mode::Blend {
+                clamp: false,
+                swapped: false,
+                premultiplied: false,
+            },
+            Some(&View {
+                data: &ba,
+                stride: 2,
+            }),
+            Some(&View {
+                data: &na,
+                stride: 2,
+            }),
+        );
+        assert!(base.iter().all(|&v| (v - 0.75).abs() < 1e-6));
+    }
 }

@@ -433,3 +433,9 @@ name = "wavpack"
 path = "fuzz_targets/wavpack.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "jxl"
+path = "fuzz_targets/jxl.rs"
+test = false
+doc = false

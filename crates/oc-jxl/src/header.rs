@@ -287,7 +287,9 @@ impl Opsin {
     }
 }
 
+/// Timing fields are parsed to step over them; only `have_timecodes` matters to the decoder.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct Animation {
     pub tps_num: u32,
     pub tps_den: u32,
@@ -486,7 +488,7 @@ impl ImageHeader {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The encoded ICC profile: decoded only far enough to step over it
+// The encoded ICC profile
 
 fn icc_ctx(idx: usize, b1: u8, b2: u8) -> u32 {
     if idx <= 128 {
@@ -511,8 +513,8 @@ fn icc_ctx(idx: usize, b1: u8, b2: u8) -> u32 {
     1 + p1 + 8 * p2
 }
 
-/// Read (and discard) the compressed ICC profile that follows the image header.
-pub fn skip_icc(br: &mut Br) -> Result<()> {
+/// Read the compressed ICC profile that follows the image header and rebuild the profile.
+pub fn read_icc(br: &mut Br) -> Result<Vec<u8>> {
     let size = br.u64()?;
     if size > 1 << 28 {
         return Err(Error::limit("alloc", "JPEG XL: ICC profile is too large"));
@@ -520,6 +522,7 @@ pub fn skip_icc(br: &mut Br) -> Result<()> {
     let mut dec = Decoder::parse(br, 41)?;
     dec.begin(br)?;
     let (mut b1, mut b2) = (0u8, 0u8);
+    let mut bytes = Vec::with_capacity((size as usize).min(1 << 20));
     for idx in 0..size as usize {
         let sym = dec.read(br, icc_ctx(idx, b1, b2))?;
         if sym >= 256 {
@@ -527,8 +530,10 @@ pub fn skip_icc(br: &mut Br) -> Result<()> {
         }
         b2 = b1;
         b1 = sym as u8;
+        bytes.push(b1);
     }
-    dec.finalize()
+    dec.finalize()?;
+    crate::icc::decode(&bytes)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -549,6 +554,7 @@ impl FrameType {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)] // the names are the specification's
 pub enum Blend {
     Replace,
     Add,
@@ -814,7 +820,7 @@ impl FrameHeader {
                         && i64::from(h.y0) + i64::from(h.height) >= i64::from(img.height)))
         };
         let has_ec = !img.ec.is_empty();
-        let mut resets_canvas = true;
+        let resets_canvas;
         if h.frame_type.is_normal() {
             let snapshot = h.clone();
             h.blending = blend_info(br, has_ec, |m| full_canvas(&snapshot, m), None)?;
@@ -872,7 +878,7 @@ impl FrameHeader {
             if iters == 0 {
                 h.epf = None;
             } else {
-                let mut e = h.epf.take().unwrap();
+                let mut e = h.epf.take().ok_or_else(|| bad("missing EPF parameters"))?;
                 e.iters = iters;
                 if !h.modular && br.bool()? {
                     for v in &mut e.sharp_lut {

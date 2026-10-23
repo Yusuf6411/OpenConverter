@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)] // a developer tool: panics are fine here
 //! Decode a JPEG XL file and write the samples as raw interleaved 8/16-bit data.
 use std::io::Write;
 

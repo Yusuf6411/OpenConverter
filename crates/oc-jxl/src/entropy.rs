@@ -98,10 +98,7 @@ impl Prefix {
             }
         }
         // The code must be complete.
-        let mut kraft = 0u32;
-        for len in 1..16 {
-            kraft += u32::from(count[len]) << (15 - len);
-        }
+        let kraft: u32 = (1..16).map(|len| u32::from(count[len]) << (15 - len)).sum();
         if kraft != 1 << 15 {
             return Err(bad("prefix code is not complete"));
         }
@@ -143,8 +140,7 @@ impl Prefix {
         let abits = alphabet_size.next_power_of_two().trailing_zeros();
         let nsym = br.read(2)? + 1;
         let mut syms = [0usize; 4];
-        let lens: [u8; 4];
-        match nsym {
+        let lens: [u8; 4] = match nsym {
             1 => {
                 let s = br.read(abits)?;
                 if s >= alphabet_size {
@@ -155,25 +151,25 @@ impl Prefix {
             2 => {
                 syms[2] = br.read(abits)? as usize;
                 syms[3] = br.read(abits)? as usize;
-                lens = [0, 0, 1, 1];
+                [0, 0, 1, 1]
             }
             3 => {
                 for s in &mut syms[1..] {
                     *s = br.read(abits)? as usize;
                 }
-                lens = [0, 1, 2, 2];
+                [0, 1, 2, 2]
             }
             _ => {
                 for s in &mut syms {
                     *s = br.read(abits)? as usize;
                 }
-                lens = if br.bool()? {
+                if br.bool()? {
                     [1, 2, 3, 3]
                 } else {
                     [2, 2, 2, 2]
-                };
+                }
             }
-        }
+        };
         let mut code_lengths = vec![0u8; alphabet_size as usize];
         let used = match nsym {
             2 => 2,
@@ -879,17 +875,6 @@ impl Decoder {
                 dist[usize::from(cluster)].read(br, state)
             }
         }
-    }
-
-    pub fn single_symbol(&self, cluster: u8) -> Option<u32> {
-        if self.lz77.is_some() {
-            return None;
-        }
-        let s = match &self.code {
-            Code::Prefix(d) => d[usize::from(cluster)].single.map(u32::from),
-            Code::Ans { dist, .. } => dist[usize::from(cluster)].single,
-        }?;
-        (s < self.configs[usize::from(cluster)].split).then_some(s)
     }
 
     pub fn read(&mut self, br: &mut Br, ctx: u32) -> Result<u32> {

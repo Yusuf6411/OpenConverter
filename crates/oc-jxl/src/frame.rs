@@ -25,7 +25,7 @@ impl<'a> Sections<'a> {
             single: None,
         };
         for &(off, size) in &s.toc {
-            if off.checked_add(size).map_or(true, |end| end > s.data.len()) {
+            if off.checked_add(size).is_none_or(|end| end > s.data.len()) {
                 return Err(crate::bits::eof());
             }
         }
@@ -34,10 +34,6 @@ impl<'a> Sections<'a> {
             s.single = Some(Br::new(&s.data[off..off + size]));
         }
         Ok(s)
-    }
-
-    pub fn is_single(&self) -> bool {
-        self.single.is_some()
     }
 
     pub fn open(&mut self, idx: usize) -> Result<Br<'a>> {
@@ -77,7 +73,7 @@ pub struct Decoded {
 }
 
 /// Which stream-relative regions of a channel belong to one group.
-struct Tile {
+pub(crate) struct Tile {
     ci: usize,
     x0: usize,
     y0: usize,
@@ -267,7 +263,8 @@ pub fn decode_frame(
     for (e, &up) in img.ec.iter().zip(&fh.ec_upsampling) {
         let shift = (up.trailing_zeros() + e.dim_shift)
             .checked_sub(fh.upsampling.trailing_zeros())
-            .ok_or_else(|| bad("extra channel is upsampled less than the colour channels"))? as i32;
+            .ok_or_else(|| bad("extra channel is upsampled less than the colour channels"))?
+            as i32;
         infos.push(Chan::info(
             cw.div_ceil(1 << shift),
             ch.div_ceil(1 << shift),

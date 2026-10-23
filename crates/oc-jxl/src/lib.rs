@@ -3,7 +3,15 @@
 //! The format structure follows the specification; `jxl-oxide` (MIT/Apache-2.0) was used as a
 //! reference for details the text leaves open. See `docs/formats/jxl.md` for what is covered.
 #![forbid(unsafe_code)]
-#![allow(clippy::indexing_slicing)] // every index is derived from dimensions validated against the limits
+// Every index is derived from dimensions validated against the limits; the sample loops mirror
+// the specification's formulas.
+#![allow(
+    clippy::indexing_slicing,
+    clippy::needless_range_loop,
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::chunks_exact_to_as_chunks
+)]
 
 mod bits;
 mod colour;
@@ -15,12 +23,13 @@ mod features;
 mod filter;
 mod frame;
 mod header;
+mod icc;
 mod modular;
 mod render;
 mod upsample;
 mod vardct;
 
-use oc_core::{Error, ErrorCode, Limits, Note, Notes, Result, Severity};
+use oc_core::{Error, Limits, Note, Notes, Result, Severity};
 
 pub use render::Picture;
 
@@ -42,7 +51,10 @@ fn codestream(data: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>> {
     let mut out: Vec<u8> = Vec::new();
     let mut found = false;
     while pos + 8 <= data.len() {
-        let size = u32::from_be_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
+        let size = u32::from_be_bytes(
+            <[u8; 4]>::try_from(&data[pos..pos + 4])
+                .map_err(|_| Error::corrupt("JPEG XL box header"))?,
+        ) as usize;
         let kind = &data[pos + 4..pos + 8];
         let (header, len) = match size {
             0 => (8, data.len() - pos),
@@ -52,12 +64,15 @@ fn codestream(data: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>> {
                 }
                 (
                     16,
-                    u64::from_be_bytes(data[pos + 8..pos + 16].try_into().unwrap()) as usize,
+                    u64::from_be_bytes(
+                        <[u8; 8]>::try_from(&data[pos + 8..pos + 16])
+                            .map_err(|_| Error::corrupt("JPEG XL box header"))?,
+                    ) as usize,
                 )
             }
             n => (8, n),
         };
-        if len < header || pos.checked_add(len).map_or(true, |e| e > data.len()) {
+        if len < header || pos.checked_add(len).is_none_or(|e| e > data.len()) {
             return Err(Error::truncated(
                 "JPEG XL box extends past the end of the file",
             ));
@@ -97,14 +112,11 @@ pub fn decode(data: &[u8], limits: &Limits) -> Result<(Picture, Notes)> {
         return Err(Error::limit("max_pixels", "JPEG XL: image is too large"));
     }
     let mut notes = Notes::new();
-    if img.colour.want_icc {
-        header::skip_icc(&mut br)?;
-        notes.push(Note::new(
-            Severity::Warning,
-            "icc_not_decoded",
-            "the embedded ICC profile of the JPEG XL file is not carried over; colours are taken as sRGB",
-        ));
-    }
+    let icc = if img.colour.want_icc {
+        Some(header::read_icc(&mut br)?)
+    } else {
+        None
+    };
     br.align();
     let mut pos = br.bits_read() / 8;
     if img.preview.is_some() {
@@ -141,7 +153,11 @@ pub fn decode(data: &[u8], limits: &Limits) -> Result<(Picture, Notes)> {
         }
         if let Some(n) = noise {
             // We stop at the first keyframe, so no visible frame precedes this one.
-            let (visible, invisible) = if fh.is_keyframe() { (1, 0) } else { (0, 1 + this_idx) };
+            let (visible, invisible) = if fh.is_keyframe() {
+                (1, 0)
+            } else {
+                (0, 1 + this_idx)
+            };
             features::add_noise(&mut planes, &fh, &n, visible, invisible);
         }
         let slot = fh.save_as_reference as usize;
@@ -167,7 +183,12 @@ pub fn decode(data: &[u8], limits: &Limits) -> Result<(Picture, Notes)> {
             slots[slot] = Some(std::rc::Rc::new(canvas.clone()));
         }
         if fh.is_keyframe() {
-            let pic = render::finish(canvas, &img, &mut notes)?;
+            let mut pic = render::finish(canvas, &img, &mut notes)?;
+            // Samples of a profile-described image that was stored without the XYB transform
+            // are still in the profile's space; hand the profile on with them.
+            if !img.xyb_encoded {
+                pic.icc = icc;
+            }
             return Ok((pic, notes));
         }
     }

@@ -107,7 +107,7 @@ Format notes: [formats/documents.md](formats/documents.md). Oracles used at test
 Format notes: [formats/legacy.md](formats/legacy.md). Oracles: Python sqlite3 (`integrity_check`), LibreOffice (wrote the .doc, .ppt and .xls test files).
 - [~] M6.20 SQLite database files read and written as tables (own B-tree reader and writer: overflow pages, varints, 4096-byte pages; every table becomes a sheet). Not done: indexes, views, triggers, WAL files, encrypted databases.
 - [~] M6.21 compound-file (MS-CFB) reader in `oc-archive`; legacy XLS (BIFF8: shared strings across CONTINUE records, dates, numbers, formulas as cached values), DOC (piece table text, fields as links, tables, page breaks, title and author) and PPT (slide text) read-only. Not done: writing these formats, BIFF5, password-protected files (reported as encrypted), pictures, styles.
-- [ ] M6.22 JPEG XL, camera RAW (DNG), WavPack, APE, ProRes, Theora decoding, Brotli encoding and WOFF2 writing: Brotli, WOFF2, DNG and Theora were done in v3.0.1/v3.0.2; JPEG XL, WavPack, APE and ProRes are not (ADR-0013).
+- [ ] M6.22 JPEG XL, camera RAW (DNG), WavPack, APE, ProRes, Theora decoding, Brotli encoding and WOFF2 writing: Brotli, WOFF2, DNG and Theora were done in v3.0.1/v3.0.2; ProRes, VP9, WavPack and JPEG XL followed later (see Post-3.0.0); APE is not (ADR-0013).
 - Fuzz targets `sqlite`, `xls`, `doc`, `ppt`; `crates/oc-engine/tests/legacy_office.rs` damages LibreOffice-made files; `crates/oc-sheet/tests/sqlite.rs` round-trips 300 tables.
 - Release v2.7.0 (tagged locally).
 
@@ -147,4 +147,5 @@ Speed work against the budgets (ADR-0015), the packaging channels in M8.4, and t
 - Theora decoding (`oc-theora`, [formats/theora.md](formats/theora.md)), bit-exact with ffmpeg on nine libtheora streams, and Ogg video reading.
 - VP9 decoding (`oc-vp9`, [formats/vp9.md](formats/vp9.md)), written from the specification and bit-exact with libvpx on 14 streams (tiles, scaled references, 4:4:4, 10-bit, lossless).
 - WavPack decoding (`oc-audio::wavpack`, [formats/wavpack.md](formats/wavpack.md)), matching ffmpeg on 14 files; read only; hybrid blocks untested.
-- Not done: JPEG XL, other camera raw formats, APE (ADR-0013); the encumbered build (ADR-0010).
+- JPEG XL decoding (`oc-jxl`, [formats/jxl.md](formats/jxl.md)): lossless and lossy, JPEG recompression, patches, upsampling, noise, progressive DC, float samples and ICC profiles, checked against libjxl's `cjxl` and `djxl`; read only; splines are not supported.
+- Not done: other camera raw formats, APE, AV1 (ADR-0013); the encumbered build (ADR-0010).

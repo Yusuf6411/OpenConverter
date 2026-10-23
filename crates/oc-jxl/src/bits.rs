@@ -128,11 +128,6 @@ impl<'a> Br<'a> {
     pub fn align(&mut self) {
         self.pos = self.pos.div_ceil(8) * 8;
     }
-
-    /// Skip to a byte boundary and return the unread bytes.
-    pub fn rest(&self) -> &'a [u8] {
-        self.data.get(self.pos.div_ceil(8)..).unwrap_or_default()
-    }
 }
 
 /// `UnpackSigned`: 0, 1, 2, 3, ... map to 0, -1, 1, -2, ...

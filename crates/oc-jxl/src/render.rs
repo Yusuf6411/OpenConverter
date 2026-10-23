@@ -24,6 +24,8 @@ pub struct Picture {
     pub channels: usize,
     pub sixteen: bool,
     pub samples: Vec<u16>,
+    /// The ICC profile the samples are in, when they are not sRGB.
+    pub icc: Option<Vec<u8>>,
 }
 
 /// The planes of a decoded frame at the frame's size.
@@ -85,8 +87,15 @@ pub fn frame_planes(dec: Decoded, img: &ImageHeader) -> Result<Planes> {
     // Each channel is stored at its own scale; bring them all to the frame's size.
     let mut sizes = vec![(w, h, color_log); ch.len()];
     for (i, e) in img.ec.iter().enumerate() {
-        let c = dec.chans.get(ec_base + i).ok_or_else(|| unsupported("missing extra channel"))?;
-        ch.push(c.d.iter().map(|&v| sample_to_float(v, &e.bit_depth)).collect());
+        let c = dec
+            .chans
+            .get(ec_base + i)
+            .ok_or_else(|| unsupported("missing extra channel"))?;
+        ch.push(
+            c.d.iter()
+                .map(|&v| sample_to_float(v, &e.bit_depth))
+                .collect(),
+        );
         let log = fh.ec_upsampling.get(i).map_or(0, |u| u.trailing_zeros()) + e.dim_shift;
         sizes.push((c.w, c.h, log));
     }
@@ -108,7 +117,13 @@ pub fn frame_planes(dec: Decoded, img: &ImageHeader) -> Result<Planes> {
             cropped
         };
     }
-    Ok(Planes { w: fw, h: fhh, ch, colour, xyb })
+    Ok(Planes {
+        w: fw,
+        h: fhh,
+        ch,
+        colour,
+        xyb,
+    })
 }
 
 /// A decoded Modular sample as a float, nominally in 0..=1: integers are scaled by the bit
@@ -119,12 +134,20 @@ fn sample_to_float(v: i32, bd: &BitDepth) -> f32 {
     };
     let bits = v as u32;
     let mant_bits = bd.bits - exp_bits - 1;
-    let sign = if bd.bits >= 32 { bits >> 31 } else { (bits >> (bd.bits - 1)) & 1 };
+    let sign = if bd.bits >= 32 {
+        bits >> 31
+    } else {
+        (bits >> (bd.bits - 1)) & 1
+    };
     let exp = (bits >> mant_bits) & ((1 << exp_bits) - 1);
     let mant = bits & ((1 << mant_bits) - 1);
     let bias = (1i32 << (exp_bits - 1)) - 1;
     let frac = mant as f32 / (1u64 << mant_bits) as f32;
-    let mag = if exp == 0 { frac * 2f32.powi(1 - bias) } else { (1.0 + frac) * 2f32.powi(exp as i32 - bias) };
+    let mag = if exp == 0 {
+        frac * 2f32.powi(1 - bias)
+    } else {
+        (1.0 + frac) * 2f32.powi(exp as i32 - bias)
+    };
     if sign != 0 {
         -mag
     } else {
@@ -224,6 +247,7 @@ pub fn finish(canvas: Planes, img: &ImageHeader, notes: &mut Notes) -> Result<Pi
         channels,
         sixteen,
         samples,
+        icc: None,
     })
 }
 

@@ -24,8 +24,7 @@ pub fn decode(data: &[u8], limits: &Limits) -> Result<(Image, Notes)> {
             bytes.push(v as u8);
         }
     }
-    Ok((
-        Image::new(pic.width, pic.height, layout, depth, bytes)?,
-        notes,
-    ))
+    let mut image = Image::new(pic.width, pic.height, layout, depth, bytes)?;
+    image.metadata.icc_profile = pic.icc;
+    Ok((image, notes))
 }
