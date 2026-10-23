@@ -14,6 +14,7 @@ pub mod bmp;
 pub mod ccitt;
 mod ccitt_tables;
 pub mod dds;
+pub mod dng;
 pub mod exr;
 pub mod gif;
 pub mod hdr;

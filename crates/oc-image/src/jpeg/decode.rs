@@ -631,6 +631,47 @@ pub fn decode(data: &[u8], limits: &Limits, progress: &dyn Progress) -> Result<(
     decode_with(data, None, limits, progress)
 }
 
+/// The samples of a lossless JPEG stream as they were coded, for raw camera files: the sample
+/// of component `c` at (`x`, `y`) is `samples[(y * width + x) * components + c]`.
+pub struct RawSamples {
+    pub width: usize,
+    pub height: usize,
+    pub components: usize,
+    pub precision: u32,
+    pub samples: Vec<u16>,
+}
+
+pub fn decode_lossless_samples(
+    data: &[u8],
+    limits: &Limits,
+    progress: &dyn Progress,
+) -> Result<RawSamples> {
+    let p = parse_stream(data, None, limits, progress)?;
+    let f = &p.frame;
+    if !f.lossless {
+        return Err(unsupported("anything but lossless coding here"));
+    }
+    if p.starved {
+        return Err(Error::truncated("JPEG image data"));
+    }
+    let n = f.comps.len();
+    let mut samples = vec![0u16; f.width * f.height * n];
+    for (c, comp) in f.comps.iter().enumerate() {
+        for (i, &v) in comp.samples.iter().take(f.width * f.height).enumerate() {
+            if let Some(o) = samples.get_mut(i * n + c) {
+                *o = v;
+            }
+        }
+    }
+    Ok(RawSamples {
+        width: f.width,
+        height: f.height,
+        components: n,
+        precision: f.precision,
+        samples,
+    })
+}
+
 /// A JPEG stream from inside a TIFF (compression 7): the tables may live in the file's
 /// `JPEGTables` tag, and the TIFF's photometric tag, not the stream, says whether three
 /// components are RGB (`rgb_direct`) or YCbCr.

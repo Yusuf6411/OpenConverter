@@ -11,8 +11,8 @@ use oc_core::{
 };
 use oc_image::anim::{self, Animation};
 use oc_image::{
-    bmp, dds, exr, gif, hdr, icc, icns, ico, jpeg, netpbm, ops, png, psd, qoi, tga, tiff, webp,
-    Image,
+    bmp, dds, dng, exr, gif, hdr, icc, icns, ico, jpeg, netpbm, ops, png, psd, qoi, tga, tiff,
+    webp, Image,
 };
 
 pub const PNG: FormatId = FormatId("png");
@@ -30,11 +30,13 @@ pub const HDR: FormatId = FormatId("hdr");
 pub const EXR: FormatId = FormatId("exr");
 pub const TIFF: FormatId = FormatId("tiff");
 pub const WEBP: FormatId = FormatId("webp");
+/// Camera raw (Adobe DNG); read only.
+pub const DNG: FormatId = FormatId("dng");
 /// Internal hub; never shown to users.
 pub const IMAGE_IR: FormatId = FormatId("image-ir");
 
-pub const FORMATS: [FormatId; 15] = [
-    PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, DDS, PSD, HDR, EXR, TIFF, WEBP,
+pub const FORMATS: [FormatId; 16] = [
+    PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, DDS, PSD, HDR, EXR, TIFF, WEBP, DNG,
 ];
 
 pub fn is_image(id: FormatId) -> bool {
@@ -595,6 +597,16 @@ pub fn register(registry: &mut Registry) {
             "GIF 89a",
         ),
         describe(
+            DNG,
+            "DNG",
+            &["dng"],
+            &["image/x-adobe-dng"],
+            Vec::new(),
+            false,
+            schema(Vec::new()),
+            "Adobe DNG 1.7 (read only: the sensor data is developed to RGB)",
+        ),
+        describe(
             PNM,
             "Netpbm",
             &["pnm", "pbm", "pgm", "ppm", "pam"],
@@ -611,8 +623,12 @@ pub fn register(registry: &mut Registry) {
             "Netpbm P1-P7",
         ),
     ];
-    for f in formats {
+    for mut f in formats {
         let (id, name) = (f.id, f.name);
+        if id == DNG {
+            f.capabilities.write = false;
+            f.capabilities.alpha = false;
+        }
         registry.add_format(f);
         registry.add_edge(Edge {
             from: id,
@@ -623,6 +639,9 @@ pub fn register(registry: &mut Registry) {
             time: 2,
             description: decode_description(name),
         });
+        if id == DNG {
+            continue;
+        }
         registry.add_edge(Edge {
             from: IMAGE_IR,
             to: id,
@@ -646,6 +665,7 @@ fn decode_description(name: &str) -> &'static str {
         "GIF" => "Decode GIF",
         "JPEG" => "Decode JPEG",
         "TIFF" => "Decode TIFF",
+        "DNG" => "Develop DNG raw data",
         "WebP" => "Decode WebP",
         "ICO / CUR" => "Decode ICO",
         "ICNS" => "Decode ICNS",
@@ -691,6 +711,7 @@ pub fn decode(
         GIF => gif::decode(data, limits),
         JPEG => jpeg::decode(data, limits, progress),
         TIFF => tiff::decode(data, limits, progress),
+        DNG => dng::decode(data, limits, progress),
         WEBP => webp::decode(data, limits, progress),
         ICO => ico::decode(data, limits, progress),
         ICNS => icns::decode(data, limits, progress),
@@ -1078,6 +1099,12 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
                 },
             },
         ),
+        DNG => {
+            return Err(Error::new(
+                ErrorCode::UnsupportedFormat,
+                "DNG can be read but not written",
+            ))
+        }
         other => {
             return Err(Error::new(
                 ErrorCode::UnsupportedFormat,

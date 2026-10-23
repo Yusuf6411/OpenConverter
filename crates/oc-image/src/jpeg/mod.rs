@@ -7,6 +7,6 @@ mod tables;
 mod transform;
 mod trellis;
 
-pub use decode::{decode, decode_tiff, sniff};
+pub use decode::{decode, decode_lossless_samples, decode_tiff, sniff, RawSamples};
 pub use encode::{encode, EncodeOptions, Subsampling};
 pub use transform::{apply as transform, Op, Transform};

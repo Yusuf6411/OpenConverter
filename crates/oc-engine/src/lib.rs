@@ -1199,12 +1199,17 @@ impl Engine {
 
     /// Identify an image by its leading bytes among the registered image formats.
     fn detect_image(&self, data: &[u8]) -> Option<FormatId> {
-        image::FORMATS
+        let best = image::FORMATS
             .into_iter()
             .filter_map(|id| self.registry.format(id))
             .filter_map(|f| f.sniff(data).map(|c| (c, f.id)))
             .max_by_key(|(c, _)| *c)
-            .map(|(_, id)| id)
+            .map(|(_, id)| id);
+        // A DNG is a TIFF whose first directory carries a DNGVersion tag.
+        if best == Some(image::TIFF) && oc_image::dng::sniff(data) {
+            return Some(image::DNG);
+        }
+        best
     }
 }
 
