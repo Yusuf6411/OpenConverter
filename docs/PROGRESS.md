@@ -146,4 +146,5 @@ Speed work against the budgets (ADR-0015), the packaging channels in M8.4, and t
 - ProRes decoding (`oc-prores`, [formats/prores.md](formats/prores.md)), matching ffmpeg within one level on 4:2:2, 4:4:4, alpha and interlaced frames.
 - Theora decoding (`oc-theora`, [formats/theora.md](formats/theora.md)), bit-exact with ffmpeg on nine libtheora streams, and Ogg video reading.
 - VP9 decoding (`oc-vp9`, [formats/vp9.md](formats/vp9.md)), written from the specification and bit-exact with libvpx on 14 streams (tiles, scaled references, 4:4:4, 10-bit, lossless).
-- Not done: JPEG XL, other camera raw formats, WavPack, APE (ADR-0013); the encumbered build (ADR-0010).
+- WavPack decoding (`oc-audio::wavpack`, [formats/wavpack.md](formats/wavpack.md)), matching ffmpeg on 14 files; read only; hybrid blocks untested.
+- Not done: JPEG XL, other camera raw formats, APE (ADR-0013); the encumbered build (ADR-0010).

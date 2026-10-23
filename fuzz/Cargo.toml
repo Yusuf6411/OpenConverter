@@ -427,3 +427,9 @@ name = "vp9"
 path = "fuzz_targets/vp9.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "wavpack"
+path = "fuzz_targets/wavpack.rs"
+test = false
+doc = false

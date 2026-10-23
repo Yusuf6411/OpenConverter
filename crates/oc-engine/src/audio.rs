@@ -3,7 +3,7 @@
 //! Like images, every audio format connects to a hub (`audio-ir`), so a conversion is always
 //! "decode X, process, encode Y".
 use oc_audio::dsp::{self, Dither, Quality};
-use oc_audio::{aiff, caf, flac, m4a, mka, mp3, opus, vorbis, wav, Audio, Samples};
+use oc_audio::{aiff, caf, flac, m4a, mka, mp3, opus, vorbis, wav, wavpack, Audio, Samples};
 use oc_core::options::{OptionKind, OptionSchema, OptionSpec, Options};
 use oc_core::planner::{Edge, EdgeKind, Registry};
 use oc_core::{
@@ -21,9 +21,15 @@ pub const M4A: FormatId = FormatId("m4a");
 pub const OPUS: FormatId = FormatId("opus");
 pub const MKA: FormatId = FormatId("mka");
 pub const WEBA: FormatId = FormatId("weba");
+pub const WV: FormatId = FormatId("wv");
 pub const AUDIO_IR: FormatId = FormatId("audio-ir");
 
-pub const FORMATS: [FormatId; 10] = [WAV, AIFF, CAF, FLAC, OGG, MP3, M4A, OPUS, MKA, WEBA];
+pub const FORMATS: [FormatId; 11] = [WAV, AIFF, CAF, FLAC, OGG, MP3, M4A, OPUS, MKA, WEBA, WV];
+
+/// Formats that are only read: there is no WavPack encoder.
+pub fn read_only(id: FormatId) -> bool {
+    id == WV
+}
 
 pub fn is_audio(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -558,6 +564,19 @@ pub fn register(registry: &mut Registry) {
             "RFC 8794 (EBML), RFC 9559 (Matroska)",
         ),
         (
+            WV,
+            "WavPack",
+            &["wv"],
+            &["audio/x-wavpack"],
+            vec![Sniffer {
+                offset: 0,
+                magic: b"wvpk",
+                confidence: 100,
+            }],
+            schema(vec![]),
+            "WavPack 4 and 5 block format (read only: lossless and hybrid lossy integer audio)",
+        ),
+        (
             WEBA,
             "WebM Audio",
             &["weba"],
@@ -581,7 +600,7 @@ pub fn register(registry: &mut Registry) {
             sniffers,
             capabilities: Capabilities {
                 read: true,
-                write: true,
+                write: !read_only(id),
                 metadata: true,
                 streams: true,
                 ..Capabilities::default()
@@ -600,6 +619,9 @@ pub fn register(registry: &mut Registry) {
             time: 2,
             description: "Decode audio",
         });
+        if read_only(id) {
+            continue;
+        }
         registry.add_edge(Edge {
             from: AUDIO_IR,
             to: id,
@@ -623,6 +645,7 @@ pub fn decode(fmt: FormatId, data: &[u8], limits: &Limits) -> Result<(Audio, Not
         f if f == M4A => m4a::read(data, limits),
         f if f == OPUS => opus::read(data, limits),
         f if f == MKA || f == WEBA => mka::read(data, limits),
+        f if f == WV => wavpack::read(data, limits),
         _ => Err(Error::new(
             ErrorCode::UnsupportedFormat,
             "no audio decoder for this format",

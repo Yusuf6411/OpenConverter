@@ -12,7 +12,7 @@ Camera raw: [raw](raw.md).
 
 Video: [containers](containers.md), [VP8](vp8.md), [VP9](vp9.md), [Theora](theora.md).
 
-Audio: [wav-aiff-caf](wav-aiff-caf.md), [flac](flac.md), [mp3](mp3.md), [vorbis](vorbis.md), [opus](opus.md), [alac](alac.md), [matroska](matroska.md), [tags](tags.md).
+Audio: [wav-aiff-caf](wav-aiff-caf.md), [flac](flac.md), [mp3](mp3.md), [vorbis](vorbis.md), [opus](opus.md), [alac](alac.md), [WavPack](wavpack.md), [matroska](matroska.md), [tags](tags.md).
 
 Documents: [documents](documents.md).
 

@@ -406,6 +406,9 @@ pub fn register(registry: &mut Registry) {
             });
         }
         for aud in crate::audio::FORMATS {
+            if crate::audio::read_only(aud) {
+                continue;
+            }
             registry.add_edge(Edge {
                 from: id,
                 to: aud,

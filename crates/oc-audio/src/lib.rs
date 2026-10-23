@@ -27,6 +27,7 @@ pub mod opus;
 pub mod tags;
 pub mod vorbis;
 pub mod wav;
+pub mod wavpack;
 
 pub use tags::{Picture, Tags};
 
