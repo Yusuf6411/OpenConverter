@@ -19,7 +19,7 @@ pub fn can_encode(c: &str) -> bool {
 pub enum Decoder {
     Mjpeg(Limits),
     Raw { pix: String, w: usize, h: usize },
-    Vp8(crate::vp8::Vp8Decoder),
+    Vp8(Box<crate::vp8::Vp8Decoder>),
 }
 
 impl Decoder {
@@ -30,7 +30,7 @@ impl Decoder {
         match s.codec.as_str() {
             codec::MJPEG => Ok(Self::Mjpeg(limits.clone())),
             codec::RAW => Ok(Self::Raw { pix: s.pix_fmt.clone(), w: s.width as usize, h: s.height as usize }),
-            codec::VP8 => Ok(Self::Vp8(crate::vp8::Vp8Decoder::new(limits.clone()))),
+            codec::VP8 => Ok(Self::Vp8(Box::new(crate::vp8::Vp8Decoder::new(limits.clone())))),
             other => Err(Error::new(
                 ErrorCode::CodecNotInBuild,
                 format!("{other} video cannot be decoded in this build; it can be copied between containers"),

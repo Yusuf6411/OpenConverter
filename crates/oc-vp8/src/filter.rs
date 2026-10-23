@@ -40,25 +40,71 @@ pub fn strengths(
                     lv += mode;
                 }
             }
-            let lv = lv.clamp(0, 63);
-            if lv > 0 {
-                let mut il = lv;
-                if sharpness > 0 {
-                    il >>= if sharpness > 4 { 2 } else { 1 };
-                    il = il.min(9 - sharpness);
-                }
-                let il = il.max(1);
-                info.ilevel = il as u8;
-                info.limit = (2 * lv + il) as u8;
-                info.hev_thresh = if lv >= 40 {
-                    2
-                } else if lv >= 15 {
-                    1
-                } else {
-                    0
-                };
-            }
+            *info = level_info(lv, sharpness, true);
             info.inner = i4 == 1;
+        }
+    }
+    out
+}
+
+/// Limits for one filter level (0 disables filtering).
+pub fn level_info(level: i32, sharpness: i32, key: bool) -> FilterInfo {
+    let lv = level.clamp(0, 63);
+    let mut info = FilterInfo::default();
+    if lv > 0 {
+        let mut il = lv;
+        if sharpness > 0 {
+            il >>= if sharpness > 4 { 2 } else { 1 };
+            il = il.min(9 - sharpness);
+        }
+        let il = il.max(1);
+        info.ilevel = il as u8;
+        info.limit = (2 * lv + il) as u8;
+        info.hev_thresh = match (key, lv) {
+            (true, 40..) => 2,
+            (true, 15..) => 1,
+            (false, 40..) => 3,
+            (false, 20..) => 2,
+            (false, 15..) => 1,
+            _ => 0,
+        };
+    }
+    info
+}
+
+/// Filter parameters for inter frames, indexed `[segment][reference frame][mode class]` where
+/// the mode class is 0 for B_PRED, 1 for the other intra modes and ZEROMV, 2 for the
+/// whole-block vector modes and 3 for SPLITMV.
+pub fn inter_strengths(
+    key: bool,
+    level: i32,
+    sharpness: i32,
+    segments: Option<(&[i32; 4], bool)>,
+    deltas: Option<(&[i32; 4], &[i32; 4])>,
+) -> [[[FilterInfo; 4]; 4]; 4] {
+    let mut out = [[[FilterInfo::default(); 4]; 4]; 4];
+    for s in 0..4 {
+        let base = match segments {
+            Some((strength, absolute)) => strength[s] + if absolute { 0 } else { level },
+            None => level,
+        }
+        .clamp(0, 63);
+        for r in 0..4 {
+            for m in 0..4 {
+                let mut lv = base;
+                if let Some((rd, md)) = deltas {
+                    lv += rd[r];
+                    if r == 0 {
+                        // Intra: only B_PRED takes a mode delta.
+                        if m == 0 {
+                            lv += md[0];
+                        }
+                    } else {
+                        lv += md[m];
+                    }
+                }
+                out[s][r][m] = level_info(lv, sharpness, key);
+            }
         }
     }
     out

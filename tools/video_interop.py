@@ -175,5 +175,23 @@ for ext in ("gif", "webp"):
         n = sh("ffprobe", "-v", "error", "-count_frames", "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", T("anim_b.gif"))
         check("webm -> gif 15 frames", n.stdout.strip() == "15", n.stdout)
 
+# VP8 inter-frame decoding: our pictures must equal ffmpeg's for libvpx streams.
+def yuv_md5(path):
+    r = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-pix_fmt", "yuv420p", "-f", "md5", "-"], capture_output=True, text=True)
+    return r.stdout.strip()
+
+vp8_cases = {
+    "plain": ["-f", "lavfi", "-i", "testsrc2=size=176x144:rate=25:duration=2", "-c:v", "libvpx", "-b:v", "400k", "-g", "30"],
+    "altref": ["-f", "lavfi", "-i", "testsrc2=size=176x144:rate=25:duration=2", "-c:v", "libvpx", "-b:v", "300k", "-g", "50", "-auto-alt-ref", "1", "-lag-in-frames", "16"],
+    "odd30": ["-f", "lavfi", "-i", "mandelbrot=size=203x117:rate=30", "-t", "2", "-c:v", "libvpx", "-b:v", "500k", "-threads", "4"],
+    "rt": ["-f", "lavfi", "-i", "mandelbrot=size=320x240:rate=30", "-t", "2", "-c:v", "libvpx", "-deadline", "realtime", "-cpu-used", "6", "-b:v", "120k"],
+    "prof3": ["-f", "lavfi", "-i", "testsrc2=size=176x144:rate=25:duration=1", "-c:v", "libvpx", "-profile:v", "3", "-b:v", "300k"],
+    "errres": ["-f", "lavfi", "-i", "mandelbrot=size=203x117:rate=25", "-t", "2", "-c:v", "libvpx", "-b:v", "400k", "-error-resilient", "1"],
+}
+for name, args in vp8_cases.items():
+    ff(*args, T(f"vp8_{name}.webm"))
+    if oc(T(f"vp8_{name}.webm"), T(f"vp8_{name}.y4m")):
+        check(f"vp8 {name} decodes like ffmpeg", yuv_md5(T(f"vp8_{name}.y4m")) == yuv_md5(T(f"vp8_{name}.webm")))
+
 print(f"{total - fails}/{total} checks passed")
 sys.exit(1 if fails else 0)

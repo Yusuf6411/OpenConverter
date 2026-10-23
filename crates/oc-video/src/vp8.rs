@@ -1,4 +1,4 @@
-//! VP8 video: key frames today, inter frames next.
+//! VP8 video.
 use crate::frames::EncodeParams;
 use crate::pic::Picture;
 use crate::{corrupt, Res};
@@ -6,15 +6,21 @@ use oc_core::{Limits, NoProgress};
 
 pub struct Vp8Decoder {
     _limits: Limits,
+    inner: oc_vp8::Decoder,
 }
 
 impl Vp8Decoder {
     pub fn new(limits: Limits) -> Self {
-        Self { _limits: limits }
+        Self {
+            _limits: limits,
+            inner: oc_vp8::Decoder::new(),
+        }
     }
 
     pub fn decode(&mut self, data: &[u8]) -> Res<Option<Picture>> {
-        let f = oc_vp8::decode(data, &NoProgress)?;
+        let Some(f) = self.inner.decode(data, &NoProgress)? else {
+            return Ok(None);
+        };
         let cw = f.chroma_width();
         if f.u.len() != cw * f.chroma_height() {
             return Err(corrupt("VP8 chroma plane has the wrong size"));

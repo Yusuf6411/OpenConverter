@@ -214,6 +214,25 @@ pub(crate) fn div_round(a: i128, b: i128) -> i64 {
 
 /// A frame rate from a per-frame duration in nanoseconds, snapped to the usual broadcast rates.
 pub fn fps_from_ns(frame_ns: i64) -> Option<(u32, u32)> {
+    fps_from_ns_tol(frame_ns, 0.0008)
+}
+
+/// Frame rate from presentation times: the average spacing, snapped to a standard rate when
+/// it agrees within the rounding of millisecond timestamps.
+pub fn estimate_fps(pts: &[i64]) -> Option<(u32, u32)> {
+    let mut v: Vec<i64> = pts.to_vec();
+    v.sort_unstable();
+    v.dedup();
+    let gaps = v.len().checked_sub(1).filter(|g| *g > 0)? as i64;
+    let span = v.last()? - v.first()?;
+    if span <= 0 {
+        return None;
+    }
+    let tol = (1.0e6 / span as f64).max(0.0008);
+    fps_from_ns_tol(span / gaps, tol)
+}
+
+fn fps_from_ns_tol(frame_ns: i64, tol: f64) -> Option<(u32, u32)> {
     if frame_ns <= 0 {
         return None;
     }
@@ -231,7 +250,7 @@ pub fn fps_from_ns(frame_ns: i64) -> Option<(u32, u32)> {
         (60, 1),
         (120, 1),
     ] {
-        if (fps / (f64::from(n) / f64::from(d)) - 1.0).abs() < 0.0008 {
+        if (fps / (f64::from(n) / f64::from(d)) - 1.0).abs() < tol {
             return Some((n, d));
         }
     }

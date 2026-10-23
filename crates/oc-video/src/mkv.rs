@@ -1,6 +1,7 @@
 //! Matroska and WebM as [`Media`].
 use crate::{
-    assign_dts, codec, fps_from_ns, frame_ns, unsupported, Kind, Media, Packet, Res, Stream,
+    assign_dts, codec, estimate_fps, fps_from_ns, frame_ns, unsupported, Kind, Media, Packet, Res,
+    Stream,
 };
 use oc_container::matroska::{
     self, AudioInfo, Matroska, Track, TrackKind, VideoInfo, WriteOptions,
@@ -172,16 +173,8 @@ pub fn read(data: &[u8], limits: &Limits) -> Res<Media> {
     for si in 0..media.streams.len() {
         if media.streams[si].kind == Kind::Video && media.streams[si].fps.is_none() {
             // No DefaultDuration: estimate from the spacing of presentation times.
-            let mut pts: Vec<i64> = media.packets_of(si).map(|p| p.pts).collect();
-            pts.sort_unstable();
-            let gaps: Vec<i64> = pts
-                .windows(2)
-                .map(|w| w[1] - w[0])
-                .filter(|g| *g > 0)
-                .collect();
-            if let Some(&g) = gaps.iter().min() {
-                media.streams[si].fps = fps_from_ns(g);
-            }
+            let pts: Vec<i64> = media.packets_of(si).map(|p| p.pts).collect();
+            media.streams[si].fps = estimate_fps(&pts);
         }
     }
     media.fill_durations();

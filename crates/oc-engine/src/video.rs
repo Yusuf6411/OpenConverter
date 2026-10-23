@@ -768,12 +768,14 @@ fn run_pipeline(
             return Ok(());
         }
         match per {
+            // A frame owns the grid points nearest to it, so millisecond-rounded timestamps
+            // do not duplicate or drop frames.
             Some(per) => loop {
                 let t = ed.start_ns + next_k * per;
-                if t >= hi {
+                if t >= hi - per / 2 {
                     break Ok(());
                 }
-                if t >= lo {
+                if t >= lo - per / 2 {
                     sink(next_k * per, per, pic)?;
                 }
                 next_k += 1;

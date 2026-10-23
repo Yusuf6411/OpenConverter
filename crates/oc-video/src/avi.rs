@@ -1,6 +1,6 @@
 //! AVI (RIFF): Motion JPEG, MPEG-4 part 2 and VP8 video; PCM, MP3 and AC-3 audio.
 use crate::{
-    codec, div_round, fps_from_ns, frame_ns, unsupported, Kind, Media, Packet, Res, Stream,
+    codec, div_round, estimate_fps, frame_ns, unsupported, Kind, Media, Packet, Res, Stream,
 };
 use oc_core::{Error, ErrorCode, Limits};
 
@@ -362,13 +362,8 @@ pub fn write(media: &Media) -> Res<Vec<u8>> {
         match s.kind {
             Kind::Video => {
                 let fps = s.fps.or_else(|| {
-                    let mut pts: Vec<i64> = pkts.iter().map(|p| p.pts).collect();
-                    pts.sort_unstable();
-                    pts.windows(2)
-                        .map(|x| x[1] - x[0])
-                        .filter(|g| *g > 0)
-                        .min()
-                        .and_then(fps_from_ns)
+                    let pts: Vec<i64> = pkts.iter().map(|p| p.pts).collect();
+                    estimate_fps(&pts)
                 });
                 let (rate, scale) = fps.unwrap_or((25, 1));
                 usec = (frame_ns((rate, scale)) / 1000) as u32;
@@ -518,13 +513,8 @@ pub fn write(media: &Media) -> Res<Vec<u8>> {
             continue;
         }
         let fps = s.fps.or_else(|| {
-            let mut pts: Vec<i64> = pkts.iter().map(|p| p.pts).collect();
-            pts.sort_unstable();
-            pts.windows(2)
-                .map(|x| x[1] - x[0])
-                .filter(|g| *g > 0)
-                .min()
-                .and_then(fps_from_ns)
+            let pts: Vec<i64> = pkts.iter().map(|p| p.pts).collect();
+            estimate_fps(&pts)
         });
         let per = frame_ns(fps.unwrap_or((25, 1)));
         let (slots, count) = slots_of(&pkts, fps);
