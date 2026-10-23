@@ -19,6 +19,7 @@ oc-vp8 = { path = "../crates/oc-vp8" }
 oc-sheet = { path = "../crates/oc-sheet" }
 oc-archive = { path = "../crates/oc-archive" }
 oc-audio = { path = "../crates/oc-audio" }
+oc-subtitle = { path = "../crates/oc-subtitle" }
 oc-container = { path = "../crates/oc-container" }
 
 # Not part of the main workspace: fuzzing needs a nightly toolchain.
@@ -285,5 +286,11 @@ doc = false
 [[bin]]
 name = "audio_wav_aiff"
 path = "fuzz_targets/audio_wav_aiff.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "subtitle"
+path = "fuzz_targets/subtitle.rs"
 test = false
 doc = false

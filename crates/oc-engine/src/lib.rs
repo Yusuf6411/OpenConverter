@@ -9,6 +9,7 @@ pub mod archive;
 pub mod audio;
 pub mod image;
 pub mod isolated;
+pub mod subtitle;
 pub mod table;
 
 use oc_core::options::{OptionKind, OptionSchema, OptionSpec, OptionValue, Options};
@@ -134,10 +135,12 @@ impl Engine {
         });
         image::register(&mut registry);
         audio::register(&mut registry);
+        subtitle::register(&mut registry);
         table::register(&mut registry);
         let packable: Vec<FormatId> = std::iter::once(TXT)
             .chain(image::FORMATS)
             .chain(audio::FORMATS)
+            .chain(subtitle::FORMATS)
             .chain(table::FORMATS)
             .collect();
         archive::register(&mut registry, &packable);
@@ -198,6 +201,7 @@ impl Engine {
         std::iter::once(TXT)
             .chain(image::FORMATS)
             .chain(audio::FORMATS)
+            .chain(subtitle::FORMATS)
             .chain(table::FORMATS)
             .chain(archive::FORMATS)
             .filter_map(|id| self.registry.format(id))
@@ -282,6 +286,24 @@ impl Engine {
                 }
             }
         }
+        if subtitle::is_subtitle(ext_from) {
+            if let Some(found) = subtitle::detect(&data) {
+                if found != ext_from {
+                    notes.push(
+                        Note::new(
+                            Severity::Warning,
+                            "format_mismatch",
+                            format!(
+                                "the file extension says {} but the content is {}",
+                                ext_from.0, found.0
+                            ),
+                        )
+                        .with_detail(found.0),
+                    );
+                    from = found;
+                }
+            }
+        }
         if archive::is_archive(from) {
             if let Some(found) = archive::sniff_conflict(ext_from, &data) {
                 notes.push(
@@ -342,6 +364,14 @@ impl Engine {
             (
                 out,
                 format!("Decode {} -> Process -> Encode {}", name(from), name(to)),
+            )
+        } else if subtitle::is_subtitle(from) {
+            let (out, n) = subtitle::convert(from, to, &data, &opts)?;
+            notes.extend(n);
+            let name = |id| self.registry.format(id).map_or("subtitle", |f| f.name);
+            (
+                out,
+                format!("Parse {} cues -> Write {}", name(from), name(to)),
             )
         } else if table::is_table(from) {
             let (out, n) = table::convert(from, to, &data, &opts, &self.limits, progress)?;
@@ -1156,6 +1186,46 @@ mod tests {
             std::fs::read(png_fixture("rgb8.rgba")).unwrap()
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn subtitles_convert_between_all_formats_with_retiming() {
+        let dir = tmpdir("subtitles");
+        let srt = dir.join("in.srt");
+        std::fs::write(
+            &srt,
+            "1\r\n00:00:01,000 --> 00:00:02,500\r\n<i>Caf\u{e9}</i> <b>bar</b>\r\n\r\n2\r\n00:00:03,000 --> 00:00:04,000\r\nSecond\r\n",
+        )
+        .unwrap();
+        let ass = dir.join("a.ass");
+        let rep = run(&srt, &ass, &[("shift_ms", "500")]).unwrap();
+        assert_eq!(rep.output_format, subtitle::ASS);
+        let text = std::fs::read_to_string(&ass).unwrap();
+        assert!(text.contains("Dialogue: 0,0:00:01.50,0:00:03.00,Default,,0,0,0,,{\\i1}Caf\u{e9}{\\i0} {\\b1}bar{\\b0}"));
+        let vtt = dir.join("b.vtt");
+        run(&ass, &vtt, &[]).unwrap();
+        let text = std::fs::read_to_string(&vtt).unwrap();
+        assert!(text.starts_with("WEBVTT"));
+        assert!(text.contains("00:00:01.500 --> 00:00:03.000"));
+        assert!(text.contains("<i>Caf\u{e9}</i> <b>bar</b>"));
+        let ttml = dir.join("c.ttml");
+        run(&vtt, &ttml, &[]).unwrap();
+        let back = dir.join("d.srt");
+        run(&ttml, &back, &[("fps_from", "25"), ("fps_to", "24")]).unwrap();
+        let text = std::fs::read_to_string(&back).unwrap();
+        // 1.5 s * 25/24 = 1.5625 s
+        assert!(text.contains("00:00:01,563 --> 00:00:03,125"), "{text}");
+        assert!(text.contains("<i>Caf\u{e9}</i> <b>bar</b>"));
+        // Legacy output encoding.
+        let latin = dir.join("e.srt");
+        run(&srt, &latin, &[("to_encoding", "windows-1252")]).unwrap();
+        assert!(std::fs::read(&latin).unwrap().contains(&0xE9));
+        // Legacy input is read back with the encoding named.
+        let again = dir.join("f.vtt");
+        run(&latin, &again, &[("from_encoding", "windows-1252")]).unwrap();
+        assert!(std::fs::read_to_string(&again)
+            .unwrap()
+            .contains("Caf\u{e9}"));
     }
 
     #[test]

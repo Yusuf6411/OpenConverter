@@ -109,7 +109,7 @@ export class Card {
       img.addEventListener("error", () => { clear(this.thumb); this.thumb.append(icon("image", 36)); });
       this.thumb.append(img);
     } else {
-      const kind = fmt ? (fmt.category === "data" ? "table" : fmt.category === "text" ? "text" : fmt.category === "audio" ? "audio" : "image") : "upload";
+      const kind = fmt ? (fmt.category === "data" ? "table" : fmt.category === "text" ? "text" : fmt.category === "audio" ? "audio" : fmt.category === "subtitle" ? "subtitle" : "image") : "upload";
       this.thumb.append(icon(kind, 36));
     }
   }

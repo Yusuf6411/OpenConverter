@@ -2219,6 +2219,7 @@ dependencies = [
  "oc-core",
  "oc-image",
  "oc-sheet",
+ "oc-subtitle",
  "oc-text",
 ]
 
@@ -2290,6 +2291,10 @@ version = "2.2.0"
 [[package]]
 name = "oc-subtitle"
 version = "2.2.0"
+dependencies = [
+ "oc-core",
+ "oc-xml",
+]
 
 [[package]]
 name = "oc-svg"
