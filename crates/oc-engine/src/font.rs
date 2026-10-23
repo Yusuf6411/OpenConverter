@@ -25,11 +25,6 @@ pub fn read_only(id: FormatId) -> bool {
     id == TTC
 }
 
-/// WOFF2 can be written (Brotli encoder) but not read (that needs Brotli's static dictionary).
-pub fn write_only(id: FormatId) -> bool {
-    id == WOFF2
-}
-
 fn spec(
     key: &'static str,
     i18n_key: &'static str,
@@ -130,7 +125,7 @@ pub fn register(registry: &mut Registry) {
             "WOFF2",
             &["woff2"][..],
             &["font/woff2"][..],
-            "W3C WOFF 2.0 (Brotli; tables stored without the glyph transform; write only)",
+            "W3C WOFF 2.0 (Brotli; written without the glyph transform, read with it)",
             vec![Sniffer {
                 offset: 0,
                 magic: b"wOF2",
@@ -159,7 +154,7 @@ pub fn register(registry: &mut Registry) {
             mime,
             sniffers,
             capabilities: Capabilities {
-                read: !write_only(id),
+                read: true,
                 write: !read_only(id),
                 ..Capabilities::default()
             },
@@ -179,9 +174,6 @@ pub fn register(registry: &mut Registry) {
         }
     };
     for from in FORMATS {
-        if write_only(from) {
-            continue;
-        }
         for to in [TTF, OTF, WOFF, WOFF2] {
             if from == to {
                 continue;
@@ -250,10 +242,7 @@ fn plain_sfnt(from: FormatId, data: &[u8], index: usize, limits: &Limits) -> Res
     let bytes = if build::is_woff(data) {
         build::woff_to_sfnt(data, limits)?
     } else if build::is_woff2(data) {
-        return Err(Error::new(
-            ErrorCode::UnsupportedVariant,
-            "WOFF2 needs a Brotli decoder, which is not built yet",
-        ));
+        oc_font::woff2::woff2_to_sfnt(data, index, limits)?
     } else if from == TTC || data.get(..4) == Some(b"ttcf") {
         let font = Font::parse_index(data, index)?;
         let (_, mut tabs) = build::tables_of_font(&font);

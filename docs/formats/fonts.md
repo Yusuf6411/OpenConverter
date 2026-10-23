@@ -8,6 +8,7 @@ Crates: `oc-font` (parsing, outlines, conversions), `oc-raster` (drawing the spe
 - `cmap` subtables of formats 0, 4, 6, 12 and 13 (binary search for lookup, full enumeration for listings).
 - `glyf` simple and composite glyphs (offsets and 2x2 transforms; component point matching is not done).
 - CFF: INDEX and DICT parsing, charsets (formats 0 to 2 and predefined), CID-keyed fonts (FDArray, FDSelect 0 and 3), built-in encodings, local and global subroutines, the full Type 2 operator set including flex, arithmetic, hint masks and `seac`-style `endchar`.
+- WOFF2: read including the glyf, loca and hmtx transforms; checked glyph by glyph against fontTools on DejaVu Sans, FreeSans and Inter. WOFF2 collections are untested.
 - WOFF 1.0: tables are inflated and the sfnt is rebuilt with correct checksums.
 
 ## What is written
@@ -22,7 +23,7 @@ Crates: `oc-font` (parsing, outlines, conversions), `oc-raster` (drawing the spe
 Oracles (test time only): fontTools reads every output and its outline areas and advances match the source; Chromium's font sanitiser loads each one (`tools/font_interop.py`, 46 checks).
 
 ## Not done
-- WOFF2 as an input (needs a Brotli decoder and its static dictionary, which is not written); WOFF2 output is supported, with tables stored untransformed, Type 1 (PFA/PFB) and bitmap-only fonts as inputs or outputs.
+- WOFF2 output keeps tables untransformed (no glyf/loca/hmtx transform is written), so files are larger than other encoders', Type 1 (PFA/PFB) and bitmap-only fonts as inputs or outputs.
 - Variable fonts: only the default instance is converted, with a warning; `gvar`/`fvar` are dropped when the outline type changes.
 - Hinting: TrueType instructions are dropped when making CFF, and CFF hints are not carried to TrueType (a note says so).
 - Layout features: the specimen applies `kern` pairs only; GSUB/GPOS shaping is a Phase 6b item.

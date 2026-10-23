@@ -3,6 +3,8 @@
 
 pub mod bcj;
 pub mod brotli;
+pub(crate) mod brotli_dec;
+pub(crate) mod brotli_transforms;
 pub mod bzip2;
 pub mod compress_z;
 pub mod deflate;

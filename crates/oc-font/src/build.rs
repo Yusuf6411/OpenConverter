@@ -186,7 +186,7 @@ pub fn sfnt_to_woff(data: &[u8], level: u32) -> Result<Vec<u8>> {
 }
 
 /// Tags with a one-byte code in a WOFF2 table directory, in code order.
-const WOFF2_KNOWN: [&[u8; 4]; 63] = [
+pub(crate) const WOFF2_KNOWN: [&[u8; 4]; 63] = [
     b"cmap", b"head", b"hhea", b"hmtx", b"maxp", b"name", b"OS/2", b"post", b"cvt ", b"fpgm",
     b"glyf", b"loca", b"prep", b"CFF ", b"VORG", b"EBDT", b"EBLC", b"gasp", b"hdmx", b"kern",
     b"LTSH", b"PCLT", b"VDMX", b"vhea", b"vmtx", b"BASE", b"GDEF", b"GPOS", b"GSUB", b"EBSC",

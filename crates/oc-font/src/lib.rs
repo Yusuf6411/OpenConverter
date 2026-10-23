@@ -17,6 +17,7 @@ pub mod post;
 pub mod reader;
 pub mod render;
 pub mod sfnt;
+pub mod woff2;
 
 pub use sfnt::Font;
 

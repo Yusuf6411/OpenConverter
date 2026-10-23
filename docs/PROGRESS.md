@@ -140,6 +140,6 @@ Speed work against the budgets (ADR-0015), the packaging channels in M8.4, and t
 
 ## Post-3.0.0 (v3.0.1)
 - Speed pass (PERFORMANCE.md).
-- Brotli encoder and WOFF2 writing (`oc-compress::brotli`, `oc-font`); WOFF2 reading and Brotli decoding are not done.
+- Brotli encoder and decoder (`oc-compress::brotli`) and WOFF2 reading and writing (`oc-font::woff2`, `build`); WOFF2 collections are read by code that no test file has exercised.
 - Distribution files (`packaging/`).
 - Not done: JPEG XL, camera RAW/DNG, WavPack, APE, ProRes, Theora decoding (ADR-0013); the encumbered build (ADR-0010).
