@@ -5,11 +5,15 @@
 #![forbid(unsafe_code)]
 
 mod bits;
+mod dct;
+mod dequant;
 mod entropy;
+mod filter;
 mod frame;
 mod header;
 mod modular;
 mod render;
+mod vardct;
 
 use oc_core::{Error, ErrorCode, Limits, Note, Notes, Result, Severity};
 

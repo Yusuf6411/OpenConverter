@@ -31,7 +31,12 @@ pub fn render(dec: &Decoded, img: &ImageHeader, notes: &mut Notes) -> Result<Pic
     }
     let cc = fh.encoded_color_channels;
     let (w, h) = (img.width as usize, img.height as usize);
-    if dec.chans.len() < cc || dec.chans[..cc].iter().any(|c| c.w != w || c.h != h) {
+    // VarDCT frames keep their colour in `xyb`; `chans` then holds only the extra channels
+    let ec_base = if dec.xyb.is_some() { 0 } else { cc };
+    if dec.xyb.is_none() && (dec.chans.len() < cc || dec.chans[..cc].iter().any(|c| c.w != w || c.h != h)) {
+        return Err(unsupported("colour channels with a different size"));
+    }
+    if dec.xyb.is_some() && (fh.color_w() as usize != w || fh.color_h() as usize != h) {
         return Err(unsupported("colour channels with a different size"));
     }
     let alpha = img.ec.iter().position(|e| matches!(e.ty, EcType::Alpha { .. }));
@@ -43,7 +48,11 @@ pub fn render(dec: &Decoded, img: &ImageHeader, notes: &mut Notes) -> Result<Pic
 
     // Planes as floats in 0..=1 (integer samples scaled by the bit depth, XYB converted).
     let mut planes: Vec<Vec<f32>> = Vec::new();
-    if img.xyb_encoded {
+    if let Some([x, y, b]) = &dec.xyb {
+        let (mut x, mut y, mut b) = (x.clone(), y.clone(), b.clone());
+        xyb_to_srgb(&mut x, &mut y, &mut b, img);
+        planes = vec![x, y, b];
+    } else if img.xyb_encoded {
         planes = xyb_planes(dec, img, cc);
     } else {
         let maxv = ((1u64 << img.bit_depth.bits) - 1) as f32;
@@ -53,7 +62,7 @@ pub fn render(dec: &Decoded, img: &ImageHeader, notes: &mut Notes) -> Result<Pic
     }
     let mut alpha_plane = None;
     if let Some(a) = alpha {
-        let c: &Chan = &dec.chans[cc + a];
+        let c: &Chan = &dec.chans[ec_base + a];
         if c.w != w || c.h != h {
             return Err(unsupported("alpha channel with a different size"));
         }
@@ -68,7 +77,12 @@ pub fn render(dec: &Decoded, img: &ImageHeader, notes: &mut Notes) -> Result<Pic
             }
         }
     }
-    let grey = cc == 1;
+    let grey = cc == 1 || img.is_grey();
+    if grey && planes.len() == 3 {
+        planes.truncate(2);
+        planes.remove(0);
+        planes.truncate(1);
+    }
     let channels = if grey { 1 } else { 3 } + usize::from(alpha_plane.is_some());
     let mut samples = Vec::with_capacity(w * h * channels);
     for i in 0..w * h {

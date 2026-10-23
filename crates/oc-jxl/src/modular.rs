@@ -794,12 +794,26 @@ fn tree_of<'a>(local: &'a Option<MaTree>, global: Option<&'a MaTree>) -> Result<
 }
 
 impl Stream {
+    /// A stream without channels, which has no header in the bitstream.
+    pub fn empty() -> Self {
+        Self {
+            transforms: Vec::new(),
+            wp: WpHeader { p1: 16, p2: 10, p3: [7, 7, 7, 0, 0], w: [13, 12, 12, 12] },
+            local_tree: None,
+            chans: Vec::new(),
+            nb_meta: 0,
+        }
+    }
+
     /// Read the header (and the local tree, if there is one) for a stream whose channels, before
     /// transforms, are `input`.
     pub fn parse(br: &mut Br, global: Option<&MaTree>, input: Vec<Chan>, max_samples: u64) -> Result<Self> {
         let use_global = br.bool()?;
         let wp = WpHeader::parse(br)?;
         let n = br.u32([(0, 0), (1, 0), (2, 4), (18, 8)])? as usize;
+        if std::env::var_os("JXL_DEBUG").is_some() {
+            eprintln!("modular stream: use_global {use_global} transforms {n} at bit {}", br.bits_read());
+        }
         if n > 512 {
             return Err(bad("too many transforms"));
         }
