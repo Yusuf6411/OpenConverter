@@ -22,6 +22,8 @@ pub mod entities;
 pub mod html_in;
 pub mod odt_in;
 pub mod odt_out;
+pub mod rtf_in;
+pub mod rtf_out;
 pub mod imgsize;
 pub mod html_out;
 pub mod markdown;

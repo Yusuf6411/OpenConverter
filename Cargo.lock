@@ -2221,6 +2221,7 @@ version = "2.5.0"
 dependencies = [
  "oc-archive",
  "oc-core",
+ "oc-text",
  "oc-xml",
 ]
 

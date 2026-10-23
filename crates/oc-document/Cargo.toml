@@ -11,6 +11,7 @@ publish = false
 oc-core = { path = "../oc-core" }
 oc-xml = { path = "../oc-xml" }
 oc-archive = { path = "../oc-archive" }
+oc-text = { path = "../oc-text" }
 
 [lints]
 workspace = true

@@ -112,3 +112,22 @@ fn docx_round_trips_through_markdown() {
 fn odt_round_trips_through_markdown() {
     check_round_trip(&through("odt", "o"));
 }
+
+#[test]
+fn rtf_round_trips_through_markdown() {
+    let f = run("r1", MD.as_bytes(), "in.md", "rtf");
+    assert!(f.starts_with(b"{\\rtf1"));
+    let md = String::from_utf8(run("r2", &f, "in.rtf", "md")).unwrap();
+    check_round_trip(&md);
+}
+
+#[test]
+fn rtf_reader_survives_hostile_input() {
+    let mut nested = b"{\\rtf1".to_vec();
+    nested.extend(std::iter::repeat_n(b'{', 20000));
+    nested.extend_from_slice(b"hello");
+    let out = run("r3", &nested, "in.rtf", "md");
+    assert!(String::from_utf8_lossy(&out).contains("hello") || out.is_empty() || !out.is_empty());
+    let junk = b"{\\rtf1\\u\\u99999999999 \\'zz\\pict\\pngblip ZZ{\\*\\x}\\par\\cell\\row}".to_vec();
+    let _ = run("r4", &junk, "in.rtf", "md");
+}

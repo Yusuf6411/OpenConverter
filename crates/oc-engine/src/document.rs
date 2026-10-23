@@ -13,7 +13,8 @@ pub const MD: FormatId = FormatId("md");
 pub const HTML: FormatId = FormatId("html");
 pub const DOCX: FormatId = FormatId("docx");
 pub const ODT: FormatId = FormatId("odt");
-pub const FORMATS: [FormatId; 4] = [MD, HTML, DOCX, ODT];
+pub const RTF: FormatId = FormatId("rtf");
+pub const FORMATS: [FormatId; 5] = [MD, HTML, DOCX, ODT, RTF];
 
 pub fn is_document(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -128,6 +129,16 @@ fn infos() -> Vec<Info> {
             read: true,
             write: true,
             spec: "ISO/IEC 26300 OpenDocument 1.2 text subset (own reader and writer)",
+        },
+        Info {
+            id: RTF,
+            name: "Rich Text Format (RTF)",
+            exts: &["rtf"],
+            mime: &["application/rtf", "text/rtf"],
+            sniff: vec![s(b"{\\rtf", 90)],
+            read: true,
+            write: true,
+            spec: "RTF 1.9 subset: runs, paragraphs, lists, tables, hyperlinks, PNG and JPEG pictures (own reader and writer)",
         },
     ]
 }
@@ -287,6 +298,7 @@ pub fn read(
         }
         DOCX => oc_document::docx_in::read(data, limits, notes),
         ODT => oc_document::odt_in::read(data, limits, notes),
+        RTF => oc_document::rtf_in::read(data, limits, notes),
         _ => Err(Error::new(
             ErrorCode::UnsupportedFormat,
             "this document format cannot be read",
@@ -344,6 +356,7 @@ pub fn write(
         .into_bytes()),
         DOCX => oc_document::docx_out::write(doc, limits),
         ODT => oc_document::odt_out::write(doc, limits),
+        RTF => Ok(oc_document::rtf_out::write(doc, notes)),
         _ => Err(bad("this document format cannot be written")),
     }
 }
