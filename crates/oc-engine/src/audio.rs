@@ -560,7 +560,7 @@ pub fn register(registry: &mut Registry) {
         (
             WEBA,
             "WebM Audio",
-            &["weba", "webm"],
+            &["weba"],
             &["audio/webm"],
             vec![Sniffer {
                 offset: 0,

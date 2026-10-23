@@ -11,6 +11,7 @@ pub mod image;
 pub mod isolated;
 pub mod subtitle;
 pub mod table;
+pub mod video;
 
 use oc_core::options::{OptionKind, OptionSchema, OptionSpec, OptionValue, Options};
 use oc_core::planner::{Edge, EdgeKind, Registry};
@@ -137,11 +138,13 @@ impl Engine {
         audio::register(&mut registry);
         subtitle::register(&mut registry);
         table::register(&mut registry);
+        video::register(&mut registry);
         let packable: Vec<FormatId> = std::iter::once(TXT)
             .chain(image::FORMATS)
             .chain(audio::FORMATS)
             .chain(subtitle::FORMATS)
             .chain(table::FORMATS)
+            .chain(video::FORMATS)
             .collect();
         archive::register(&mut registry, &packable);
         Self {
@@ -203,6 +206,7 @@ impl Engine {
             .chain(audio::FORMATS)
             .chain(subtitle::FORMATS)
             .chain(table::FORMATS)
+            .chain(video::FORMATS)
             .chain(archive::FORMATS)
             .filter_map(|id| self.registry.format(id))
     }
@@ -304,6 +308,24 @@ impl Engine {
                 }
             }
         }
+        if video::is_video(ext_from) {
+            if let Some(found) = video::detect(&data) {
+                if found != ext_from {
+                    notes.push(
+                        Note::new(
+                            Severity::Warning,
+                            "format_mismatch",
+                            format!(
+                                "the file extension says {} but the content is {}",
+                                ext_from.0, found.0
+                            ),
+                        )
+                        .with_detail(found.0),
+                    );
+                    from = found;
+                }
+            }
+        }
         if archive::is_archive(from) {
             if let Some(found) = archive::sniff_conflict(ext_from, &data) {
                 notes.push(
@@ -364,6 +386,13 @@ impl Engine {
             (
                 out,
                 format!("Decode {} -> Process -> Encode {}", name(from), name(to)),
+            )
+        } else if video::is_video(from) {
+            let out = video::convert(from, to, &data, &opts, &self.limits, &mut notes)?;
+            let name = |id| self.registry.format(id).map_or("video", |f| f.name);
+            (
+                out,
+                format!("Read {} streams -> Write {}", name(from), name(to)),
             )
         } else if subtitle::is_subtitle(from) {
             let (out, n) = subtitle::convert(from, to, &data, &opts)?;

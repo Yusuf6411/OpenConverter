@@ -109,6 +109,8 @@ pub struct Track<'a> {
     pub samples: Vec<Sample>,
     /// The `edts/elst` entries: (segment duration in movie time, media time, rate).
     pub edits: Vec<(u64, i64)>,
+    /// Display rotation in degrees clockwise from the `tkhd` matrix (0, 90, 180 or 270).
+    pub rotation: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -212,6 +214,19 @@ fn parse_track<'a>(trak: &'a [u8], file: &'a [u8], limits: &Limits) -> Result<Op
         None => None,
     }
     .unwrap_or(0);
+    let rotation = full(tkhd.body)
+        .and_then(|(ver, b)| {
+            let m = if ver == 1 { 48 } else { 36 };
+            let a = be32(b, m)? as i32;
+            let bb = be32(b, m + 4)? as i32;
+            Some(match (a, bb) {
+                (0, v) if v > 0 => 90,
+                (v, 0) if v < 0 => 180,
+                (0, v) if v < 0 => 270,
+                _ => 0,
+            })
+        })
+        .unwrap_or(0);
     let Some(mdia) = child(trak, b"mdia") else {
         return Ok(None);
     };
@@ -275,6 +290,7 @@ fn parse_track<'a>(trak: &'a [u8], file: &'a [u8], limits: &Limits) -> Result<Op
         entry: entry.body,
         samples,
         edits,
+        rotation,
     }))
 }
 

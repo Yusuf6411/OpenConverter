@@ -895,7 +895,7 @@ pub fn parse(data: &[u8], limits: &Limits) -> Result<Matroska> {
         };
         parse_cluster(body, &mut cx)?;
     }
-    packets.sort_by_key(|p| p.pts_ns);
+    // File order is decode order; B-frame video is not in presentation order, so no sorting.
     m.packets = packets;
     Ok(m)
 }
@@ -1093,7 +1093,7 @@ fn block_bytes(track: u64, rel: i16, flags: u8, data: &[u8]) -> Vec<u8> {
     b
 }
 
-/// Serialise a file. Packets are written in time order; each cluster starts at a keyframe of
+/// Serialise a file. Packets are written in the order given (decode order); each cluster starts at a keyframe of
 /// the first video track (or after `cluster_ns` for audio-only files).
 /// A cluster being filled while writing: its start time, body, and the cue points inside it.
 type OpenCluster = (i64, Vec<u8>, Vec<(u64, i64)>);
@@ -1106,8 +1106,9 @@ pub fn write(m: &Matroska, opts: &WriteOptions) -> Result<Vec<u8>> {
         ));
     }
     let scale = m.timestamp_scale.max(1);
-    let mut packets: Vec<&Packet> = m.packets.iter().collect();
-    packets.sort_by_key(|p| p.pts_ns);
+    // Blocks go out in the order given: that is decode order, which differs from presentation
+    // order when a video track has B-frames. Callers pass them interleaved.
+    let packets: Vec<&Packet> = m.packets.iter().collect();
     let video = m
         .tracks
         .iter()

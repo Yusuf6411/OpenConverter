@@ -2221,6 +2221,7 @@ dependencies = [
  "oc-sheet",
  "oc-subtitle",
  "oc-text",
+ "oc-video",
 ]
 
 [[package]]
@@ -2310,6 +2311,10 @@ dependencies = [
 [[package]]
 name = "oc-video"
 version = "2.2.0"
+dependencies = [
+ "oc-container",
+ "oc-core",
+]
 
 [[package]]
 name = "oc-vp8"

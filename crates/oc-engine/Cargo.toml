@@ -15,6 +15,7 @@ oc-audio = { path = "../oc-audio" }
 oc-container = { path = "../oc-container" }
 oc-sheet = { path = "../oc-sheet" }
 oc-subtitle = { path = "../oc-subtitle" }
+oc-video = { path = "../oc-video" }
 oc-archive = { path = "../oc-archive" }
 
 [lints]
