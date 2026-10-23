@@ -82,6 +82,26 @@ jobs:
             target/release/bundle/**/*.dmg
             openconverter-desktop-portable-*.zip
 
+  wheels:
+    name: wheels ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install maturin
+      - run: maturin build --release --manifest-path crates/oc-python/Cargo.toml --out wheels
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheels/*.whl
+
   publish:
     needs: [cli, desktop]
     runs-on: ubuntu-latest

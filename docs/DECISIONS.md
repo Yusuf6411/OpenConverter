@@ -64,3 +64,8 @@ Consequences: the output looks different on machines with different fonts; text 
 Context: JPEG XL, DNG/camera RAW, WavPack, APE, ProRes, Theora decoding, a Brotli encoder and WOFF2 writing each need large specification tables (context models, dictionaries, transform sets) that cannot be fetched in the offline build environment, and the project's rule is to write its own code and verify it against real files.
 Decision: they are recorded as not done rather than shipped as guesses. Legacy Office, XLS and SQLite, which are fully described by publicly known structure and can be checked with LibreOffice and sqlite3, were done instead.
 Consequences: the compatibility table does not list these formats; adding one later needs its specification and an oracle to test against.
+
+## ADR-0014: The Python binding uses PyO3 and drops `forbid(unsafe_code)` for that crate
+Context: the master prompt names PyO3 and maturin. PyO3's macros expand to `unsafe` code, which `#![forbid(unsafe_code)]` rejects. The own-codec rule covers format and codec code, not the interpreter interface.
+Decision: `oc-python` depends on `pyo3` (abi3-py39) and is the only crate that does; it contains no hand-written `unsafe`. Conversions run in-process (no sandboxed worker), which is documented.
+Consequences: `cargo xtask check-deps` and `cargo deny` still pass; the crate builds as a cdylib with `extension-module`, so it has no Rust unit tests and is tested from Python.

@@ -49,8 +49,13 @@ impl Table {
 
     /// A row extended with empty cells to the table width.
     pub fn padded(&self, row: &[String]) -> Vec<String> {
+        Self::padded_to(self.width(), row)
+    }
+
+    /// A row extended to `width` (from [`Table::width`], computed once for a whole table).
+    pub fn padded_to(width: usize, row: &[String]) -> Vec<String> {
         let mut r = row.to_vec();
-        r.resize(self.width().max(row.len()), String::new());
+        r.resize(width.max(row.len()), String::new());
         r
     }
 }

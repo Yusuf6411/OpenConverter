@@ -111,6 +111,12 @@ Format notes: [formats/legacy.md](formats/legacy.md). Oracles: Python sqlite3 (`
 - Fuzz targets `sqlite`, `xls`, `doc`, `ppt`; `crates/oc-engine/tests/legacy_office.rs` damages LibreOffice-made files; `crates/oc-sheet/tests/sqlite.rs` round-trips 300 tables.
 - Release v2.7.0 (tagged locally).
 
+## Phase 7: Python bindings
+Notes: [python.md](python.md).
+- [~] M7.1 `crates/oc-python`: `openconverter.convert`, `info`, `formats`, `Result`, `ConversionError`; abi3 wheel built with maturin and tested with unittest (9 tests); type stubs; GIL released. A CI job builds and tests the wheel; the release workflow builds wheels per platform. Not done: `open_image` buffer object, progress and cancellation, manylinux/musllinux/aarch64/universal2 wheels, PyPI publishing (needs the owner).
+- Fixed while testing: CSV/TSV/JSON table writing recomputed the table width per row, so 80,000 rows took 2.3 s and 400,000 rows minutes; now 0.04 s and 0.25 s.
+- Release v2.8.0 (tagged locally).
+
 ## Known gaps
 - 1.x Python test cases are not ported yet; they are available at tag v1.0.0. Port them as each Rust codec lands (M1.x, M2.x).
 - cargo-deny passes locally (advisories, bans, licenses, sources); the Tauri tree is allowed through named wrappers (ADR-0005).
@@ -120,6 +126,6 @@ Format notes: [formats/legacy.md](formats/legacy.md). Oracles: Python sqlite3 (`
 - [~] M2.8 [COMPATIBILITY.md](COMPATIBILITY.md) is generated from the registry by `tools/gen_compat.py`; screenshots of the UI are in `docs/screenshots/`.
 
 ## Next step
-Phase 7: Python bindings.
+Phase 8: distribution polish.
 
 - **Tables (CSV, TSV, JSON, XLSX, ODS)**: `oc-sheet` reads and writes RFC 4180 delimited text (delimiter detection, lenient quotes, BOM, ragged rows padded), flat JSON tables (own strict parser) and, since Phase 3, XLSX and ODS workbooks (M3.5). Engine options mirror 1.x. Fuzz targets `table` and `workbook`.

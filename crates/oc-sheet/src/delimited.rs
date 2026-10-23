@@ -221,11 +221,12 @@ pub fn write(table: &Table, delim: u8, crlf: bool, progress: &dyn Progress) -> R
     let nl = if crlf { "\r\n" } else { "\n" };
     let delim = char::from(delim);
     let mut out = String::new();
+    let width = table.width();
     if let Some(h) = &table.header {
-        push_row(&mut out, &table.padded(h), delim, nl);
+        push_row(&mut out, &Table::padded_to(width, h), delim, nl);
     }
     for (idx, r) in table.rows.iter().enumerate() {
-        push_row(&mut out, &table.padded(r), delim, nl);
+        push_row(&mut out, &Table::padded_to(width, r), delim, nl);
         if idx & 4095 == 0 {
             progress.check_cancelled()?;
             progress.report(idx as u64, table.rows.len().max(1) as u64, "writing");

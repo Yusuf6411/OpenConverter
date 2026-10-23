@@ -1,0 +1,21 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "openconverter"
+description = "Convert images, audio, video, documents, tables, archives and more with no external tools."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT OR Apache-2.0" }
+dynamic = ["version"]
+classifiers = [
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+]
+
+[tool.maturin]
+python-source = "python"
+module-name = "openconverter._native"
+features = ["pyo3/extension-module"]

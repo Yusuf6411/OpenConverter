@@ -332,7 +332,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d067ad48b8650848b989a59a86c6c36a995d02d2bf778d45c3c5d57bc2718f02"
 dependencies = [
  "smallvec",
- "target-lexicon",
+ "target-lexicon 0.12.16",
 ]
 
 [[package]]
@@ -486,7 +486,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 3.0.9",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2147,7 +2147,7 @@ dependencies = [
 
 [[package]]
 name = "oc-archive"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "aes",
  "hmac",
@@ -2161,7 +2161,7 @@ dependencies = [
 
 [[package]]
 name = "oc-audio"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-checksum",
  "oc-container",
@@ -2172,11 +2172,11 @@ dependencies = [
 
 [[package]]
 name = "oc-checksum"
-version = "2.7.0"
+version = "2.8.0"
 
 [[package]]
 name = "oc-cli"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-archive",
  "oc-core",
@@ -2186,7 +2186,7 @@ dependencies = [
 
 [[package]]
 name = "oc-compress"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-checksum",
  "oc-core",
@@ -2196,18 +2196,18 @@ dependencies = [
 
 [[package]]
 name = "oc-container"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-core",
 ]
 
 [[package]]
 name = "oc-core"
-version = "2.7.0"
+version = "2.8.0"
 
 [[package]]
 name = "oc-desktop"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-cli",
  "oc-server",
@@ -2217,7 +2217,7 @@ dependencies = [
 
 [[package]]
 name = "oc-document"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-archive",
  "oc-core",
@@ -2227,7 +2227,7 @@ dependencies = [
 
 [[package]]
 name = "oc-engine"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-archive",
  "oc-audio",
@@ -2248,7 +2248,7 @@ dependencies = [
 
 [[package]]
 name = "oc-font"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-checksum",
  "oc-compress",
@@ -2258,7 +2258,7 @@ dependencies = [
 
 [[package]]
 name = "oc-image"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-checksum",
  "oc-compress",
@@ -2270,14 +2270,14 @@ dependencies = [
 
 [[package]]
 name = "oc-io"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-core",
 ]
 
 [[package]]
 name = "oc-pdf"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "aes",
  "md-5",
@@ -2293,15 +2293,20 @@ dependencies = [
 
 [[package]]
 name = "oc-python"
-version = "2.7.0"
+version = "2.8.0"
+dependencies = [
+ "oc-core",
+ "oc-engine",
+ "pyo3",
+]
 
 [[package]]
 name = "oc-raster"
-version = "2.7.0"
+version = "2.8.0"
 
 [[package]]
 name = "oc-server"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "axum",
  "getrandom 0.4.3",
@@ -2317,7 +2322,7 @@ dependencies = [
 
 [[package]]
 name = "oc-sheet"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-archive",
  "oc-core",
@@ -2327,11 +2332,11 @@ dependencies = [
 
 [[package]]
 name = "oc-simd"
-version = "2.7.0"
+version = "2.8.0"
 
 [[package]]
 name = "oc-subtitle"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-core",
  "oc-xml",
@@ -2339,7 +2344,7 @@ dependencies = [
 
 [[package]]
 name = "oc-svg"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-core",
  "oc-font",
@@ -2351,14 +2356,14 @@ dependencies = [
 
 [[package]]
 name = "oc-text"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-core",
 ]
 
 [[package]]
 name = "oc-video"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-container",
  "oc-core",
@@ -2369,18 +2374,18 @@ dependencies = [
 
 [[package]]
 name = "oc-vp8"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-core",
 ]
 
 [[package]]
 name = "oc-worker"
-version = "2.7.0"
+version = "2.8.0"
 
 [[package]]
 name = "oc-xml"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "oc-core",
 ]
@@ -2651,6 +2656,63 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "pyo3"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "229ca13b8a15bb0d1487b81ab975bfcd97513416499a8312011b6036e42e0de4"
+dependencies = [
+ "libc",
+ "once_cell",
+ "portable-atomic",
+ "pyo3-build-config",
+ "pyo3-ffi",
+ "pyo3-macros",
+]
+
+[[package]]
+name = "pyo3-build-config"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70130e2b6dd1ee589a8788026a429561ca5c40fa7a2fa7914c2282eddae24700"
+dependencies = [
+ "target-lexicon 0.13.5",
+]
+
+[[package]]
+name = "pyo3-ffi"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e7ff73c555c286d212d4ce7e5fbda845a973c4f61bd5f160f5f2c3c2a04d1c4"
+dependencies = [
+ "libc",
+ "pyo3-build-config",
+]
+
+[[package]]
+name = "pyo3-macros"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c46d2e5862c7bb8207e3b639f713dda3c499933444784154c11d013c5a691b60"
+dependencies = [
+ "proc-macro2",
+ "pyo3-macros-backend",
+ "quote",
+ "syn 3.0.9",
+]
+
+[[package]]
+name = "pyo3-macros-backend"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38b89f066f2ae72a2aef52d1537ca2fcd104440ebfadee06e97aa90738a25b9b"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -3407,6 +3469,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
 
 [[package]]
+name = "target-lexicon"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
+
+[[package]]
 name = "tauri"
 version = "2.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3716,9 +3784,9 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokio"
-version = "1.54.0"
+version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0c168a474b95bfecfe908a65d4bdffc523144b649a74c09c286afb35d53e0bc"
+checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
 dependencies = [
  "bytes",
  "libc",

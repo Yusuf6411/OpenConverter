@@ -36,3 +36,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install maturin
+      - run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          maturin build --release --manifest-path crates/oc-python/Cargo.toml --out wheels
+          pip install wheels/*.whl
+          python -m unittest discover -s crates/oc-python/tests -v

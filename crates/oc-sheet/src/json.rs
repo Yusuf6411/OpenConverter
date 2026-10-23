@@ -451,7 +451,7 @@ pub fn write(table: &Table, indent: usize, ensure_ascii: bool, notes: &mut Notes
     for (r, row) in table.rows.iter().enumerate() {
         out.push_str(nl);
         out.push_str(&ind(1));
-        let cells = table.padded(row);
+        let cells = Table::padded_to(width, row);
         let (open, close) = if header.is_some() {
             ('{', '}')
         } else {
