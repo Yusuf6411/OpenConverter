@@ -11,7 +11,7 @@ use oc_core::{
 };
 use oc_image::anim::{self, Animation};
 use oc_image::{
-    bmp, dds, dng, exr, gif, hdr, icc, icns, ico, jpeg, netpbm, ops, png, psd, qoi, tga, tiff,
+    bmp, dds, dng, exr, gif, hdr, icc, icns, ico, jpeg, jxl, netpbm, ops, png, psd, qoi, tga, tiff,
     webp, Image,
 };
 
@@ -32,11 +32,13 @@ pub const TIFF: FormatId = FormatId("tiff");
 pub const WEBP: FormatId = FormatId("webp");
 /// Camera raw (Adobe DNG); read only.
 pub const DNG: FormatId = FormatId("dng");
+/// JPEG XL; read only.
+pub const JXL: FormatId = FormatId("jxl");
 /// Internal hub; never shown to users.
 pub const IMAGE_IR: FormatId = FormatId("image-ir");
 
-pub const FORMATS: [FormatId; 16] = [
-    PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, DDS, PSD, HDR, EXR, TIFF, WEBP, DNG,
+pub const FORMATS: [FormatId; 17] = [
+    PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, DDS, PSD, HDR, EXR, TIFF, WEBP, DNG, JXL,
 ];
 
 pub fn is_image(id: FormatId) -> bool {
@@ -607,6 +609,27 @@ pub fn register(registry: &mut Registry) {
             "Adobe DNG 1.7 (read only: the sensor data is developed to RGB)",
         ),
         describe(
+            JXL,
+            "JPEG XL",
+            &["jxl"],
+            &["image/jxl"],
+            vec![
+                Sniffer {
+                    offset: 0,
+                    magic: &[0xFF, 0x0A],
+                    confidence: 90,
+                },
+                Sniffer {
+                    offset: 0,
+                    magic: &[0, 0, 0, 0x0c, b'J', b'X', b'L', b' ', 0x0d, 0x0a, 0x87, 0x0a],
+                    confidence: 100,
+                },
+            ],
+            false,
+            schema(Vec::new()),
+            "ISO/IEC 18181 (read only: see docs/formats/jxl.md for the supported subset)",
+        ),
+        describe(
             PNM,
             "Netpbm",
             &["pnm", "pbm", "pgm", "ppm", "pam"],
@@ -625,7 +648,7 @@ pub fn register(registry: &mut Registry) {
     ];
     for mut f in formats {
         let (id, name) = (f.id, f.name);
-        if id == DNG {
+        if id == DNG || id == JXL {
             f.capabilities.write = false;
             f.capabilities.alpha = false;
         }
@@ -639,7 +662,7 @@ pub fn register(registry: &mut Registry) {
             time: 2,
             description: decode_description(name),
         });
-        if id == DNG {
+        if id == DNG || id == JXL {
             continue;
         }
         registry.add_edge(Edge {
@@ -666,6 +689,7 @@ fn decode_description(name: &str) -> &'static str {
         "JPEG" => "Decode JPEG",
         "TIFF" => "Decode TIFF",
         "DNG" => "Develop DNG raw data",
+        "JPEG XL" => "Decode JPEG XL",
         "WebP" => "Decode WebP",
         "ICO / CUR" => "Decode ICO",
         "ICNS" => "Decode ICNS",
@@ -712,6 +736,7 @@ pub fn decode(
         JPEG => jpeg::decode(data, limits, progress),
         TIFF => tiff::decode(data, limits, progress),
         DNG => dng::decode(data, limits, progress),
+        JXL => jxl::decode(data, limits),
         WEBP => webp::decode(data, limits, progress),
         ICO => ico::decode(data, limits, progress),
         ICNS => icns::decode(data, limits, progress),
@@ -1103,6 +1128,12 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
             return Err(Error::new(
                 ErrorCode::UnsupportedFormat,
                 "DNG can be read but not written",
+            ))
+        }
+        JXL => {
+            return Err(Error::new(
+                ErrorCode::UnsupportedFormat,
+                "JPEG XL can be read but not written",
             ))
         }
         other => {

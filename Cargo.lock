@@ -2264,12 +2264,20 @@ dependencies = [
  "oc-compress",
  "oc-core",
  "oc-io",
+ "oc-jxl",
  "oc-text",
  "oc-vp8",
 ]
 
 [[package]]
 name = "oc-io"
+version = "3.0.3"
+dependencies = [
+ "oc-core",
+]
+
+[[package]]
+name = "oc-jxl"
 version = "3.0.3"
 dependencies = [
  "oc-core",
