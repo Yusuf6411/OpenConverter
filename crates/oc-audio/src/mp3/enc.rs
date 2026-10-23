@@ -83,9 +83,11 @@ impl Bw {
 
 struct Cand {
     select: usize,
-    base: usize,
     linbits: u32,
     maxv: i32,
+    /// Bits of a pair (code and sign bits) by `min(x, 15) * 16 + min(y, 15)`; escape bits
+    /// for values of 15 and more come on top.
+    cost: [u16; 256],
 }
 
 struct Tables {
@@ -121,11 +123,20 @@ fn tables() -> &'static Tables {
                 13 | 15 => 15,
                 _ => 15 + (1i32 << lin) - 1,
             };
+            let mut cost = [0u16; 256];
+            if let Some(tab) = code.get(base) {
+                for x in 0..16usize {
+                    for y in 0..16usize {
+                        let len = tab.get(x * 16 + y).map_or(0, |e| u16::from(e.0));
+                        cost[x * 16 + y] = len + u16::from(x > 0) + u16::from(y > 0);
+                    }
+                }
+            }
             cands.push(Cand {
                 select,
-                base,
                 linbits: u32::from(lin),
                 maxv,
+                cost,
             });
         }
         Tables { code, cands }
@@ -134,21 +145,18 @@ fn tables() -> &'static Tables {
 
 const BIG: u32 = 1 << 20;
 
-fn pair_cost(t: &Tables, c: &Cand, x: i32, y: i32) -> u32 {
+#[inline(always)]
+fn pair_cost(c: &Cand, x: i32, y: i32) -> u32 {
     if x > c.maxv || y > c.maxv {
         return BIG;
     }
-    let esc = c.base == 16 || c.base == 24;
-    let (cx, cy) = if esc { (x.min(15), y.min(15)) } else { (x, y) };
-    let (len, _) = t.code[c.base][(cx * 16 + cy) as usize];
-    let mut bits = u32::from(len) + u32::from(x > 0) + u32::from(y > 0);
-    if esc {
-        if x >= 15 {
-            bits += c.linbits;
-        }
-        if y >= 15 {
-            bits += c.linbits;
-        }
+    let (cx, cy) = (x.min(15) as usize, y.min(15) as usize);
+    let mut bits = u32::from(c.cost[cx * 16 + cy]);
+    if x >= 15 {
+        bits += c.linbits;
+    }
+    if y >= 15 {
+        bits += c.linbits;
     }
     bits
 }
@@ -182,11 +190,16 @@ fn plan(is: &[i32; 576], rate: u32) -> Coded {
     // Cumulative cost of every candidate table over the pairs.
     let ncand = t.cands.len();
     let mut cum = vec![0u32; ncand * (nb + 1)];
+    let mut pairs = [(0i32, 0i32); 288];
+    for (p, slot) in pairs.iter_mut().enumerate().take(nb) {
+        *slot = (is[2 * p].abs(), is[2 * p + 1].abs());
+    }
     for (ci, c) in t.cands.iter().enumerate() {
         let row = &mut cum[ci * (nb + 1)..(ci + 1) * (nb + 1)];
-        for p in 0..nb {
-            let cost = pair_cost(t, c, is[2 * p].abs(), is[2 * p + 1].abs());
-            row[p + 1] = row[p] + cost;
+        let mut acc = 0u32;
+        for (p, &(x, y)) in pairs.iter().enumerate().take(nb) {
+            acc += pair_cost(c, x, y);
+            row[p + 1] = acc;
         }
     }
     let best = |a: usize, b: usize| -> (u32, usize) {
@@ -204,18 +217,36 @@ fn plan(is: &[i32; 576], rate: u32) -> Coded {
     };
     let bands = long_bands(rate);
     let mut winner = (u32::MAX, 0usize, 0usize, [0usize; 3]);
+    // The cheapest table from `p1` to the end depends only on `p1`; remember it per boundary.
+    let mut tails: Vec<Option<(usize, (u32, usize))>> = vec![None; 24];
     for r0 in 0..16usize {
         let p0 = (usize::from(bands[(r0 + 1).min(22)]) / 2).min(nb);
         let (c0, t0) = best(0, p0);
         if c0 >= BIG {
             continue;
         }
+        let mut last: Option<(usize, (u32, usize))> = None;
         for r1 in 0..8usize {
-            let p1 = (usize::from(bands[(r0 + r1 + 2).min(22)]) / 2)
-                .min(nb)
-                .max(p0);
-            let (c1_, t1) = best(p0, p1);
-            let (c2, t2) = best(p1, nb);
+            let j = (r0 + r1 + 2).min(22);
+            let p1 = (usize::from(bands[j]) / 2).min(nb).max(p0);
+            let (c1_, t1) = match last {
+                Some((lp, r)) if lp == p1 => r,
+                _ => {
+                    let r = best(p0, p1);
+                    last = Some((p1, r));
+                    r
+                }
+            };
+            let (c2, t2) = match tails.get(j).copied().flatten() {
+                Some((tp, r)) if tp == p1 => r,
+                _ => {
+                    let r = best(p1, nb);
+                    if let Some(slot) = tails.get_mut(j) {
+                        *slot = Some((p1, r));
+                    }
+                    r
+                }
+            };
             let total = c0 + c1_ + c2;
             if c1_ < BIG && c2 < BIG && total < winner.0 {
                 winner = (total, r0, r1, [t0, t1, t2]);
@@ -515,14 +546,19 @@ fn code_granule(
     }
     let (mut lo, mut hi) = (0i32, 255i32);
     // hi always fits; find the smallest fitting gain by bisection.
+    let mut kept: Option<(i32, Vec<Coded>)> = None;
     while lo < hi {
         let mid = (lo + hi) / 2;
         match eval(mid) {
-            Some(v) if fits(&v) => hi = mid,
+            Some(v) if fits(&v) => {
+                hi = mid;
+                kept = Some((mid, v));
+            }
             _ => lo = mid + 1,
         }
     }
-    let ch = eval(lo).unwrap_or_else(|| {
+    let cached = kept.and_then(|(g, v)| (g == lo).then_some(v));
+    let ch = cached.or_else(|| eval(lo)).unwrap_or_else(|| {
         quants
             .iter()
             .map(|q| {

@@ -544,6 +544,8 @@ pub struct Params {
     nice: usize,
     lazy: u8,
     hash_bits: u32,
+    /// Levels 1 to 3: one candidate from each of two hash tables, no chains.
+    fast: bool,
 }
 
 fn params(level: i32) -> Params {
@@ -567,6 +569,7 @@ fn params(level: i32) -> Params {
         nice,
         lazy,
         hash_bits: 17,
+        fast: level <= 3,
     }
 }
 
@@ -574,6 +577,8 @@ struct Matcher<'a> {
     d: &'a [u8],
     head: Vec<u32>,
     prev: Vec<u32>,
+    /// Eight-byte hash table of the fast parser.
+    long: Vec<u32>,
     mask: usize,
     window: usize,
     p: Params,
@@ -588,7 +593,12 @@ impl<'a> Matcher<'a> {
         Self {
             d,
             head: vec![NIL; 1 << p.hash_bits],
-            prev: vec![NIL; size],
+            prev: if p.fast { Vec::new() } else { vec![NIL; size] },
+            long: if p.fast {
+                vec![NIL; 1 << p.hash_bits]
+            } else {
+                Vec::new()
+            },
             mask: size - 1,
             window: size.min(window),
             p,
@@ -599,6 +609,24 @@ impl<'a> Matcher<'a> {
     fn hash(&self, i: usize) -> usize {
         let w = u32::from_le_bytes([self.d[i], self.d[i + 1], self.d[i + 2], self.d[i + 3]]);
         (w.wrapping_mul(2_654_435_761) >> (32 - self.p.hash_bits)) as usize
+    }
+
+    fn hash8(&self, i: usize) -> usize {
+        let mut a = [0u8; 8];
+        if let Some(w) = self.d.get(i..i + 8) {
+            a.copy_from_slice(w);
+        }
+        (u64::from_le_bytes(a).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> (64 - self.p.hash_bits))
+            as usize
+    }
+
+    /// Record position `i` in both tables of the fast parser.
+    fn put(&mut self, i: usize) {
+        if i + 8 <= self.d.len() {
+            let (h8, h4) = (self.hash8(i), self.hash(i));
+            self.long[h8] = i as u32;
+            self.head[h4] = i as u32;
+        }
     }
 
     fn insert(&mut self, i: usize) {
@@ -613,6 +641,22 @@ impl<'a> Matcher<'a> {
 
     fn len(&self, a: usize, b: usize, max: usize) -> usize {
         let mut n = 0;
+        // eight bytes at a time while both sides have them
+        while n + 8 <= max {
+            let (Some(x), Some(y)) = (self.d.get(a + n..a + n + 8), self.d.get(b + n..b + n + 8))
+            else {
+                break;
+            };
+            let mut xa = [0u8; 8];
+            let mut ya = [0u8; 8];
+            xa.copy_from_slice(x);
+            ya.copy_from_slice(y);
+            let diff = u64::from_le_bytes(xa) ^ u64::from_le_bytes(ya);
+            if diff != 0 {
+                return n + (diff.trailing_zeros() / 8) as usize;
+            }
+            n += 8;
+        }
         while n < max && self.d[a + n] == self.d[b + n] {
             n += 1;
         }
@@ -704,6 +748,74 @@ fn gain(len: usize, dist: usize, rep: bool) -> i64 {
     }
 }
 
+/// The fast parser for levels 1 to 3: greedy, one candidate from each hash table plus the
+/// first repeat offset, and a growing step through data that does not match.
+fn parse_fast(
+    m: &mut Matcher<'_>,
+    start: usize,
+    end: usize,
+    reps: &mut [u32; 3],
+    literals: &mut Vec<u8>,
+) -> Vec<Seq> {
+    let d = m.d;
+    let mut seqs = Vec::new();
+    let mut i = start;
+    let mut anchor = start;
+    while i + 8 <= end {
+        let ll = (i - anchor) as u32;
+        let max = end - i;
+        let (h8, h4) = (m.hash8(i), m.hash(i));
+        let (c8, c4) = (m.long[h8], m.head[h4]);
+        m.long[h8] = i as u32;
+        m.head[h4] = i as u32;
+        let mut best = (0usize, 0usize, i64::MIN);
+        let r = reps[0] as usize;
+        if r <= i && r > 0 {
+            let l = m.len(i - r, i, max);
+            if l >= MIN_MATCH && is_repeat(r as u32, ll, reps) {
+                best = (l, r, gain(l, r, true));
+            }
+        }
+        for c in [c8, c4] {
+            if c == NIL {
+                continue;
+            }
+            let c = c as usize;
+            if c >= i || i - c > m.window {
+                continue;
+            }
+            let l = m.len(c, i, max);
+            if l >= 4 {
+                let g = gain(l, i - c, is_repeat((i - c) as u32, ll, reps));
+                if g > best.2 {
+                    best = (l, i - c, g);
+                }
+            }
+        }
+        if best.0 == 0 {
+            i += 1 + ((i - anchor) >> 6);
+            continue;
+        }
+        let (len, dist, _) = best;
+        literals.extend_from_slice(&d[anchor..i]);
+        let ov = offset_value(dist as u32, ll, reps);
+        seqs.push(Seq {
+            ll,
+            ml: len as u32,
+            ov,
+        });
+        m.put(i + 1);
+        if len > 4 {
+            m.put(i + len - 2);
+            m.put(i + len - 1);
+        }
+        i += len;
+        anchor = i;
+    }
+    literals.extend_from_slice(&d[anchor..end]);
+    seqs
+}
+
 /// Splits `d[start..end]` into sequences and trailing literals.
 fn parse(
     m: &mut Matcher<'_>,
@@ -751,7 +863,8 @@ fn parse(
             (0, 0, i64::MIN)
         };
         if len == 0 {
-            i += 1;
+            // Long runs without a match: look at fewer positions (as zstd does).
+            i += 1 + ((i - anchor) >> 7);
             continue;
         }
         // Lazy matching: a clearly better match one or two bytes later wins.
@@ -849,7 +962,11 @@ pub fn compress(data: &[u8], level: i32, checksum: bool) -> Vec<u8> {
         }
         let saved = reps;
         let mut lits = Vec::new();
-        let seqs = parse(&mut m, pos, end, &mut reps, &mut lits);
+        let seqs = if m.p.fast {
+            parse_fast(&mut m, pos, end, &mut reps, &mut lits)
+        } else {
+            parse(&mut m, pos, end, &mut reps, &mut lits)
+        };
         let mut body = literals_section(&lits);
         body.extend(sequences_section(&seqs));
         if body.len() >= size {

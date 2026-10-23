@@ -1419,6 +1419,25 @@ fn build_image(
                 (None, None) if f.lossless => meta.jfif.is_none(),
                 (None, None) => meta.jfif.is_none() && ids.as_slice() == b"RGB",
             };
+            let direct = match planes.as_slice() {
+                [pa, pb, pc] if bits == 8 => (pa.get(..n), pb.get(..n), pc.get(..n)),
+                _ => (None, None, None),
+            };
+            if let (Some(p0), Some(p1), Some(p2)) = direct {
+                let mut out = Vec::with_capacity(n * 3);
+                if rgb_direct {
+                    for ((&a, &b), &c) in p0.iter().zip(p1).zip(p2) {
+                        out.extend([a as u8, b as u8, c as u8]);
+                    }
+                } else {
+                    for ((&y, &cb), &cr) in p0.iter().zip(p1).zip(p2) {
+                        let [r, g, b] = ycc_to_rgb(i32::from(y), i32::from(cb), i32::from(cr), 8);
+                        out.extend([r as u8, g as u8, b as u8]);
+                    }
+                }
+                return Image::new(w as u32, h as u32, Layout::Rgb, Depth::Eight, out)
+                    .map(|i| (i, false));
+            }
             let mut rgb = Vec::with_capacity(n * 3);
             for i in 0..n {
                 let px = if rgb_direct {

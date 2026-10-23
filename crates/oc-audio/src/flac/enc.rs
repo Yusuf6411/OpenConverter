@@ -70,9 +70,11 @@ impl Bw {
         }
         self.acc = (self.acc << bits) | (v & ((1u64 << bits) - 1));
         self.n += bits;
-        while self.n >= 8 {
-            self.n -= 8;
-            self.buf.push((self.acc >> self.n) as u8);
+        if self.n >= 8 {
+            let nb = (self.n / 8) as usize;
+            self.n %= 8;
+            let bytes = (self.acc >> self.n).to_be_bytes();
+            self.buf.extend_from_slice(&bytes[8 - nb..]);
         }
         self.acc &= (1u64 << self.n) - 1;
     }
@@ -123,22 +125,29 @@ fn best_rice(res: &[i64], order: usize, max_po: u32) -> (usize, u32, Vec<u32>, b
     {
         po_limit += 1;
     }
+    // Partition sums at the finest order; coarser orders add neighbours. The cost of a
+    // partition with parameter k is estimated as (sum >> k) + n * (k + 1), which is within n
+    // bits of the exact size; the estimate only chooses, the real parameters are written.
+    let parts_f = 1usize << po_limit;
+    let per_f = block >> po_limit;
+    let mut sums: Vec<u64> = Vec::with_capacity(parts_f);
+    let mut counts: Vec<usize> = Vec::with_capacity(parts_f);
+    for p in 0..parts_f {
+        let lo = p * per_f + if p == 0 { order } else { 0 };
+        let hi = (p + 1) * per_f;
+        let mut sum = 0u64;
+        for &v in res.get(lo..hi).unwrap_or(&[]) {
+            sum += zigzag(v);
+        }
+        sums.push(sum);
+        counts.push(hi.saturating_sub(lo));
+    }
     let mut best: Option<(usize, u32, Vec<u32>, bool)> = None;
-    // Per-sample zigzag values.
-    let z: Vec<u64> = res.iter().map(|&v| zigzag(v)).collect();
-    for po in 0..=po_limit {
-        let parts = 1usize << po;
-        let per = block >> po;
-        let mut params = Vec::with_capacity(parts);
+    for po in (0..=po_limit).rev() {
+        let mut params = Vec::with_capacity(sums.len());
         let mut total = 6; // method (2) + order (4)
         let mut wide = false;
-        let mut start = 0;
-        for p in 0..parts {
-            let n = if p == 0 { per - order } else { per };
-            let slice = &z[start + if p == 0 { order } else { 0 }..start + per];
-            start += per;
-            let sum: u64 = slice.iter().sum();
-            // k near log2(mean).
+        for (&sum, &n) in sums.iter().zip(&counts) {
             let mean = sum / (n.max(1) as u64);
             let k0 = if mean == 0 {
                 0
@@ -148,7 +157,7 @@ fn best_rice(res: &[i64], order: usize, max_po: u32) -> (usize, u32, Vec<u32>, b
             let mut bestk = 0;
             let mut bestc = u64::MAX;
             for k in k0.saturating_sub(1)..=(k0 + 1).min(30) {
-                let c: u64 = slice.iter().map(|&v| (v >> k) + 1 + u64::from(k)).sum();
+                let c = (sum >> k) + n as u64 * (u64::from(k) + 1);
                 if c < bestc {
                     bestc = c;
                     bestk = k;
@@ -160,12 +169,13 @@ fn best_rice(res: &[i64], order: usize, max_po: u32) -> (usize, u32, Vec<u32>, b
             params.push(bestk);
             total += bestc as usize;
         }
-        total += parts * if wide { 5 } else { 4 };
-        if wide {
-            // Switching to the 5-bit method; the cost above used 5 already.
-        }
+        total += sums.len() * if wide { 5 } else { 4 };
         if best.as_ref().is_none_or(|b| total < b.0) {
             best = Some((total, po, params, wide));
+        }
+        if po > 0 {
+            sums = sums.chunks(2).map(|c| c.iter().sum()).collect();
+            counts = counts.chunks(2).map(|c| c.iter().sum()).collect();
         }
     }
     best.unwrap_or((usize::MAX, 0, vec![0], false))
@@ -183,8 +193,14 @@ fn write_residual(w: &mut Bw, res: &[i64], order: usize, po: u32, params: &[u32]
         let hi = (p + 1) * per;
         for &v in &res[lo..hi] {
             let z = zigzag(v);
-            w.unary_zeros(z >> k);
-            w.put_wide(z & ((1u64 << k) - 1), k);
+            let q = z >> k;
+            if q + 1 + u64::from(k) <= 32 {
+                // zeros, the stop bit and the k low bits in one write
+                w.put((1u64 << k) | (z & ((1u64 << k) - 1)), q as u32 + 1 + k);
+            } else {
+                w.unary_zeros(q);
+                w.put_wide(z & ((1u64 << k) - 1), k);
+            }
         }
     }
 }
@@ -232,15 +248,79 @@ fn fixed_residual(x: &[i64], order: usize) -> Vec<i64> {
     r
 }
 
-fn encode_fixed(x: &[i64], order: usize, bps: u32, wasted: u32, p: &Params) -> Sub {
+/// A subframe chosen by estimated size; only the winner is written out.
+enum Plan {
+    Fixed {
+        order: usize,
+        res: Vec<i64>,
+        po: u32,
+        params: Vec<u32>,
+        wide: bool,
+    },
+    Lpc {
+        q: Vec<i64>,
+        shift: i32,
+        precision: u32,
+        res: Vec<i64>,
+        po: u32,
+        params: Vec<u32>,
+        wide: bool,
+    },
+}
+
+fn plan_fixed(x: &[i64], order: usize, bps: u32, p: &Params) -> (usize, Plan) {
     let res = fixed_residual(x, order);
-    let (_, po, params, wide) = best_rice(&res, order, p.max_po);
+    let (cost, po, params, wide) = best_rice(&res, order, p.max_po);
+    (
+        cost.saturating_add(order * bps as usize),
+        Plan::Fixed {
+            order,
+            res,
+            po,
+            params,
+            wide,
+        },
+    )
+}
+
+fn build(plan: Plan, x: &[i64], bps: u32, wasted: u32) -> Sub {
     let mut w = Bw::default();
-    header_bits(&mut w, 8 + order as u64, wasted);
-    for &v in &x[..order] {
-        w.put_wide((v as u64) & ((1u64 << bps) - 1), bps);
+    match plan {
+        Plan::Fixed {
+            order,
+            res,
+            po,
+            params,
+            wide,
+        } => {
+            header_bits(&mut w, 8 + order as u64, wasted);
+            for &v in &x[..order] {
+                w.put_wide((v as u64) & ((1u64 << bps) - 1), bps);
+            }
+            write_residual(&mut w, &res, order, po, &params, wide);
+        }
+        Plan::Lpc {
+            q,
+            shift,
+            precision,
+            res,
+            po,
+            params,
+            wide,
+        } => {
+            let order = q.len();
+            header_bits(&mut w, 31 + order as u64, wasted);
+            for &v in &x[..order] {
+                w.put_wide((v as u64) & ((1u64 << bps) - 1), bps);
+            }
+            w.put(u64::from(precision - 1), 4);
+            w.put(shift as u64, 5);
+            for &c in &q {
+                w.put_wide((c as u64) & ((1u64 << precision) - 1), precision);
+            }
+            write_residual(&mut w, &res, order, po, &params, wide);
+        }
     }
-    write_residual(&mut w, &res, order, po, &params, wide);
     Sub { w }
 }
 
@@ -323,30 +403,32 @@ fn lpc_residual(x: &[i64], q: &[i64], shift: i32) -> Option<Vec<i64>> {
     Some(r)
 }
 
-fn encode_lpc(
+fn plan_lpc(
     x: &[i64],
-    q: &[i64],
+    q: Vec<i64>,
     shift: i32,
     precision: u32,
     bps: u32,
-    wasted: u32,
     p: &Params,
-) -> Option<Sub> {
+) -> Option<(usize, Plan)> {
     let order = q.len();
-    let res = lpc_residual(x, q, shift)?;
-    let (_, po, params, wide) = best_rice(&res, order, p.max_po);
-    let mut w = Bw::default();
-    header_bits(&mut w, 31 + order as u64, wasted);
-    for &v in &x[..order] {
-        w.put_wide((v as u64) & ((1u64 << bps) - 1), bps);
-    }
-    w.put(u64::from(precision - 1), 4);
-    w.put(shift as u64, 5);
-    for &c in q {
-        w.put_wide((c as u64) & ((1u64 << precision) - 1), precision);
-    }
-    write_residual(&mut w, &res, order, po, &params, wide);
-    Some(Sub { w })
+    let res = lpc_residual(x, &q, shift)?;
+    let (cost, po, params, wide) = best_rice(&res, order, p.max_po);
+    let cost = cost
+        .saturating_add(order * bps as usize)
+        .saturating_add(9 + order * precision as usize);
+    Some((
+        cost,
+        Plan::Lpc {
+            q,
+            shift,
+            precision,
+            res,
+            po,
+            params,
+            wide,
+        },
+    ))
 }
 
 /// Best subframe for one channel whose samples need `bps` bits.
@@ -372,12 +454,13 @@ fn encode_subframe(x: &[i64], bps: u32, p: &Params) -> Sub {
         w.put_wide((x[0] as u64) & ((1u64 << bps) - 1), bps);
         return Sub { w };
     }
-    let mut best = verbatim(x, bps, wasted);
+    let mut best: Option<(usize, Plan)> = None;
+    let verbatim_cost = n * bps as usize;
     let maxfix = 4.min(n.saturating_sub(1));
     for order in 0..=maxfix {
-        let c = encode_fixed(x, order, bps, wasted, p);
-        if c.w.bits() < best.w.bits() {
-            best = c;
+        let c = plan_fixed(x, order, bps, p);
+        if best.as_ref().is_none_or(|b| c.0 < b.0) {
+            best = Some(c);
         }
     }
     let max_lpc = p.max_lpc.min(n.saturating_sub(1)).min(32);
@@ -425,9 +508,9 @@ fn encode_subframe(x: &[i64], bps: u32, p: &Params) -> Sub {
                 };
                 for pr in precisions {
                     if let Some((q, shift)) = quantize(coefs, pr) {
-                        if let Some(c) = encode_lpc(x, &q, shift, pr, bps, wasted, p) {
-                            if c.w.bits() < best.w.bits() {
-                                best = c;
+                        if let Some(c) = plan_lpc(x, q, shift, pr, bps, p) {
+                            if best.as_ref().is_none_or(|b| c.0 < b.0) {
+                                best = Some(c);
                             }
                         }
                     }
@@ -435,7 +518,10 @@ fn encode_subframe(x: &[i64], bps: u32, p: &Params) -> Sub {
             }
         }
     }
-    best
+    match best {
+        Some((cost, plan)) if cost < verbatim_cost => build(plan, x, bps, wasted),
+        _ => verbatim(x, bps, wasted),
+    }
 }
 
 fn utf8_number(v: u64, out: &mut Vec<u8>) {

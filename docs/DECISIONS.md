@@ -72,5 +72,5 @@ Consequences: `cargo xtask check-deps` and `cargo deny` still pass; the crate bu
 
 ## ADR-0015: Performance misses are recorded, not hidden
 Context: the Phase 8 pass found that most measured operations miss their §17.2 budget, several by more than 4× (Zstandard encode and decode, Inflate, JPEG decode, PNG decode). The codecs are correct and bit-exact against their references; they are scalar, single-threaded and not tuned.
-Decision: ship the numbers in docs/PERFORMANCE.md rather than weaken the budgets. Speed work (SIMD kernels in `oc-simd`, a faster Zstandard match finder, table-driven Inflate, threaded encoders) is the next performance task and needs criterion benchmarks first so that gains and regressions are measurable.
+Decision: ship the numbers in docs/PERFORMANCE.md rather than weaken the budgets. A first speed pass (v3.0.1) fixed the worst cases (Zstandard encode 30×, Inflate, FLAC, PNG and JPEG decode) and the rest is still open. Further speed work (SIMD kernels in `oc-simd`, a faster Zstandard match finder, table-driven Inflate, threaded encoders) is the next performance task and needs criterion benchmarks first so that gains and regressions are measurable.
 Consequences: v3.0.0 does not meet the §17.2 targets. Users converting very large files will notice on Zstandard and XZ.

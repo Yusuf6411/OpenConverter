@@ -89,16 +89,20 @@ fn paeth(a: u8, b: u8, c: u8) -> u8 {
     }
 }
 
-/// Undo the PNG filter on one row in place. `prev` is the previous unfiltered row.
+/// Undo the PNG filter on one row in place. `prev` is the previous unfiltered row and has the
+/// same length as `row`.
+#[allow(clippy::indexing_slicing)]
 fn unfilter(kind: u8, row: &mut [u8], prev: &[u8], bpp: usize) -> Result<()> {
+    let n = row.len();
+    if prev.len() < n {
+        return Err(Error::corrupt("PNG row length mismatch"));
+    }
+    let prev = &prev[..n];
     match kind {
         0 => {}
         1 => {
-            for i in bpp..row.len() {
-                let a = row.get(i - bpp).copied().unwrap_or(0);
-                if let Some(x) = row.get_mut(i) {
-                    *x = x.wrapping_add(a);
-                }
+            for i in bpp..n {
+                row[i] = row[i].wrapping_add(row[i - bpp]);
             }
         }
         2 => {
@@ -107,34 +111,21 @@ fn unfilter(kind: u8, row: &mut [u8], prev: &[u8], bpp: usize) -> Result<()> {
             }
         }
         3 => {
-            for i in 0..row.len() {
-                let a = if i >= bpp {
-                    u16::from(row.get(i - bpp).copied().unwrap_or(0))
-                } else {
-                    0
-                };
-                let b = u16::from(prev.get(i).copied().unwrap_or(0));
-                if let Some(x) = row.get_mut(i) {
-                    *x = x.wrapping_add(((a + b) / 2) as u8);
-                }
+            for i in 0..bpp.min(n) {
+                row[i] = row[i].wrapping_add(prev[i] >> 1);
+            }
+            for i in bpp..n {
+                let avg = ((u16::from(row[i - bpp]) + u16::from(prev[i])) >> 1) as u8;
+                row[i] = row[i].wrapping_add(avg);
             }
         }
         4 => {
-            for i in 0..row.len() {
-                let a = if i >= bpp {
-                    row.get(i - bpp).copied().unwrap_or(0)
-                } else {
-                    0
-                };
-                let b = prev.get(i).copied().unwrap_or(0);
-                let c = if i >= bpp {
-                    prev.get(i - bpp).copied().unwrap_or(0)
-                } else {
-                    0
-                };
-                if let Some(x) = row.get_mut(i) {
-                    *x = x.wrapping_add(paeth(a, b, c));
-                }
+            for i in 0..bpp.min(n) {
+                row[i] = row[i].wrapping_add(prev[i]);
+            }
+            for i in bpp..n {
+                let p = paeth(row[i - bpp], prev[i], prev[i - bpp]);
+                row[i] = row[i].wrapping_add(p);
             }
         }
         _ => return Err(Error::corrupt(format!("unknown PNG filter type {kind}"))),
@@ -526,6 +517,47 @@ fn decode_pixels(
         return Err(Error::truncated(
             "PNG image data is shorter than the header implies",
         ));
+    }
+
+    // Common case: 8-bit samples in their final layout, so unfilter straight into the pixels.
+    if !hdr.interlaced
+        && depth == 8
+        && trns.is_empty()
+        && matches!(
+            ct,
+            ColorType::Gray | ColorType::GrayAlpha | ColorType::Rgb | ColorType::Rgba
+        )
+    {
+        let rb = hdr.row_bytes(width as usize);
+        let bpp = ch;
+        let mut out: Vec<u8> = Vec::with_capacity(rb * height as usize);
+        let zeros = vec![0u8; rb];
+        for y in 0..height as usize {
+            if y % 64 == 0 {
+                progress.check_cancelled()?;
+            }
+            let at = y * (rb + 1);
+            let kind = raw.get(at).copied().unwrap_or(0);
+            let row = raw.get(at + 1..at + 1 + rb).ok_or_else(|| {
+                Error::truncated("PNG image data is shorter than the header implies")
+            })?;
+            let start = out.len();
+            out.extend_from_slice(row);
+            let (before, cur) = out.split_at_mut(start);
+            let prev = if start >= rb {
+                before.get(start - rb..).unwrap_or(&zeros)
+            } else {
+                &zeros
+            };
+            unfilter(kind, cur, prev, bpp)?;
+        }
+        let layout = match ct {
+            ColorType::Gray => Layout::Gray,
+            ColorType::GrayAlpha => Layout::GrayAlpha,
+            ColorType::Rgb => Layout::Rgb,
+            _ => Layout::Rgba,
+        };
+        return Image::new(width, height, layout, Depth::Eight, out);
     }
 
     // Unfilter every pass into one sample plane (palette index or channel values).

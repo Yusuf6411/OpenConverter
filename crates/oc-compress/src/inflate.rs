@@ -1,4 +1,5 @@
 //! DEFLATE decompression (RFC 1951). Bounded by [`Limits`], cancellable via [`Progress`].
+#![allow(clippy::indexing_slicing)]
 use oc_core::{Error, Limits, Progress, Result};
 use oc_io::ByteReader;
 
@@ -50,6 +51,29 @@ impl<'a> Bits<'a> {
         }
         Ok(())
     }
+    /// Top the buffer up to at least 56 bits, or to the end of the input.
+    #[inline(always)]
+    fn refill(&mut self) {
+        if self.cnt >= 32 {
+            return;
+        }
+        if let Some(w) = self.data.get(self.pos..self.pos + 8) {
+            let mut a = [0u8; 8];
+            a.copy_from_slice(w);
+            self.buf |= u64::from_le_bytes(a) << self.cnt;
+            self.pos += ((63 - self.cnt) >> 3) as usize;
+            self.cnt |= 56;
+            return;
+        }
+        while self.cnt <= 56 {
+            let Some(&b) = self.data.get(self.pos) else {
+                break;
+            };
+            self.pos += 1;
+            self.buf |= u64::from(b) << self.cnt;
+            self.cnt += 8;
+        }
+    }
     fn bits(&mut self, n: u32) -> Result<u32> {
         if n == 0 {
             return Ok(0);
@@ -72,9 +96,14 @@ impl<'a> Bits<'a> {
     }
 }
 
+const FAST: u32 = 10;
+
 struct Huffman {
     count: [u16; 16],
     symbol: Vec<u16>,
+    /// Indexed by the next `FAST` input bits: `symbol << 4 | length`, or 0 when the code is
+    /// longer than `FAST` bits (or unused) and the canonical walk decides.
+    fast: Vec<u16>,
 }
 
 impl Huffman {
@@ -90,6 +119,7 @@ impl Huffman {
             return Ok(Self {
                 count,
                 symbol: Vec::new(),
+                fast: Vec::new(),
             });
         }
         let mut left: i32 = 1;
@@ -118,10 +148,57 @@ impl Huffman {
                 *o += 1;
             }
         }
-        Ok(Self { count, symbol })
+        let mut fast = vec![0u16; 1 << FAST];
+        let mut next = [0u32; 17];
+        let mut code = 0u32;
+        for l in 1..16 {
+            let prev = if l > 1 { u32::from(count[l - 1]) } else { 0 };
+            code = (code + prev) << 1;
+            next[l] = code;
+        }
+        for (sym, &l) in lengths.iter().enumerate() {
+            let l = u32::from(l);
+            if l == 0 || l > FAST {
+                if l != 0 {
+                    if let Some(n) = next.get_mut(l as usize) {
+                        *n += 1;
+                    }
+                }
+                continue;
+            }
+            let c = next[l as usize];
+            next[l as usize] += 1;
+            let rev = c.reverse_bits() >> (32 - l);
+            let entry = ((sym as u16) << 4) | l as u16;
+            let mut i = rev as usize;
+            while i < fast.len() {
+                fast[i] = entry;
+                i += 1 << l;
+            }
+        }
+        Ok(Self {
+            count,
+            symbol,
+            fast,
+        })
     }
 
+    #[inline(always)]
     fn decode(&self, b: &mut Bits<'_>) -> Result<u16> {
+        if !self.fast.is_empty() {
+            b.refill();
+            let e = self.fast[(b.buf & ((1 << FAST) - 1)) as usize];
+            let l = u32::from(e & 15);
+            if l != 0 && l <= b.cnt {
+                b.buf >>= l;
+                b.cnt -= l;
+                return Ok(e >> 4);
+            }
+        }
+        self.decode_slow(b)
+    }
+
+    fn decode_slow(&self, b: &mut Bits<'_>) -> Result<u16> {
         let (mut code, mut first, mut index) = (0i32, 0i32, 0i32);
         for &count in self.count.iter().skip(1) {
             code |= b.bits(1)? as i32;
@@ -348,9 +425,14 @@ fn codes(
                     );
                 }
                 let start = out.len() - d;
-                for k in 0..len {
-                    let v = out.get(start + k).copied().unwrap_or(0);
-                    out.push(v);
+                if d >= len {
+                    out.extend_from_within(start..start + len);
+                } else {
+                    out.reserve(len);
+                    for k in 0..len {
+                        let v = out.get(start + k).copied().unwrap_or(0);
+                        out.push(v);
+                    }
                 }
             }
         }

@@ -60,6 +60,11 @@ impl<'a> BackReader<'a> {
     fn bits_at(&self, start: usize, n: u32) -> u64 {
         // `n` <= 32; gather the bytes that hold bits start..start+n.
         let first = start / 8;
+        if let Some(w) = self.data.get(first..first + 8) {
+            let mut a = [0u8; 8];
+            a.copy_from_slice(w);
+            return (u64::from_le_bytes(a) >> (start % 8)) & ((1u64 << n) - 1);
+        }
         let mut acc = 0u64;
         for k in 0..6 {
             acc |= u64::from(self.data.get(first + k).copied().unwrap_or(0)) << (8 * k);
@@ -67,6 +72,7 @@ impl<'a> BackReader<'a> {
         (acc >> (start % 8)) & ((1u64 << n) - 1)
     }
 
+    #[inline(always)]
     pub fn read(&mut self, n: u32) -> u32 {
         if n == 0 {
             return 0;
