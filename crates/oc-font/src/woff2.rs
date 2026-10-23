@@ -327,7 +327,7 @@ fn rebuild_glyf(t: &[u8], limits: &Limits) -> Result<Rebuilt> {
         } else {
             return Err(bad("woff2: bad contour count"));
         }
-        while glyf.len() % 4 != 0 {
+        while !glyf.len().is_multiple_of(4) {
             glyf.push(0);
         }
     }
