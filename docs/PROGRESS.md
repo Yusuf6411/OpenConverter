@@ -75,6 +75,11 @@ Format notes: [formats/containers.md](formats/containers.md), [formats/vp8.md](f
 - [~] M5.7 Video UI: streams inspector with keep/drop per stream, thumbnail strip, trim marks, seven presets; `/api/files/{id}/video`. Driven in headless Chromium. Not done: playback of the original, drag handles on the strip.
 - Fuzz target `video`, run 2 minutes locally.
 
+## Phase 5b: VP9 and AV1
+- [ ] M5.9 VP9, M5.10 AV1 and AVIF: not done, see ADR-0011 (normative tables unavailable). Stream copy of VP9/AV1 between MP4 and WebM already works.
+- [ ] M5.11 subtitle burn-in: moved to Phase 6a.
+- No v2.4.0 tag; the next release is v2.5.0.
+
 ## Known gaps
 - 1.x Python test cases are not ported yet; they are available at tag v1.0.0. Port them as each Rust codec lands (M1.x, M2.x).
 - cargo-deny passes locally (advisories, bans, licenses, sources); the Tauri tree is allowed through named wrappers (ADR-0005).
@@ -84,6 +89,6 @@ Format notes: [formats/containers.md](formats/containers.md), [formats/vp8.md](f
 - [~] M2.8 [COMPATIBILITY.md](COMPATIBILITY.md) is generated from the registry by `tools/gen_compat.py`; screenshots of the UI are in `docs/screenshots/`.
 
 ## Next step
-Phase 5b: VP9 and AV1.
+Phase 6a: raster engine, fonts, SVG, then PDF.
 
 - **Tables (CSV, TSV, JSON, XLSX, ODS)**: `oc-sheet` reads and writes RFC 4180 delimited text (delimiter detection, lenient quotes, BOM, ragged rows padded), flat JSON tables (own strict parser) and, since Phase 3, XLSX and ODS workbooks (M3.5). Engine options mirror 1.x. Fuzz targets `table` and `workbook`.
