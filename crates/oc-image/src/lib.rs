@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod anim;
+pub mod avif;
 mod bc6h;
 mod bc6h_layout;
 pub mod bc7;

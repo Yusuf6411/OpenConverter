@@ -19,4 +19,5 @@ oc-vp8 = { path = "../oc-vp8" }
 oc-theora = { path = "../oc-theora" }
 oc-prores = { path = "../oc-prores" }
 oc-vp9 = { path = "../oc-vp9" }
+oc-av1 = { path = "../oc-av1" }
 oc-audio = { path = "../oc-audio" }

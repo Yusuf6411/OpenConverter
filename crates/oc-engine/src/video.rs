@@ -1668,7 +1668,13 @@ fn anim_over_black(img: &oc_image::Image) -> Vec<u8> {
 fn can_decode_video(c: &str) -> bool {
     matches!(
         c,
-        codec::MJPEG | codec::RAW | codec::VP8 | codec::VP9 | codec::THEORA | codec::PRORES
+        codec::MJPEG
+            | codec::RAW
+            | codec::VP8
+            | codec::VP9
+            | codec::AV1
+            | codec::THEORA
+            | codec::PRORES
     )
 }
 

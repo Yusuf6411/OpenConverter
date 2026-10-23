@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::indexing_slicing)]
 
+pub mod av1;
 pub mod avi;
 pub mod es;
 pub mod flv;

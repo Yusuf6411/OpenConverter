@@ -11,8 +11,8 @@ use oc_core::{
 };
 use oc_image::anim::{self, Animation};
 use oc_image::{
-    bmp, dds, dng, exr, gif, hdr, icc, icns, ico, jpeg, jxl, netpbm, ops, png, psd, qoi, tga, tiff,
-    webp, Image,
+    avif, bmp, dds, dng, exr, gif, hdr, icc, icns, ico, jpeg, jxl, netpbm, ops, png, psd, qoi, tga,
+    tiff, webp, Image,
 };
 
 pub const PNG: FormatId = FormatId("png");
@@ -34,11 +34,13 @@ pub const WEBP: FormatId = FormatId("webp");
 pub const DNG: FormatId = FormatId("dng");
 /// JPEG XL; read only.
 pub const JXL: FormatId = FormatId("jxl");
+/// AVIF; read only.
+pub const AVIF: FormatId = FormatId("avif");
 /// Internal hub; never shown to users.
 pub const IMAGE_IR: FormatId = FormatId("image-ir");
 
-pub const FORMATS: [FormatId; 17] = [
-    PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, DDS, PSD, HDR, EXR, TIFF, WEBP, DNG, JXL,
+pub const FORMATS: [FormatId; 18] = [
+    PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, DDS, PSD, HDR, EXR, TIFF, WEBP, DNG, JXL, AVIF,
 ];
 
 pub fn is_image(id: FormatId) -> bool {
@@ -630,6 +632,27 @@ pub fn register(registry: &mut Registry) {
             "ISO/IEC 18181 (read only: see docs/formats/jxl.md for the supported subset)",
         ),
         describe(
+            AVIF,
+            "AVIF",
+            &["avif"],
+            &["image/avif"],
+            vec![
+                Sniffer {
+                    offset: 4,
+                    magic: b"ftypavif",
+                    confidence: 100,
+                },
+                Sniffer {
+                    offset: 4,
+                    magic: b"ftypavis",
+                    confidence: 100,
+                },
+            ],
+            false,
+            schema(Vec::new()),
+            "AV1 Image File Format (read only: stills, grids and alpha; see docs/formats/av1.md)",
+        ),
+        describe(
             PNM,
             "Netpbm",
             &["pnm", "pbm", "pgm", "ppm", "pam"],
@@ -648,7 +671,7 @@ pub fn register(registry: &mut Registry) {
     ];
     for mut f in formats {
         let (id, name) = (f.id, f.name);
-        if id == DNG || id == JXL {
+        if id == DNG || id == JXL || id == AVIF {
             f.capabilities.write = false;
             f.capabilities.alpha = false;
         }
@@ -662,7 +685,7 @@ pub fn register(registry: &mut Registry) {
             time: 2,
             description: decode_description(name),
         });
-        if id == DNG || id == JXL {
+        if id == DNG || id == JXL || id == AVIF {
             continue;
         }
         registry.add_edge(Edge {
@@ -737,6 +760,7 @@ pub fn decode(
         TIFF => tiff::decode(data, limits, progress),
         DNG => dng::decode(data, limits, progress),
         JXL => jxl::decode(data, limits),
+        AVIF => avif::decode(data, limits),
         WEBP => webp::decode(data, limits, progress),
         ICO => ico::decode(data, limits, progress),
         ICNS => icns::decode(data, limits, progress),
@@ -1134,6 +1158,12 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
             return Err(Error::new(
                 ErrorCode::UnsupportedFormat,
                 "JPEG XL can be read but not written",
+            ))
+        }
+        AVIF => {
+            return Err(Error::new(
+                ErrorCode::UnsupportedFormat,
+                "AVIF can be read but not written",
             ))
         }
         other => {

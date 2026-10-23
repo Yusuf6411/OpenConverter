@@ -2267,8 +2267,10 @@ dependencies = [
 name = "oc-image"
 version = "3.0.3"
 dependencies = [
+ "oc-av1",
  "oc-checksum",
  "oc-compress",
+ "oc-container",
  "oc-core",
  "oc-io",
  "oc-jxl",
@@ -2397,6 +2399,7 @@ name = "oc-video"
 version = "3.0.3"
 dependencies = [
  "oc-audio",
+ "oc-av1",
  "oc-container",
  "oc-core",
  "oc-image",

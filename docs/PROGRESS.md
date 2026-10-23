@@ -148,4 +148,5 @@ Speed work against the budgets (ADR-0015), the packaging channels in M8.4, and t
 - VP9 decoding (`oc-vp9`, [formats/vp9.md](formats/vp9.md)), written from the specification and bit-exact with libvpx on 14 streams (tiles, scaled references, 4:4:4, 10-bit, lossless).
 - WavPack decoding (`oc-audio::wavpack`, [formats/wavpack.md](formats/wavpack.md)), matching ffmpeg on 14 files; read only; hybrid blocks untested.
 - JPEG XL decoding (`oc-jxl`, [formats/jxl.md](formats/jxl.md)): lossless and lossy, JPEG recompression, patches, upsampling, noise, progressive DC, float samples and ICC profiles, checked against libjxl's `cjxl` and `djxl`; read only; splines are not supported.
-- Not done: other camera raw formats, APE, AV1 (ADR-0013); the encumbered build (ADR-0010).
+- AV1 decoding and AVIF reading (`oc-av1`, `oc-image::avif`, [formats/av1.md](formats/av1.md)): the whole decoding process of the specification, bit-exact with dav1d on libaom, SVT-AV1 and rav1e streams; read only; super-resolution untested.
+- Not done: other camera raw formats, APE; the encumbered build (ADR-0010).

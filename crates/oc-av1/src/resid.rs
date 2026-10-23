@@ -23,7 +23,13 @@ impl Dec {
     pub fn get_plane_residual_size(&self, subsize: usize, plane: usize) -> usize {
         let sx = if plane > 0 { self.subx } else { 0 };
         let sy = if plane > 0 { self.suby } else { 0 };
-        usize::from(t::SUBSAMPLED_SIZE[subsize][sx][sy])
+        // BLOCK_INVALID only occurs in non-conforming streams; any valid size keeps decoding in bounds.
+        let r = usize::from(t::SUBSAMPLED_SIZE[subsize][sx][sy]);
+        if r >= BLOCK_INVALID {
+            0
+        } else {
+            r
+        }
     }
 
     pub fn compute_prediction(&mut self) {

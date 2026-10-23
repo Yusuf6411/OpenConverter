@@ -10,7 +10,13 @@ use oc_image::{ops, Depth, Layout};
 pub fn can_decode(c: &str) -> bool {
     matches!(
         c,
-        codec::MJPEG | codec::RAW | codec::VP8 | codec::VP9 | codec::THEORA | codec::PRORES
+        codec::MJPEG
+            | codec::RAW
+            | codec::VP8
+            | codec::VP9
+            | codec::AV1
+            | codec::THEORA
+            | codec::PRORES
     )
 }
 
@@ -24,6 +30,7 @@ pub enum Decoder {
     Raw { pix: String, w: usize, h: usize },
     Vp8(Box<crate::vp8::Vp8Decoder>),
     Vp9(Box<crate::vp9::Vp9Decoder>),
+    Av1(Box<crate::av1::Av1Decoder>),
     Theora(Box<crate::theora::TheoraDecoder>),
     ProRes(crate::prores::ProResDecoder),
 }
@@ -38,6 +45,7 @@ impl Decoder {
             codec::RAW => Ok(Self::Raw { pix: s.pix_fmt.clone(), w: s.width as usize, h: s.height as usize }),
             codec::VP8 => Ok(Self::Vp8(Box::new(crate::vp8::Vp8Decoder::new(limits.clone())))),
             codec::VP9 => Ok(Self::Vp9(Box::new(crate::vp9::Vp9Decoder::new(limits)))),
+            codec::AV1 => Ok(Self::Av1(Box::new(crate::av1::Av1Decoder::new(&s.private)))),
             codec::THEORA => Ok(Self::Theora(Box::new(crate::theora::TheoraDecoder::new(&s.private, limits)?))),
             codec::PRORES => Ok(Self::ProRes(crate::prores::ProResDecoder::new(limits))),
             other => Err(Error::new(
@@ -63,6 +71,7 @@ impl Decoder {
             Self::Raw { pix, w, h } => Ok(Some(Picture::from_raw(pix, *w, *h, data)?)),
             Self::Vp8(d) => d.decode(data),
             Self::Vp9(d) => d.decode(data),
+            Self::Av1(d) => d.decode(data),
             Self::Theora(d) => d.decode(data),
             Self::ProRes(d) => d.decode(data),
         }
