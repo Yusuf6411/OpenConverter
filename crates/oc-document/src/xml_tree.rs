@@ -24,7 +24,10 @@ fn local(n: &str) -> &str {
 impl El {
     /// Attribute by local name (`w:val` is `val`).
     pub fn attr(&self, name: &str) -> Option<&str> {
-        self.attrs.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+        self.attrs
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
     }
 
     pub fn children(&self) -> impl Iterator<Item = &El> {

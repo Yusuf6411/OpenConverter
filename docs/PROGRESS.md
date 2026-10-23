@@ -92,6 +92,17 @@ Format notes: [formats/fonts.md](formats/fonts.md), [formats/svg.md](formats/svg
 - [ ] M6.8 PDF UI: the generic option cards show the PDF options (pages, resolution, password); page thumbnails and a page picker are not done.
 - Fuzz target `pdf`. Release v2.5.0 (tagged locally).
 
+## Phase 6b: Documents
+Format notes: [formats/documents.md](formats/documents.md). Oracles used at test time: pandoc, LibreOffice, python-docx, python-pptx, pikepdf, Poppler.
+- [~] M6.10 document model; Markdown (CommonMark 655/655 spec examples, GFM 656/672), HTML reader and writer, TXT and PDF text through the model. The HTML reader is a tolerant tokenizer and tree builder, not the WHATWG algorithm (see formats/documents.md).
+- [~] M6.11 DOCX, ODT, RTF read and write; EPUB read and write; FB2 read. Round trips through Markdown are tested for each, and DOCX, ODT and RTF were opened in LibreOffice and written by it and read back.
+- [~] M6.12 layout engine to PDF (greedy line breaking, embedded font subsets, bookmarks, links, tables, pictures), and the first page as a picture. Not done: Knuth-Plass, hyphenation, footnotes, headers and footers, columns, bundled fallback fonts, SVG output.
+- [ ] M6.13 complex-script shaping, bidi and UAX #14: not done (the PDF writer warns when it meets such text).
+- [~] M6.14 PPTX and ODP to text and outline, and so to every document format, PDF and pictures. Not done: slides drawn as slides.
+- [ ] M6.15 document UI: not done.
+- Fuzz targets `docx`, `odt`, `rtf`, `epub`, `fb2`, `markdown`, `html`; `crates/oc-document/tests/hostile.rs` damages every package format.
+- Release v2.6.0 (tagged locally).
+
 ## Known gaps
 - 1.x Python test cases are not ported yet; they are available at tag v1.0.0. Port them as each Rust codec lands (M1.x, M2.x).
 - cargo-deny passes locally (advisories, bans, licenses, sources); the Tauri tree is allowed through named wrappers (ADR-0005).
@@ -101,6 +112,6 @@ Format notes: [formats/fonts.md](formats/fonts.md), [formats/svg.md](formats/svg
 - [~] M2.8 [COMPATIBILITY.md](COMPATIBILITY.md) is generated from the registry by `tools/gen_compat.py`; screenshots of the UI are in `docs/screenshots/`.
 
 ## Next step
-Phase 6b: Document IR, Markdown, HTML, DOCX/ODT/RTF/EPUB, layout to PDF.
+Phase 6c: stretch formats.
 
 - **Tables (CSV, TSV, JSON, XLSX, ODS)**: `oc-sheet` reads and writes RFC 4180 delimited text (delimiter detection, lenient quotes, BOM, ragged rows padded), flat JSON tables (own strict parser) and, since Phase 3, XLSX and ODS workbooks (M3.5). Engine options mirror 1.x. Fuzz targets `table` and `workbook`.

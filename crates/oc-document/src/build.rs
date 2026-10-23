@@ -75,7 +75,6 @@ impl Builder {
     }
 }
 
-
 impl Builder {
     /// Add a list item at nesting depth `ilvl` of the list identified by `key`.
     pub fn list_item(&mut self, ilvl: usize, key: &str, ordered: bool, start: u32, item: ListItem) {

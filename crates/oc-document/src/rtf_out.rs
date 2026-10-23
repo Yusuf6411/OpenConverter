@@ -88,13 +88,57 @@ impl Out<'_> {
     fn inline(&mut self, i: &Inline, st: &Style) {
         match i {
             Inline::Text(t) => self.run(t, st),
-            Inline::Emph(c) => self.inlines(c, &Style { italic: true, ..st.clone() }),
-            Inline::Strong(c) => self.inlines(c, &Style { bold: true, ..st.clone() }),
-            Inline::Strike(c) => self.inlines(c, &Style { strike: true, ..st.clone() }),
-            Inline::Underline(c) => self.inlines(c, &Style { ul: true, ..st.clone() }),
-            Inline::Sup(c) => self.inlines(c, &Style { sup: true, sub: false, ..st.clone() }),
-            Inline::Sub(c) => self.inlines(c, &Style { sub: true, sup: false, ..st.clone() }),
-            Inline::Code(t) => self.run(t, &Style { code: true, ..st.clone() }),
+            Inline::Emph(c) => self.inlines(
+                c,
+                &Style {
+                    italic: true,
+                    ..st.clone()
+                },
+            ),
+            Inline::Strong(c) => self.inlines(
+                c,
+                &Style {
+                    bold: true,
+                    ..st.clone()
+                },
+            ),
+            Inline::Strike(c) => self.inlines(
+                c,
+                &Style {
+                    strike: true,
+                    ..st.clone()
+                },
+            ),
+            Inline::Underline(c) => self.inlines(
+                c,
+                &Style {
+                    ul: true,
+                    ..st.clone()
+                },
+            ),
+            Inline::Sup(c) => self.inlines(
+                c,
+                &Style {
+                    sup: true,
+                    sub: false,
+                    ..st.clone()
+                },
+            ),
+            Inline::Sub(c) => self.inlines(
+                c,
+                &Style {
+                    sub: true,
+                    sup: false,
+                    ..st.clone()
+                },
+            ),
+            Inline::Code(t) => self.run(
+                t,
+                &Style {
+                    code: true,
+                    ..st.clone()
+                },
+            ),
             Inline::Link { url, content, .. } => {
                 self.s.push_str("{\\field{\\*\\fldinst{HYPERLINK \"");
                 esc(&url.replace('"', "%22"), &mut self.s);
@@ -119,9 +163,9 @@ impl Out<'_> {
                             gh = gh * 8640 / gw.max(1);
                             gw = 8640;
                         }
-                        let _ = write!(
+                        let _ = writeln!(
                             self.s,
-                            "{{\\pict\\{kind}\\picw{w}\\pich{h}\\picwgoal{gw}\\pichgoal{gh}\n"
+                            "{{\\pict\\{kind}\\picw{w}\\pich{h}\\picwgoal{gw}\\pichgoal{gh}"
                         );
                         for (n, b) in img.data.iter().enumerate() {
                             let _ = write!(self.s, "{b:02x}");
@@ -129,7 +173,7 @@ impl Out<'_> {
                                 self.s.push('\n');
                             }
                         }
-                        self.s.push_str("}");
+                        self.s.push('}');
                     }
                     None => {
                         self.dropped += 1;
@@ -156,11 +200,20 @@ impl Out<'_> {
                     "\\pard\\keepn\\sb280\\sa120\\outlinelevel{}\\f2\\fs{fs}{{\\b ",
                     l - 1
                 );
-                self.inlines(content, &Style { bold: false, ..Style::default() });
+                self.inlines(
+                    content,
+                    &Style {
+                        bold: false,
+                        ..Style::default()
+                    },
+                );
                 self.s.push_str("}\\par\n");
             }
             Block::Paragraph(c) => {
-                let _ = write!(self.s, "\\pard\\li{indent}\\sa160\\sl276\\slmult1\\f0\\fs24 ");
+                let _ = write!(
+                    self.s,
+                    "\\pard\\li{indent}\\sa160\\sl276\\slmult1\\f0\\fs24 "
+                );
                 self.inlines(c, &Style::default());
                 self.s.push_str("\\par\n");
             }
@@ -169,7 +222,12 @@ impl Out<'_> {
                     self.block(b, indent + 720);
                 }
             }
-            Block::List { ordered, start, items, .. } => {
+            Block::List {
+                ordered,
+                start,
+                items,
+                ..
+            } => {
                 self.list_id += 1;
                 let id = self.list_id;
                 self.list(*ordered, *start, items, 0, id, indent);
@@ -183,7 +241,8 @@ impl Out<'_> {
                 self.s.push_str("\\pard\\sa120\\par\n");
             }
             Block::Rule => {
-                self.s.push_str("\\pard\\sa120\\brdrb\\brdrs\\brdrw10\\brsp20 \\par\n");
+                self.s
+                    .push_str("\\pard\\sa120\\brdrb\\brdrs\\brdrw10\\brsp20 \\par\n");
             }
             Block::PageBreak => self.s.push_str("\\pard\\page\\par\n"),
             Block::Html(_) => {}
@@ -209,7 +268,10 @@ impl Out<'_> {
                         };
                         let _ = write!(self.s, "\\pard\\intbl{al}\\f0\\fs22 ");
                         if let Some(c) = cell {
-                            let st = Style { bold: c.header, ..Style::default() };
+                            let st = Style {
+                                bold: c.header,
+                                ..Style::default()
+                            };
                             self.inlines(&c.content, &st);
                         }
                         self.s.push_str("\\cell\n");
@@ -221,7 +283,15 @@ impl Out<'_> {
         }
     }
 
-    fn list(&mut self, ordered: bool, start: u32, items: &[ListItem], lvl: i32, id: i32, indent: i32) {
+    fn list(
+        &mut self,
+        ordered: bool,
+        start: u32,
+        items: &[ListItem],
+        lvl: i32,
+        id: i32,
+        indent: i32,
+    ) {
         self.lists.push((id, ordered, start));
         for (n, it) in items.iter().enumerate() {
             let marker = if ordered {
@@ -234,7 +304,12 @@ impl Out<'_> {
             let mut first = true;
             for b in &it.blocks {
                 match b {
-                    Block::List { ordered, start, items, .. } => {
+                    Block::List {
+                        ordered,
+                        start,
+                        items,
+                        ..
+                    } => {
                         self.list_id += 1;
                         let nid = self.list_id;
                         self.list(*ordered, *start, items, lvl + 1, nid, indent);
@@ -291,7 +366,10 @@ fn list_tables(lists: &[(i32, bool, u32)]) -> String {
     }
     t.push_str("}\n{\\*\\listoverridetable");
     for (id, _, _) in lists {
-        let _ = write!(t, "{{\\listoverride\\listid{id}\\listoverridecount0\\ls{id}}}");
+        let _ = write!(
+            t,
+            "{{\\listoverride\\listid{id}\\listoverridecount0\\ls{id}}}"
+        );
     }
     t.push_str("}\n");
     t
@@ -318,7 +396,11 @@ pub fn write(doc: &Document, notes: &mut Notes) -> Vec<u8> {
     let m = &doc.meta;
     if m.title.is_some() || m.author.is_some() || m.subject.is_some() {
         head.push_str("{\\info");
-        for (k, v) in [("title", &m.title), ("author", &m.author), ("subject", &m.subject)] {
+        for (k, v) in [
+            ("title", &m.title),
+            ("author", &m.author),
+            ("subject", &m.subject),
+        ] {
             if let Some(v) = v {
                 let _ = write!(head, "{{\\{k} ");
                 esc(v, &mut head);
@@ -333,14 +415,19 @@ pub fn write(doc: &Document, notes: &mut Notes) -> Vec<u8> {
         }
         head.push_str("}\n");
     }
-    head.push_str("\\paperw11906\\paperh16838\\margl1417\\margr1417\\margt1417\\margb1417\\widowctrl\n");
+    head.push_str(
+        "\\paperw11906\\paperh16838\\margl1417\\margr1417\\margt1417\\margb1417\\widowctrl\n",
+    );
     head.push_str(&o.s);
     head.push_str("}\n");
     if o.dropped > 0 {
         notes.push(Note::new(
             Severity::Loss,
             "rtf.images_dropped",
-            format!("{} picture(s) other than PNG or JPEG were left out", o.dropped),
+            format!(
+                "{} picture(s) other than PNG or JPEG were left out",
+                o.dropped
+            ),
         ));
     }
     head.into_bytes()

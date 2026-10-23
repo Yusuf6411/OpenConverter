@@ -35,7 +35,11 @@ struct Out<'a> {
 
 impl Out<'_> {
     fn rel(&mut self, target: &str, external: bool) -> String {
-        if let Some((id, _, _)) = self.rels.iter().find(|(_, t, e)| t == target && *e == external) {
+        if let Some((id, _, _)) = self
+            .rels
+            .iter()
+            .find(|(_, t, e)| t == target && *e == external)
+        {
             return id.clone();
         }
         self.next_rel += 1;
@@ -170,20 +174,20 @@ impl Out<'_> {
                         out.push_str(&inner);
                     } else {
                         let id = self.rel(url, true);
-                        out.push_str(&format!("<w:hyperlink r:id=\"{id}\" w:history=\"1\">{inner}</w:hyperlink>"));
+                        out.push_str(&format!(
+                            "<w:hyperlink r:id=\"{id}\" w:history=\"1\">{inner}</w:hyperlink>"
+                        ));
                     }
                 }
-                Inline::Image { src, title, alt } => {
-                    match self.drawing(src, &plain(alt), title) {
-                        Some(d) => out.push_str(&format!("<w:r>{d}</w:r>")),
-                        None => {
-                            let a = plain(alt);
-                            if !a.is_empty() {
-                                out.push_str(&text_run(&format!("[{a}]"), s));
-                            }
+                Inline::Image { src, title, alt } => match self.drawing(src, &plain(alt), title) {
+                    Some(d) => out.push_str(&format!("<w:r>{d}</w:r>")),
+                    None => {
+                        let a = plain(alt);
+                        if !a.is_empty() {
+                            out.push_str(&text_run(&format!("[{a}]"), s));
                         }
                     }
-                }
+                },
                 Inline::Html(_) => {}
             }
         }
@@ -297,7 +301,10 @@ impl Out<'_> {
                     Block::Paragraph(c) if first => {
                         let mut c = c.clone();
                         if let Some(done) = it.checked {
-                            c.insert(0, Inline::Text(if done { "\u{2611} " } else { "\u{2610} " }.into()));
+                            c.insert(
+                                0,
+                                Inline::Text(if done { "\u{2611} " } else { "\u{2610} " }.into()),
+                            );
                         }
                         self.para(
                             &format!("<w:pStyle w:val=\"ListParagraph\"/><w:numPr><w:ilvl w:val=\"{lvl}\"/><w:numId w:val=\"{num_id}\"/></w:numPr>"),
@@ -306,7 +313,12 @@ impl Out<'_> {
                             out,
                         );
                     }
-                    Block::List { ordered, start, items, .. } => {
+                    Block::List {
+                        ordered,
+                        start,
+                        items,
+                        ..
+                    } => {
                         if first {
                             // an item that starts with a nested list: an empty numbered paragraph first
                             self.para(
@@ -316,7 +328,10 @@ impl Out<'_> {
                                 out,
                             );
                         }
-                        let inner = Ctx { level: ctx.level + 1, ..*ctx };
+                        let inner = Ctx {
+                            level: ctx.level + 1,
+                            ..*ctx
+                        };
                         self.list(*ordered, *start, items, &inner, out);
                     }
                     other => {
@@ -328,7 +343,10 @@ impl Out<'_> {
                                 out,
                             );
                         }
-                        let inner = Ctx { quote: ctx.quote + 1 + i64::from(ctx.level), ..*ctx };
+                        let inner = Ctx {
+                            quote: ctx.quote + 1 + i64::from(ctx.level),
+                            ..*ctx
+                        };
                         self.block(other, &inner, out);
                     }
                 }
@@ -365,7 +383,9 @@ impl Out<'_> {
                     content: vec![],
                 };
                 let c = r.get(i).unwrap_or(&empty);
-                out.push_str(&format!("<w:tc><w:tcPr><w:tcW w:w=\"{w}\" w:type=\"dxa\"/></w:tcPr>"));
+                out.push_str(&format!(
+                    "<w:tc><w:tcPr><w:tcW w:w=\"{w}\" w:type=\"dxa\"/></w:tcPr>"
+                ));
                 let jc = match c.align {
                     Align::Center => "<w:jc w:val=\"center\"/>",
                     Align::Right => "<w:jc w:val=\"right\"/>",
@@ -393,7 +413,9 @@ struct Ctx {
 const STYLES: &str = include_str!("docx_styles.xml");
 
 fn abstract_num(id: u32, bullet: bool) -> String {
-    let mut x = format!("<w:abstractNum w:abstractNumId=\"{id}\"><w:multiLevelType w:val=\"hybridMultilevel\"/>");
+    let mut x = format!(
+        "<w:abstractNum w:abstractNumId=\"{id}\"><w:multiLevelType w:val=\"hybridMultilevel\"/>"
+    );
     for l in 0..9u32 {
         let (fmt, text) = if bullet {
             ("bullet".to_string(), "\u{2022}".to_string())
@@ -476,7 +498,9 @@ pub fn write(doc: &Document, limits: &Limits) -> Result<Vec<u8>> {
                 "bmp" => "image/bmp",
                 _ => "image/jpeg",
             };
-            exts.push_str(&format!("<Default Extension=\"{e}\" ContentType=\"{ct}\"/>"));
+            exts.push_str(&format!(
+                "<Default Extension=\"{e}\" ContentType=\"{ct}\"/>"
+            ));
         }
     }
     let content_types = format!(
@@ -489,28 +513,50 @@ pub fn write(doc: &Document, limits: &Limits) -> Result<Vec<u8>> {
         core.push_str(&format!("<dc:title>{}</dc:title>", escape_text(&clean(t))));
     }
     if let Some(t) = &m.subject {
-        core.push_str(&format!("<dc:subject>{}</dc:subject>", escape_text(&clean(t))));
+        core.push_str(&format!(
+            "<dc:subject>{}</dc:subject>",
+            escape_text(&clean(t))
+        ));
     }
     if let Some(t) = &m.author {
-        core.push_str(&format!("<dc:creator>{}</dc:creator>", escape_text(&clean(t))));
+        core.push_str(&format!(
+            "<dc:creator>{}</dc:creator>",
+            escape_text(&clean(t))
+        ));
     }
     if let Some(t) = &m.language {
-        core.push_str(&format!("<dc:language>{}</dc:language>", escape_text(&clean(t))));
+        core.push_str(&format!(
+            "<dc:language>{}</dc:language>",
+            escape_text(&clean(t))
+        ));
     }
     if let Some(d) = &m.date {
         if d.len() >= 10 && d.as_bytes().get(4) == Some(&b'-') {
-            let full = if d.len() == 10 { format!("{d}T00:00:00Z") } else { d.clone() };
-            core.push_str(&format!("<dcterms:created xsi:type=\"dcterms:W3CDTF\">{}</dcterms:created>", escape_text(&full)));
+            let full = if d.len() == 10 {
+                format!("{d}T00:00:00Z")
+            } else {
+                d.clone()
+            };
+            core.push_str(&format!(
+                "<dcterms:created xsi:type=\"dcterms:W3CDTF\">{}</dcterms:created>",
+                escape_text(&full)
+            ));
         }
     }
     core.push_str("</cp:coreProperties>");
     let mut entries = vec![
-        ("[Content_Types].xml".to_string(), content_types.into_bytes()),
+        (
+            "[Content_Types].xml".to_string(),
+            content_types.into_bytes(),
+        ),
         ("_rels/.rels".to_string(), root_rels.as_bytes().to_vec()),
         ("word/document.xml".to_string(), document.into_bytes()),
         ("word/styles.xml".to_string(), STYLES.as_bytes().to_vec()),
         ("word/numbering.xml".to_string(), numbering.into_bytes()),
-        ("word/_rels/document.xml.rels".to_string(), rels.into_bytes()),
+        (
+            "word/_rels/document.xml.rels".to_string(),
+            rels.into_bytes(),
+        ),
         ("docProps/core.xml".to_string(), core.into_bytes()),
     ];
     entries.extend(o.media);

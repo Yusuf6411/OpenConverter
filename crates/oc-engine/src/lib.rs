@@ -8,6 +8,7 @@
 pub mod archive;
 pub mod audio;
 mod burn;
+mod docpdf;
 pub mod document;
 pub mod font;
 pub mod image;
@@ -731,6 +732,52 @@ impl Engine {
             let (out, n) = image::encode(to, &img, &opts, &out_ext)?;
             notes.extend(n);
             (out, "Draw SVG -> Encode picture".to_string())
+        } else if (document::is_document(from) || from == TXT) && image::is_image(to) {
+            // the first page, drawn from the laid-out PDF
+            let pdf_bytes = if from == TXT {
+                let (utf8, n) = convert_text(data, &opts)?;
+                notes.extend(n);
+                let text = String::from_utf8_lossy(&utf8).into_owned();
+                let doc = oc_document::text_io::read(&text);
+                docpdf::write(&doc, &opts, &self.limits, &mut notes)?
+            } else {
+                document::to_pdf(from, data, &opts, &self.limits, &mut notes)?
+            };
+            let (img, n) = pdf::render_first(&pdf_bytes, &opts, &self.limits)?;
+            notes.extend(n);
+            let out_ext = req
+                .output
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let mut after = opts.clone();
+            after.set("width", oc_core::options::OptionValue::Int(0));
+            after.set("height", oc_core::options::OptionValue::Int(0));
+            let (img, n) = image::transform(img, &after, &self.limits)?;
+            notes.extend(n);
+            let (out, n) = image::encode(to, &img, &opts, &out_ext)?;
+            notes.extend(n);
+            (
+                out,
+                "Read document -> Lay out page -> Draw page -> Encode picture".to_string(),
+            )
+        } else if document::is_document(from) && to == pdf::PDF {
+            let out = document::to_pdf(from, data, &opts, &self.limits, &mut notes)?;
+            (
+                out,
+                "Read document -> Lay out pages -> Write PDF".to_string(),
+            )
+        } else if from == TXT && to == pdf::PDF {
+            let (utf8, n) = convert_text(data, &opts)?;
+            notes.extend(n);
+            let text = String::from_utf8_lossy(&utf8).into_owned();
+            let doc = oc_document::text_io::read(&text);
+            let out = docpdf::write(&doc, &opts, &self.limits, &mut notes)?;
+            (
+                out,
+                "Decode text -> Make paragraphs -> Lay out pages -> Write PDF".to_string(),
+            )
         } else if document::is_document(from) && document::is_document(to) {
             let out = document::convert(from, to, data, &opts, &self.limits, &mut notes)?;
             (out, "Read document -> Write document".to_string())
@@ -1904,12 +1951,12 @@ mod tests {
     }
 
     #[test]
-    fn text_cannot_become_an_image() {
+    fn text_cannot_become_a_font() {
         let dir = tmpdir("cross");
         let t = dir.join("a.txt");
         std::fs::write(&t, "hi").unwrap();
         assert_eq!(
-            run(&t, &dir.join("a.png"), &[]).err().map(|e| e.code),
+            run(&t, &dir.join("a.ttf"), &[]).err().map(|e| e.code),
             Some(ErrorCode::UnsupportedFormat)
         );
         let _ = std::fs::remove_dir_all(dir);

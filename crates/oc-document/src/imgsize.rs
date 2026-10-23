@@ -22,13 +22,23 @@ fn be16(d: &[u8], o: usize) -> Option<u32> {
     Some(u32::from(u16::from_be_bytes([*d.get(o)?, *d.get(o + 1)?])))
 }
 fn be32(d: &[u8], o: usize) -> Option<u32> {
-    Some(u32::from_be_bytes([*d.get(o)?, *d.get(o + 1)?, *d.get(o + 2)?, *d.get(o + 3)?]))
+    Some(u32::from_be_bytes([
+        *d.get(o)?,
+        *d.get(o + 1)?,
+        *d.get(o + 2)?,
+        *d.get(o + 3)?,
+    ]))
 }
 fn le16(d: &[u8], o: usize) -> Option<u32> {
     Some(u32::from(u16::from_le_bytes([*d.get(o)?, *d.get(o + 1)?])))
 }
 fn le32(d: &[u8], o: usize) -> Option<u32> {
-    Some(u32::from_le_bytes([*d.get(o)?, *d.get(o + 1)?, *d.get(o + 2)?, *d.get(o + 3)?]))
+    Some(u32::from_le_bytes([
+        *d.get(o)?,
+        *d.get(o + 1)?,
+        *d.get(o + 2)?,
+        *d.get(o + 3)?,
+    ]))
 }
 
 pub fn size(d: &[u8]) -> Option<(u32, u32)> {

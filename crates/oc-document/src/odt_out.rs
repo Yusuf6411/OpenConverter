@@ -71,7 +71,9 @@ impl Out<'_> {
             out.push_str(&body);
         } else {
             let n = self.style_name(s);
-            out.push_str(&format!("<text:span text:style-name=\"{n}\">{body}</text:span>"));
+            out.push_str(&format!(
+                "<text:span text:style-name=\"{n}\">{body}</text:span>"
+            ));
         }
     }
 
@@ -82,15 +84,60 @@ impl Out<'_> {
                 Inline::SoftBreak => self.text(" ", s, out),
                 Inline::LineBreak => out.push_str("<text:line-break/>"),
                 Inline::Code(c) => {
-                    let st = RunStyle { code: true, ..s.clone() };
+                    let st = RunStyle {
+                        code: true,
+                        ..s.clone()
+                    };
                     self.text(c, &st, out);
                 }
-                Inline::Emph(c) => self.inlines(c, &RunStyle { italic: true, ..s.clone() }, out),
-                Inline::Strong(c) => self.inlines(c, &RunStyle { bold: true, ..s.clone() }, out),
-                Inline::Strike(c) => self.inlines(c, &RunStyle { strike: true, ..s.clone() }, out),
-                Inline::Underline(c) => self.inlines(c, &RunStyle { underline: true, ..s.clone() }, out),
-                Inline::Sup(c) => self.inlines(c, &RunStyle { sup: true, ..s.clone() }, out),
-                Inline::Sub(c) => self.inlines(c, &RunStyle { sub: true, ..s.clone() }, out),
+                Inline::Emph(c) => self.inlines(
+                    c,
+                    &RunStyle {
+                        italic: true,
+                        ..s.clone()
+                    },
+                    out,
+                ),
+                Inline::Strong(c) => self.inlines(
+                    c,
+                    &RunStyle {
+                        bold: true,
+                        ..s.clone()
+                    },
+                    out,
+                ),
+                Inline::Strike(c) => self.inlines(
+                    c,
+                    &RunStyle {
+                        strike: true,
+                        ..s.clone()
+                    },
+                    out,
+                ),
+                Inline::Underline(c) => self.inlines(
+                    c,
+                    &RunStyle {
+                        underline: true,
+                        ..s.clone()
+                    },
+                    out,
+                ),
+                Inline::Sup(c) => self.inlines(
+                    c,
+                    &RunStyle {
+                        sup: true,
+                        ..s.clone()
+                    },
+                    out,
+                ),
+                Inline::Sub(c) => self.inlines(
+                    c,
+                    &RunStyle {
+                        sub: true,
+                        ..s.clone()
+                    },
+                    out,
+                ),
                 Inline::Link { url, content, .. } => {
                     let mut inner = String::new();
                     self.inlines(content, s, &mut inner);
@@ -107,7 +154,10 @@ impl Out<'_> {
                     if let Some(img) = self.doc.image(src) {
                         let (w, h) = imgsize::size(&img.data).unwrap_or((400, 300));
                         // 96 dpi pixels to centimetres, at most the text width
-                        let (mut cw, mut ch) = (f64::from(w.max(1)) * 2.54 / 96.0, f64::from(h.max(1)) * 2.54 / 96.0);
+                        let (mut cw, mut ch) = (
+                            f64::from(w.max(1)) * 2.54 / 96.0,
+                            f64::from(h.max(1)) * 2.54 / 96.0,
+                        );
                         if cw > 16.0 {
                             ch = ch * 16.0 / cw;
                             cw = 16.0;
@@ -160,7 +210,12 @@ impl Out<'_> {
                 out.push_str("</text:p>");
             }
             Block::Quote(c) => self.blocks(c, true, out),
-            Block::List { ordered, start, items, .. } => self.list(*ordered, *start, items, quote, out),
+            Block::List {
+                ordered,
+                start,
+                items,
+                ..
+            } => self.list(*ordered, *start, items, quote, out),
             Block::Code { text, .. } => {
                 for l in text.trim_end_matches('\n').split('\n') {
                     out.push_str("<text:p text:style-name=\"Preformatted_20_Text\">");
@@ -174,7 +229,9 @@ impl Out<'_> {
             Block::Table { rows } => {
                 let cols = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
                 out.push_str("<table:table table:name=\"Table\" table:style-name=\"Table1\">");
-                out.push_str(&format!("<table:table-column table:number-columns-repeated=\"{cols}\"/>"));
+                out.push_str(&format!(
+                    "<table:table-column table:number-columns-repeated=\"{cols}\"/>"
+                ));
                 for (n, r) in rows.iter().enumerate() {
                     let header = n == 0 && r.iter().any(|c| c.header);
                     if header {
@@ -185,7 +242,10 @@ impl Out<'_> {
                         out.push_str("<table:table-cell table:style-name=\"Cell\" office:value-type=\"string\">");
                         let c = r.get(i);
                         let st = if c.is_some_and(|c| c.header) {
-                            RunStyle { bold: true, ..RunStyle::default() }
+                            RunStyle {
+                                bold: true,
+                                ..RunStyle::default()
+                            }
                         } else {
                             RunStyle::default()
                         };
@@ -210,10 +270,21 @@ impl Out<'_> {
         }
     }
 
-    fn list(&mut self, ordered: bool, start: u32, items: &[ListItem], quote: bool, out: &mut String) {
+    fn list(
+        &mut self,
+        ordered: bool,
+        start: u32,
+        items: &[ListItem],
+        quote: bool,
+        out: &mut String,
+    ) {
         out.push_str(&format!(
             "<text:list text:style-name=\"{}\">",
-            if ordered { "Numbering_20_123" } else { "List_20_Bullet" }
+            if ordered {
+                "Numbering_20_123"
+            } else {
+                "List_20_Bullet"
+            }
         ));
         for (i, it) in items.iter().enumerate() {
             if ordered && i == 0 && start != 1 {
@@ -279,7 +350,9 @@ pub fn write(doc: &Document, limits: &Limits) -> Result<Vec<u8>> {
             props.push_str(" fo:font-style=\"italic\" style:font-style-asian=\"italic\" style:font-style-complex=\"italic\"");
         }
         if s.strike {
-            props.push_str(" style:text-line-through-style=\"solid\" style:text-line-through-type=\"single\"");
+            props.push_str(
+                " style:text-line-through-style=\"solid\" style:text-line-through-type=\"single\"",
+            );
         }
         if s.underline {
             props.push_str(" style:text-underline-style=\"solid\" style:text-underline-width=\"auto\" style:text-underline-color=\"font-color\"");
@@ -310,14 +383,24 @@ pub fn write(doc: &Document, limits: &Limits) -> Result<Vec<u8>> {
         meta.push_str(&format!("<dc:subject>{}</dc:subject>", escape_text(t)));
     }
     if let Some(t) = &m.author {
-        meta.push_str(&format!("<meta:initial-creator>{0}</meta:initial-creator><dc:creator>{0}</dc:creator>", escape_text(t)));
+        meta.push_str(&format!(
+            "<meta:initial-creator>{0}</meta:initial-creator><dc:creator>{0}</dc:creator>",
+            escape_text(t)
+        ));
     }
     if let Some(t) = &m.language {
         meta.push_str(&format!("<dc:language>{}</dc:language>", escape_text(t)));
     }
     if let Some(d) = &m.date {
-        let full = if d.len() == 10 { format!("{d}T00:00:00") } else { d.clone() };
-        meta.push_str(&format!("<meta:creation-date>{}</meta:creation-date>", escape_text(&full)));
+        let full = if d.len() == 10 {
+            format!("{d}T00:00:00")
+        } else {
+            d.clone()
+        };
+        meta.push_str(&format!(
+            "<meta:creation-date>{}</meta:creation-date>",
+            escape_text(&full)
+        ));
     }
     meta.push_str("</office:meta></office:document-meta>");
     let mut manifest = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<manifest:manifest xmlns:manifest=\"urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\" manifest:version=\"1.2\"><manifest:file-entry manifest:full-path=\"/\" manifest:version=\"1.2\" manifest:media-type=\"application/vnd.oasis.opendocument.text\"/><manifest:file-entry manifest:full-path=\"content.xml\" manifest:media-type=\"text/xml\"/><manifest:file-entry manifest:full-path=\"styles.xml\" manifest:media-type=\"text/xml\"/><manifest:file-entry manifest:full-path=\"meta.xml\" manifest:media-type=\"text/xml\"/>");
@@ -330,10 +413,16 @@ pub fn write(doc: &Document, limits: &Limits) -> Result<Vec<u8>> {
     }
     manifest.push_str("</manifest:manifest>");
     let mut entries = vec![
-        ("mimetype".to_string(), b"application/vnd.oasis.opendocument.text".to_vec()),
+        (
+            "mimetype".to_string(),
+            b"application/vnd.oasis.opendocument.text".to_vec(),
+        ),
         ("META-INF/manifest.xml".to_string(), manifest.into_bytes()),
         ("content.xml".to_string(), content.into_bytes()),
-        ("styles.xml".to_string(), STYLES.replace("{NS}", NS).into_bytes()),
+        (
+            "styles.xml".to_string(),
+            STYLES.replace("{NS}", NS).into_bytes(),
+        ),
         ("meta.xml".to_string(), meta.into_bytes()),
     ];
     entries.extend(o.media);

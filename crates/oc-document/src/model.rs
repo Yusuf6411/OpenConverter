@@ -152,3 +152,87 @@ fn push_plain(inlines: &[Inline], s: &mut String) {
         }
     }
 }
+
+/// Visit every picture inline in the blocks, mutably.
+pub fn visit_images(blocks: &mut [Block], f: &mut dyn FnMut(&mut Inline)) {
+    for b in blocks {
+        match b {
+            Block::Heading { content, .. } | Block::Paragraph(content) => {
+                visit_inline_images(content, f)
+            }
+            Block::List { items, .. } => {
+                for it in items {
+                    visit_images(&mut it.blocks, f);
+                }
+            }
+            Block::Quote(c) => visit_images(c, f),
+            Block::Table { rows } => {
+                for r in rows {
+                    for c in r {
+                        visit_inline_images(&mut c.content, f);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn visit_inline_images(inl: &mut [Inline], f: &mut dyn FnMut(&mut Inline)) {
+    for i in inl {
+        match i {
+            Inline::Image { .. } => f(i),
+            Inline::Emph(c)
+            | Inline::Strong(c)
+            | Inline::Strike(c)
+            | Inline::Underline(c)
+            | Inline::Sup(c)
+            | Inline::Sub(c)
+            | Inline::Link { content: c, .. } => visit_inline_images(c, f),
+            _ => {}
+        }
+    }
+}
+
+/// Remove raw HTML (blocks and inlines), for formats that need well-formed XML.
+pub fn strip_html(blocks: &mut Vec<Block>) {
+    blocks.retain(|b| !matches!(b, Block::Html(_)));
+    for b in blocks.iter_mut() {
+        match b {
+            Block::Heading { content, .. } | Block::Paragraph(content) => {
+                strip_inline_html(content)
+            }
+            Block::List { items, .. } => {
+                for it in items {
+                    strip_html(&mut it.blocks);
+                }
+            }
+            Block::Quote(c) => strip_html(c),
+            Block::Table { rows } => {
+                for r in rows {
+                    for c in r {
+                        strip_inline_html(&mut c.content);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn strip_inline_html(inl: &mut Vec<Inline>) {
+    inl.retain(|i| !matches!(i, Inline::Html(_)));
+    for i in inl.iter_mut() {
+        match i {
+            Inline::Emph(c)
+            | Inline::Strong(c)
+            | Inline::Strike(c)
+            | Inline::Underline(c)
+            | Inline::Sup(c)
+            | Inline::Sub(c)
+            | Inline::Link { content: c, .. }
+            | Inline::Image { alt: c, .. } => strip_inline_html(c),
+            _ => {}
+        }
+    }
+}

@@ -1,6 +1,6 @@
 //! DOCX to the document model: styles, numbering, runs, fields, tables, pictures, footnotes.
-use crate::imgsize;
 use crate::build::Builder;
+use crate::imgsize;
 use crate::model::{Align, Block, Cell, Document, Inline, ListItem, Meta};
 use crate::xml_tree::{self, El};
 use crate::zipio::Package;
@@ -45,7 +45,11 @@ impl Numbering {
         };
         let lvl = self.abstracts.get(abs).and_then(|a| a.get(&ilvl));
         let bullet = lvl.is_none_or(|l| l.bullet);
-        let start = over.get(&ilvl).copied().or(lvl.map(|l| l.start)).unwrap_or(1);
+        let start = over
+            .get(&ilvl)
+            .copied()
+            .or(lvl.map(|l| l.start))
+            .unwrap_or(1);
         (bullet, start)
     }
 }
@@ -92,8 +96,16 @@ fn run_props(rpr: &El, base: &RStyle, styles: &HashMap<String, Style>) -> RStyle
 fn is_mono(f: &str) -> bool {
     let l = f.to_ascii_lowercase();
     [
-        "consolas", "courier", "mono", "menlo", "monaco", "lucida console", "source code", "fira code",
-        "cascadia", "inconsolata",
+        "consolas",
+        "courier",
+        "mono",
+        "menlo",
+        "monaco",
+        "lucida console",
+        "source code",
+        "fira code",
+        "cascadia",
+        "inconsolata",
     ]
     .iter()
     .any(|m| l.contains(m))
@@ -158,10 +170,19 @@ fn num_val(e: Option<&El>) -> Option<u32> {
 fn load_styles(root: &El, out: &mut HashMap<String, Style>) {
     // document defaults are not needed: only differences from Normal matter
     for s in root.children().filter(|c| c.name == "style") {
-        let Some(id) = s.attr("styleId") else { continue };
+        let Some(id) = s.attr("styleId") else {
+            continue;
+        };
         let mut st = Style {
-            name: s.child("name").and_then(|n| n.attr("val")).unwrap_or("").to_ascii_lowercase(),
-            based_on: s.child("basedOn").and_then(|b| b.attr("val")).map(String::from),
+            name: s
+                .child("name")
+                .and_then(|n| n.attr("val"))
+                .unwrap_or("")
+                .to_ascii_lowercase(),
+            based_on: s
+                .child("basedOn")
+                .and_then(|b| b.attr("val"))
+                .map(String::from),
             ..Style::default()
         };
         if let Some(ppr) = s.child("pPr") {
@@ -187,11 +208,16 @@ fn load_styles(root: &El, out: &mut HashMap<String, Style>) {
 fn load_numbering(root: &El) -> Numbering {
     let mut n = Numbering::default();
     for a in root.children().filter(|c| c.name == "abstractNum") {
-        let Some(id) = a.attr("abstractNumId") else { continue };
+        let Some(id) = a.attr("abstractNumId") else {
+            continue;
+        };
         let mut levels = HashMap::new();
         for l in a.children().filter(|c| c.name == "lvl") {
             let ilvl = l.attr("ilvl").and_then(|v| v.parse().ok()).unwrap_or(0);
-            let fmt = l.child("numFmt").and_then(|f| f.attr("val")).unwrap_or("decimal");
+            let fmt = l
+                .child("numFmt")
+                .and_then(|f| f.attr("val"))
+                .unwrap_or("decimal");
             levels.insert(
                 ilvl,
                 Level {
@@ -203,7 +229,10 @@ fn load_numbering(root: &El) -> Numbering {
         n.abstracts.insert(id.to_string(), levels);
     }
     for m in root.children().filter(|c| c.name == "num") {
-        let (Some(id), Some(abs)) = (m.attr("numId"), m.child("abstractNumId").and_then(|a| a.attr("val"))) else {
+        let (Some(id), Some(abs)) = (
+            m.attr("numId"),
+            m.child("abstractNumId").and_then(|a| a.attr("val")),
+        ) else {
             continue;
         };
         let mut over = HashMap::new();
@@ -224,11 +253,23 @@ pub fn read(data: &[u8], limits: &Limits, notes: &mut Notes) -> Result<Document>
     let pkg = Package::read(data, limits)?;
     let main = main_part(&pkg, limits).unwrap_or_else(|| "word/document.xml".into());
     let Some(doc_xml) = pkg.text(&main) else {
-        return Err(Error::new(ErrorCode::CorruptFile, "the DOCX has no main document part"));
+        return Err(Error::new(
+            ErrorCode::CorruptFile,
+            "the DOCX has no main document part",
+        ));
     };
-    let dir = main.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default();
-    let rels_path = format!("{dir}/_rels/{}.rels", main.rsplit('/').next().unwrap_or("document.xml"));
-    let rels = pkg.text(&rels_path).map(|x| parse_rels(&x, limits)).unwrap_or_default();
+    let dir = main
+        .rsplit_once('/')
+        .map(|(d, _)| d.to_string())
+        .unwrap_or_default();
+    let rels_path = format!(
+        "{dir}/_rels/{}.rels",
+        main.rsplit('/').next().unwrap_or("document.xml")
+    );
+    let rels = pkg
+        .text(&rels_path)
+        .map(|x| parse_rels(&x, limits))
+        .unwrap_or_default();
     let mut styles = HashMap::new();
     let mut numbering = Numbering::default();
     for (id, (target, ext)) in &rels {
@@ -343,7 +384,11 @@ fn join(dir: &str, target: &str) -> String {
     if let Some(t) = target.strip_prefix('/') {
         return t.to_string();
     }
-    let mut parts: Vec<&str> = if dir.is_empty() { vec![] } else { dir.split('/').collect() };
+    let mut parts: Vec<&str> = if dir.is_empty() {
+        vec![]
+    } else {
+        dir.split('/').collect()
+    };
     for seg in target.split('/') {
         match seg {
             "." | "" => {}
@@ -360,8 +405,13 @@ fn main_part(pkg: &Package, limits: &Limits) -> Option<String> {
     let x = pkg.text("_rels/.rels")?;
     let r = xml_tree::parse(&x, limits).ok()?;
     for rel in r.children() {
-        if rel.attr("Type").is_some_and(|t| t.ends_with("/officeDocument")) {
-            return rel.attr("Target").map(|t| t.trim_start_matches('/').to_string());
+        if rel
+            .attr("Type")
+            .is_some_and(|t| t.ends_with("/officeDocument"))
+        {
+            return rel
+                .attr("Target")
+                .map(|t| t.trim_start_matches('/').to_string());
         }
     }
     None
@@ -369,8 +419,12 @@ fn main_part(pkg: &Package, limits: &Limits) -> Option<String> {
 
 fn core_meta(pkg: &Package, limits: &Limits) -> Meta {
     let mut m = Meta::default();
-    let Some(x) = pkg.text("docProps/core.xml") else { return m };
-    let Ok(r) = xml_tree::parse(&x, limits) else { return m };
+    let Some(x) = pkg.text("docProps/core.xml") else {
+        return m;
+    };
+    let Ok(r) = xml_tree::parse(&x, limits) else {
+        return m;
+    };
     for c in r.children() {
         let t = c.text().trim().to_string();
         if t.is_empty() {
@@ -441,7 +495,10 @@ impl Ctx<'_> {
 
     fn paragraph(&mut self, p: &El, dir: &str, b: &mut Builder) {
         let ppr = p.child("pPr");
-        let style_id = ppr.and_then(|x| x.child("pStyle")).and_then(|s| s.attr("val")).unwrap_or("Normal");
+        let style_id = ppr
+            .and_then(|x| x.child("pStyle"))
+            .and_then(|s| s.attr("val"))
+            .unwrap_or("Normal");
         let chain = self.style_chain(style_id);
         let names: Vec<String> = chain.iter().map(|s| s.name.clone()).collect();
         let name0 = names.first().cloned().unwrap_or_default();
@@ -463,20 +520,40 @@ impl Ctx<'_> {
         if level.is_none() {
             level = chain.iter().find_map(|s| s.outline);
         }
-        if let Some(l) = ppr.and_then(|x| x.child("outlineLvl")).and_then(|o| num_val(Some(o))) {
+        if let Some(l) = ppr
+            .and_then(|x| x.child("outlineLvl"))
+            .and_then(|o| num_val(Some(o)))
+        {
             level = Some((l + 1).min(6) as u8);
         }
         let is_code_style = names.iter().any(|n| {
-            matches!(n.as_str(), "code" | "source code" | "html preformatted" | "preformatted text" | "macro text" | "plain text")
-                || n.starts_with("code ")
+            matches!(
+                n.as_str(),
+                "code"
+                    | "source code"
+                    | "html preformatted"
+                    | "preformatted text"
+                    | "macro text"
+                    | "plain text"
+            ) || n.starts_with("code ")
         });
-        let is_quote_style = names.iter().any(|n| matches!(n.as_str(), "quote" | "block text" | "intense quote" | "block quotation"));
-        let mut num = ppr
-            .and_then(|x| x.child("numPr"))
-            .and_then(|n| n.child("numId").and_then(|i| i.attr("val")).map(|v| (v.to_string(), num_val(n.child("ilvl")))));
+        let is_quote_style = names.iter().any(|n| {
+            matches!(
+                n.as_str(),
+                "quote" | "block text" | "intense quote" | "block quotation"
+            )
+        });
+        let mut num = ppr.and_then(|x| x.child("numPr")).and_then(|n| {
+            n.child("numId")
+                .and_then(|i| i.attr("val"))
+                .map(|v| (v.to_string(), num_val(n.child("ilvl"))))
+        });
         if let Some((n, il)) = &mut num {
             if il.is_none() {
-                *il = chain.iter().find_map(|s| s.num.as_ref().map(|x| x.1)).or(Some(0));
+                *il = chain
+                    .iter()
+                    .find_map(|s| s.num.as_ref().map(|x| x.1))
+                    .or(Some(0));
             }
             let _ = n;
         }
@@ -508,11 +585,14 @@ impl Ctx<'_> {
         }
         self.paragraph_runs(p, dir, &mut para, &base);
         let page_before = ppr.is_some_and(|x| x.child("pageBreakBefore").is_some_and(on));
-        let border_rule = ppr.is_some_and(|x| x.child("pBdr").is_some_and(|d| d.child("bottom").is_some()));
+        let border_rule =
+            ppr.is_some_and(|x| x.child("pBdr").is_some_and(|d| d.child("bottom").is_some()));
         let _ = name0;
         // trim inline edges
         trim_edges(&mut para.inlines);
-        let text_empty = para.inlines.iter().all(|i| matches!(i, Inline::Text(t) if t.trim().is_empty()) || matches!(i, Inline::LineBreak));
+        let text_empty = para.inlines.iter().all(|i| {
+            matches!(i, Inline::Text(t) if t.trim().is_empty()) || matches!(i, Inline::LineBreak)
+        });
         if page_before {
             b.push(Block::PageBreak);
         }
@@ -574,7 +654,11 @@ impl Ctx<'_> {
             let mut inl = para.inlines;
             let mut checked = None;
             if let Some(Inline::Text(t)) = inl.first_mut() {
-                for (m, v) in [("\u{2610} ", false), ("\u{2611} ", true), ("\u{2612} ", true)] {
+                for (m, v) in [
+                    ("\u{2610} ", false),
+                    ("\u{2611} ", true),
+                    ("\u{2612} ", true),
+                ] {
                     if let Some(r) = t.strip_prefix(m) {
                         checked = Some(v);
                         *t = r.to_string();
@@ -589,7 +673,11 @@ impl Ctx<'_> {
                 start,
                 ListItem {
                     checked,
-                    blocks: if inl.is_empty() { vec![] } else { vec![Block::Paragraph(inl)] },
+                    blocks: if inl.is_empty() {
+                        vec![]
+                    } else {
+                        vec![Block::Paragraph(inl)]
+                    },
                 },
             );
         } else if let Some(l) = level {
@@ -771,7 +859,8 @@ impl Ctx<'_> {
                         Some("end") => {
                             if let Some(f) = fields.pop() {
                                 if let Some(u) = hyperlink_target(&f.instr) {
-                                    let inner: Vec<Inline> = out.drain(f.start.min(out.len())..).collect();
+                                    let inner: Vec<Inline> =
+                                        out.drain(f.start.min(out.len())..).collect();
                                     if !inner.is_empty() {
                                         out.push(Inline::Link {
                                             url: u,
@@ -835,15 +924,28 @@ impl Ctx<'_> {
         }
         let mut blips = Vec::new();
         find(d, "blip", &mut blips);
-        let mut ids: Vec<String> = blips.iter().filter_map(|b| b.attr("embed").map(String::from)).collect();
+        let mut ids: Vec<String> = blips
+            .iter()
+            .filter_map(|b| b.attr("embed").map(String::from))
+            .collect();
         let mut imagedata = Vec::new();
         find(d, "imagedata", &mut imagedata);
-        ids.extend(imagedata.iter().filter_map(|b| b.attr("id").map(String::from)));
+        ids.extend(
+            imagedata
+                .iter()
+                .filter_map(|b| b.attr("id").map(String::from)),
+        );
         let mut docpr = Vec::new();
         find(d, "docPr", &mut docpr);
-        let alt = docpr.first().and_then(|p| p.attr("descr")).unwrap_or("").to_string();
+        let alt = docpr
+            .first()
+            .and_then(|p| p.attr("descr"))
+            .unwrap_or("")
+            .to_string();
         for id in ids {
-            let Some((target, ext)) = self.rels.get(&id).cloned() else { continue };
+            let Some((target, ext)) = self.rels.get(&id).cloned() else {
+                continue;
+            };
             if ext {
                 continue;
             }
@@ -852,11 +954,17 @@ impl Ctx<'_> {
                 out.push(Inline::Image {
                     src: name.clone(),
                     title: String::new(),
-                    alt: if alt.is_empty() { vec![] } else { vec![Inline::Text(alt.clone())] },
+                    alt: if alt.is_empty() {
+                        vec![]
+                    } else {
+                        vec![Inline::Text(alt.clone())]
+                    },
                 });
                 continue;
             }
-            let Some(data) = self.pkg.get(&path) else { continue };
+            let Some(data) = self.pkg.get(&path) else {
+                continue;
+            };
             match imgsize::mime_of(data) {
                 Some(m) => {
                     let name = self.doc.add_image(m, data.to_vec());
@@ -864,7 +972,11 @@ impl Ctx<'_> {
                     out.push(Inline::Image {
                         src: name,
                         title: String::new(),
-                        alt: if alt.is_empty() { vec![] } else { vec![Inline::Text(alt.clone())] },
+                        alt: if alt.is_empty() {
+                            vec![]
+                        } else {
+                            vec![Inline::Text(alt.clone())]
+                        },
                     });
                 }
                 None => self.unsupported_images += 1,
@@ -875,11 +987,15 @@ impl Ctx<'_> {
     fn table(&mut self, t: &El, dir: &str) -> Option<Block> {
         let mut rows = Vec::new();
         for (n, tr) in t.children().filter(|c| c.name == "tr").enumerate() {
-            let header = tr.child("trPr").is_some_and(|p| p.child("tblHeader").is_some());
+            let header = tr
+                .child("trPr")
+                .is_some_and(|p| p.child("tblHeader").is_some());
             let mut row = Vec::new();
             for tc in tr.children().filter(|c| c.name == "tc") {
                 if tc.child("tcPr").is_some_and(|p| {
-                    p.child("vMerge").is_some() || p.child("gridSpan").is_some_and(|g| g.attr("val") != Some("1"))
+                    p.child("vMerge").is_some()
+                        || p.child("gridSpan")
+                            .is_some_and(|g| g.attr("val") != Some("1"))
                 }) {
                     self.spans = true;
                 }

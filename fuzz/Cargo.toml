@@ -346,3 +346,33 @@ path = "fuzz_targets/html.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "docx"
+path = "fuzz_targets/docx.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "odt"
+path = "fuzz_targets/odt.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "rtf"
+path = "fuzz_targets/rtf.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "epub"
+path = "fuzz_targets/epub.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fb2"
+path = "fuzz_targets/fb2.rs"
+test = false
+doc = false

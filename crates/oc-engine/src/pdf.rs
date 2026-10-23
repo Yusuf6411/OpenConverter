@@ -89,11 +89,29 @@ fn writer_options() -> OptionSchema {
             spec(
                 "margin",
                 "Margin",
-                "Margin in points around a picture on an a4 or letter page",
+                "Margin in points around a picture or text on an a4 or letter page (documents use 56.7, 20 mm, when this is 0)",
                 OptionKind::Float {
                     min: 0.0,
                     max: 200.0,
                     default: 0.0,
+                },
+            ),
+            spec(
+                "font_size",
+                "Font size",
+                "For documents and text: the size of body text in points",
+                OptionKind::Float {
+                    min: 6.0,
+                    max: 48.0,
+                    default: 11.0,
+                },
+            ),
+            spec(
+                "font",
+                "Font",
+                "For documents and text: serif, sans, mono, or the name of an installed font family",
+                OptionKind::Text {
+                    default: "serif".into(),
                 },
             ),
             spec(

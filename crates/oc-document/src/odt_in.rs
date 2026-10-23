@@ -72,29 +72,46 @@ impl Styles {
                         let Some(name) = s.attr("name") else { continue };
                         let mut p = Props::default();
                         name_flags(name, &mut p);
-                        if let Some(l) = s.attr("default-outline-level").and_then(|v| v.parse::<u8>().ok()) {
+                        if let Some(l) = s
+                            .attr("default-outline-level")
+                            .and_then(|v| v.parse::<u8>().ok())
+                        {
                             p.heading = Some(l.clamp(1, 6));
                         }
                         for c in s.children() {
                             match c.name.as_str() {
                                 "text-properties" => {
-                                    if matches!(c.attr("font-weight"), Some("bold" | "700" | "800" | "900")) {
+                                    if matches!(
+                                        c.attr("font-weight"),
+                                        Some("bold" | "700" | "800" | "900")
+                                    ) {
                                         p.bold = true;
                                     }
                                     if matches!(c.attr("font-style"), Some("italic" | "oblique")) {
                                         p.italic = true;
                                     }
-                                    if c.attr("text-line-through-style").is_some_and(|v| v != "none") {
+                                    if c.attr("text-line-through-style")
+                                        .is_some_and(|v| v != "none")
+                                    {
                                         p.strike = true;
                                     }
                                     if c.attr("text-underline-style").is_some_and(|v| v != "none") {
                                         p.underline = true;
                                     }
                                     if let Some(pos) = c.attr("text-position") {
-                                        if pos.starts_with("super") || pos.starts_with('-') == false && pos.starts_with(|c: char| c.is_ascii_digit()) {
+                                        let first = pos.split_whitespace().next().unwrap_or("");
+                                        if first.starts_with("super") {
                                             p.sup = true;
-                                        } else if pos.starts_with("sub") || pos.starts_with('-') {
+                                        } else if first.starts_with("sub") {
                                             p.sub = true;
+                                        } else if let Ok(v) =
+                                            first.trim_end_matches('%').parse::<f64>()
+                                        {
+                                            if v > 0.0 {
+                                                p.sup = true;
+                                            } else if v < 0.0 {
+                                                p.sub = true;
+                                            }
                                         }
                                     }
                                     if c.attr("font-name").is_some_and(is_mono)
@@ -124,9 +141,13 @@ impl Styles {
                         let Some(name) = s.attr("name") else { continue };
                         let mut lv = HashMap::new();
                         for l in s.children() {
-                            let level: usize = l.attr("level").and_then(|v| v.parse().ok()).unwrap_or(1);
+                            let level: usize =
+                                l.attr("level").and_then(|v| v.parse().ok()).unwrap_or(1);
                             let ordered = l.name == "list-level-style-number";
-                            let start = l.attr("start-value").and_then(|v| v.parse().ok()).unwrap_or(1);
+                            let start = l
+                                .attr("start-value")
+                                .and_then(|v| v.parse().ok())
+                                .unwrap_or(1);
                             lv.insert(level.saturating_sub(1), (ordered, start));
                         }
                         self.lists.insert(name.to_string(), lv);
@@ -145,7 +166,9 @@ impl Styles {
             if chain.len() > 16 {
                 break;
             }
-            let Some((parent, p)) = self.map.get(&n) else { break };
+            let Some((parent, p)) = self.map.get(&n) else {
+                break;
+            };
             chain.push(p.clone());
             cur = parent.clone();
         }
@@ -235,7 +258,8 @@ impl Cx<'_> {
             match k {
                 xml_tree::Kid::Text(t) => {
                     // ODF collapses whitespace runs; <text:s/> adds explicit spaces.
-                    let mut prev_space = matches!(out.last(), Some(Inline::Text(p)) if p.ends_with(' '));
+                    let mut prev_space =
+                        matches!(out.last(), Some(Inline::Text(p)) if p.ends_with(' '));
                     let mut s = String::new();
                     for c in t.chars() {
                         if c.is_whitespace() {
@@ -264,7 +288,10 @@ impl Cx<'_> {
             "tab" => push_text(out, "\t"),
             "line-break" => out.push(Inline::LineBreak),
             "span" => {
-                let p = e.attr("style-name").map(|n| self.styles.resolve(n)).unwrap_or_default();
+                let p = e
+                    .attr("style-name")
+                    .map(|n| self.styles.resolve(n))
+                    .unwrap_or_default();
                 let mut inner = Vec::new();
                 self.inlines(e, &mut inner, depth + 1);
                 out.extend(wrap(&p, inner));
@@ -300,7 +327,7 @@ impl Cx<'_> {
         }
     }
 
-    fn frame(&mut self, e: &El, out: &mut Vec<Inline>) {
+    pub(crate) fn frame(&mut self, e: &El, out: &mut Vec<Inline>) {
         let alt = e
             .child("desc")
             .or_else(|| e.child("title"))
@@ -329,12 +356,14 @@ impl Cx<'_> {
             });
             return;
         }
-        let data = self
-            .pkg
-            .get(&href)
-            .map(|d| d.to_vec())
-            .or_else(|| img.child("binary-data").and_then(|b| crate::base64::decode(&b.text())));
-        match data.as_deref().and_then(|d| imgsize::mime_of(d).map(|m| (m, d))) {
+        let data = self.pkg.get(&href).map(|d| d.to_vec()).or_else(|| {
+            img.child("binary-data")
+                .and_then(|b| crate::base64::decode(&b.text()))
+        });
+        match data
+            .as_deref()
+            .and_then(|d| imgsize::mime_of(d).map(|m| (m, d)))
+        {
             Some((m, d)) => {
                 let name = self.doc.add_image(m, d.to_vec());
                 self.images.insert(href, name.clone());
@@ -378,9 +407,15 @@ impl Cx<'_> {
     }
 
     fn paragraph(&mut self, e: &El, out: &mut Vec<Block>, depth: usize) {
-        let mut p = e.attr("style-name").map(|n| self.styles.resolve(n)).unwrap_or_default();
+        let mut p = e
+            .attr("style-name")
+            .map(|n| self.styles.resolve(n))
+            .unwrap_or_default();
         if e.name == "h" {
-            let l = e.attr("outline-level").and_then(|v| v.parse::<u8>().ok()).unwrap_or(1);
+            let l = e
+                .attr("outline-level")
+                .and_then(|v| v.parse::<u8>().ok())
+                .unwrap_or(1);
             p.heading = Some(l.clamp(1, 6));
         }
         if p.page_break {
@@ -422,7 +457,10 @@ impl Cx<'_> {
             return;
         }
         let block = match p.heading {
-            Some(level) => Block::Heading { level, content: inl },
+            Some(level) => Block::Heading {
+                level,
+                content: inl,
+            },
             None => Block::Paragraph(inl),
         };
         if p.quote && p.heading.is_none() {
@@ -449,7 +487,10 @@ impl Cx<'_> {
             .unwrap_or((false, 1));
         let mut items = Vec::new();
         let mut first = true;
-        for it in e.children().filter(|c| c.name == "list-item" || c.name == "list-header") {
+        for it in e
+            .children()
+            .filter(|c| c.name == "list-item" || c.name == "list-header")
+        {
             if first {
                 if let Some(s) = it.attr("start-value").and_then(|v| v.parse().ok()) {
                     start = s;
@@ -473,12 +514,19 @@ impl Cx<'_> {
                     continue;
                 }
             }
-            items.push(ListItem { checked: None, blocks });
+            items.push(ListItem {
+                checked: None,
+                blocks,
+            });
         }
         if items.is_empty() {
             return vec![];
         }
-        if items.len() == 1 && items.iter().all(|i| i.blocks.iter().all(|b| matches!(b, Block::List { .. }))) {
+        if items.len() == 1
+            && items
+                .iter()
+                .all(|i| i.blocks.iter().all(|b| matches!(b, Block::List { .. })))
+        {
             // a list whose only item is another list adds nothing
             return items.pop().map(|i| i.blocks).unwrap_or_default();
         }
@@ -495,7 +543,10 @@ impl Cx<'_> {
         let collect = |this: &mut Self, parent: &El, header: bool, rows: &mut Vec<Vec<Cell>>| {
             for r in parent.children().filter(|c| c.name == "table-row") {
                 let mut cells = Vec::new();
-                for c in r.children().filter(|c| c.name == "table-cell" || c.name == "covered-table-cell") {
+                for c in r
+                    .children()
+                    .filter(|c| c.name == "table-cell" || c.name == "covered-table-cell")
+                {
                     if c.name == "covered-table-cell" {
                         continue;
                     }
@@ -509,7 +560,9 @@ impl Cx<'_> {
                             content.push(Inline::LineBreak);
                         }
                         match b {
-                            Block::Paragraph(i) | Block::Heading { content: i, .. } => content.extend(i),
+                            Block::Paragraph(i) | Block::Heading { content: i, .. } => {
+                                content.extend(i)
+                            }
                             Block::Code { text, .. } => content.push(Inline::Code(text)),
                             Block::List { items, .. } => {
                                 for it in items {
@@ -610,8 +663,12 @@ fn finish_code(blocks: &mut [Block]) {
 
 fn meta(pkg: &Package, limits: &Limits) -> Meta {
     let mut m = Meta::default();
-    let Some(x) = pkg.text("meta.xml") else { return m };
-    let Ok(r) = xml_tree::parse(&x, limits) else { return m };
+    let Some(x) = pkg.text("meta.xml") else {
+        return m;
+    };
+    let Ok(r) = xml_tree::parse(&x, limits) else {
+        return m;
+    };
     let Some(md) = r.child("meta") else { return m };
     for c in md.children() {
         let t = c.text().trim().to_string();
@@ -628,9 +685,8 @@ fn meta(pkg: &Package, limits: &Limits) -> Meta {
             "subject" | "description" => m.subject = Some(t),
             "language" => m.language = Some(t),
             "date" | "creation-date" => {
-                if m.date.is_none() {
-                    m.date = Some(t.split('T').next().unwrap_or(&t).to_string())
-                }
+                m.date
+                    .get_or_insert_with(|| t.split('T').next().unwrap_or(&t).to_string());
             }
             _ => {}
         }
@@ -677,7 +733,10 @@ pub fn read(data: &[u8], limits: &Limits, notes: &mut Notes) -> Result<Document>
             .into_iter()
             .map(|mut b| {
                 finish_code(&mut b);
-                ListItem { checked: None, blocks: b }
+                ListItem {
+                    checked: None,
+                    blocks: b,
+                }
             })
             .collect();
         blocks.push(Block::List {
@@ -696,9 +755,103 @@ pub fn read(data: &[u8], limits: &Limits, notes: &mut Notes) -> Result<Document>
         cx.notes.push(Note::new(
             Severity::Loss,
             "odt.images_skipped",
-            format!("{} picture(s) could not be read and were left out", cx.skipped_images),
+            format!(
+                "{} picture(s) could not be read and were left out",
+                cx.skipped_images
+            ),
         ));
     }
+    cx.doc.blocks = blocks;
+    Ok(cx.doc)
+}
+
+/// ODP slide decks: each slide a titled section, like the PPTX reader.
+pub fn read_presentation(data: &[u8], limits: &Limits, notes: &mut Notes) -> Result<Document> {
+    let pkg = Package::read(data, limits)?;
+    let content = pkg
+        .text("content.xml")
+        .ok_or_else(|| Error::new(ErrorCode::CorruptFile, "this ODP has no content.xml"))?;
+    let root = xml_tree::parse(&content, limits)?;
+    let mut styles = Styles::default();
+    if let Some(s) = pkg.text("styles.xml") {
+        if let Ok(sr) = xml_tree::parse(&s, limits) {
+            styles.load(&sr);
+        }
+    }
+    styles.load(&root);
+    let mut cx = Cx {
+        doc: Document::default(),
+        styles,
+        pkg: &pkg,
+        notes,
+        footnotes: Vec::new(),
+        images: HashMap::new(),
+        skipped_images: 0,
+        depth: 0,
+        max_depth: (limits.max_depth as usize).clamp(8, 64),
+    };
+    cx.doc.meta = meta(&pkg, limits);
+    let pres = root
+        .child("body")
+        .and_then(|b| b.child("presentation"))
+        .ok_or_else(|| Error::new(ErrorCode::CorruptFile, "this ODP has no presentation body"))?;
+    let mut blocks: Vec<Block> = Vec::new();
+    for (n, page) in pres.children().filter(|c| c.name == "page").enumerate() {
+        let mut title: Option<Vec<Inline>> = None;
+        let mut body: Vec<Block> = Vec::new();
+        for fr in page.children().filter(|c| c.name == "frame") {
+            let class = fr.attr("class").unwrap_or("");
+            let tb = fr.child("text-box");
+            if class == "notes" {
+                continue;
+            }
+            match tb {
+                Some(tb) if class == "title" => {
+                    let mut t = Vec::new();
+                    let mut tmp = Vec::new();
+                    cx.blocks(tb, &mut tmp, 1);
+                    for b in tmp {
+                        if let Block::Paragraph(i) | Block::Heading { content: i, .. } = b {
+                            if !t.is_empty() {
+                                t.push(Inline::Text(" ".into()));
+                            }
+                            t.extend(i);
+                        }
+                    }
+                    if title.is_none() && !t.is_empty() {
+                        title = Some(t);
+                    }
+                }
+                Some(tb) => cx.blocks(tb, &mut body, 1),
+                None if fr.child("table").is_some() => {
+                    if let Some(t) = fr.child("table").and_then(|t| cx.table(t, 1)) {
+                        body.push(t);
+                    }
+                }
+                None => {
+                    let mut inl = Vec::new();
+                    cx.frame(fr, &mut inl);
+                    if !inl.is_empty() {
+                        body.push(Block::Paragraph(inl));
+                    }
+                }
+            }
+        }
+        finish_code(&mut body);
+        if n > 0 {
+            blocks.push(Block::PageBreak);
+        }
+        blocks.push(Block::Heading {
+            level: 1,
+            content: title.unwrap_or_else(|| vec![Inline::Text(format!("Slide {}", n + 1))]),
+        });
+        blocks.extend(body);
+    }
+    cx.notes.push(Note::new(
+        Severity::Info,
+        "odp.text_only",
+        "slides were read as text, lists, tables and pictures; layout, shapes, animations and speaker notes are not carried",
+    ));
     cx.doc.blocks = blocks;
     Ok(cx.doc)
 }

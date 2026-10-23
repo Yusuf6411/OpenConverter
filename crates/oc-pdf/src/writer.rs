@@ -473,6 +473,73 @@ fn flate_image(b: &mut Builder, img: &Image, extra: Vec<(&str, Obj)>) -> Obj {
     b.add_stream(d, data, false)
 }
 
+/// Add a picture as an image XObject: JPEG data as it is, pixels as Flate (with a soft mask for
+/// alpha). Returns the object and the size in pixels, with the resolution the picture states.
+pub fn add_image_source(b: &mut Builder, src: Source) -> Result<(Obj, u32, u32, Option<f64>)> {
+    Ok(match src {
+        Source::Jpeg(data, dpi) => {
+            let info = jpeg_info(&data).ok_or_else(|| {
+                Error::new(
+                    ErrorCode::CorruptFile,
+                    "the JPEG has no readable frame header",
+                )
+            })?;
+            if info.precision != 8 || !matches!(info.components, 1 | 3 | 4) {
+                return Err(Error::new(
+                    ErrorCode::UnsupportedVariant,
+                    "only 8-bit JPEG with 1, 3 or 4 components can be stored in a PDF as it is",
+                ));
+            }
+            let cs = match info.components {
+                1 => name("DeviceGray"),
+                3 => name("DeviceRGB"),
+                _ => name("DeviceCMYK"),
+            };
+            let mut d = dict(vec![
+                ("Type", name("XObject")),
+                ("Subtype", name("Image")),
+                ("Width", Obj::Int(i64::from(info.width))),
+                ("Height", Obj::Int(i64::from(info.height))),
+                ("ColorSpace", cs),
+                ("BitsPerComponent", Obj::Int(8)),
+                ("Filter", name("DCTDecode")),
+            ]);
+            if info.components == 4 && info.adobe {
+                // Adobe writes CMYK JPEG inverted
+                d.insert(
+                    "Decode".into(),
+                    Obj::Array(
+                        [1, 0, 1, 0, 1, 0, 1, 0]
+                            .iter()
+                            .map(|v| Obj::Int(*v))
+                            .collect(),
+                    ),
+                );
+            }
+            (b.add_stream(d, data, false), info.width, info.height, dpi)
+        }
+        Source::Raster(img) => {
+            let img = to_eight(&img);
+            let (base, alpha) = split_alpha(&img);
+            let mut extra = Vec::new();
+            if let Some(a) = alpha {
+                let amask = Image {
+                    width: img.width,
+                    height: img.height,
+                    layout: Layout::Gray,
+                    depth: Depth::Eight,
+                    data: a,
+                    metadata: Default::default(),
+                };
+                let sm = flate_image(b, &amask, Vec::new());
+                extra.push(("SMask", sm));
+            }
+            let dpi = img.metadata.dpi.map(|(x, _)| x);
+            (flate_image(b, &base, extra), img.width, img.height, dpi)
+        }
+    })
+}
+
 /// Place each picture on its own page.
 pub fn images_to_pdf(images: Vec<Source>, opts: &ImageOptions) -> Result<Vec<u8>> {
     if images.is_empty() {
@@ -486,73 +553,7 @@ pub fn images_to_pdf(images: Vec<Source>, opts: &ImageOptions) -> Result<Vec<u8>
     let pages_node = b.reserve();
     let mut page_refs = Vec::new();
     for src in images {
-        let (xobj, wpx, hpx, meta_dpi) = match src {
-            Source::Jpeg(data, dpi) => {
-                let info = jpeg_info(&data).ok_or_else(|| {
-                    Error::new(
-                        ErrorCode::CorruptFile,
-                        "the JPEG has no readable frame header",
-                    )
-                })?;
-                if info.precision != 8 || !matches!(info.components, 1 | 3 | 4) {
-                    return Err(Error::new(
-                        ErrorCode::UnsupportedVariant,
-                        "only 8-bit JPEG with 1, 3 or 4 components can be stored in a PDF as it is",
-                    ));
-                }
-                let cs = match info.components {
-                    1 => name("DeviceGray"),
-                    3 => name("DeviceRGB"),
-                    _ => name("DeviceCMYK"),
-                };
-                let mut d = dict(vec![
-                    ("Type", name("XObject")),
-                    ("Subtype", name("Image")),
-                    ("Width", Obj::Int(i64::from(info.width))),
-                    ("Height", Obj::Int(i64::from(info.height))),
-                    ("ColorSpace", cs),
-                    ("BitsPerComponent", Obj::Int(8)),
-                    ("Filter", name("DCTDecode")),
-                ]);
-                if info.components == 4 && info.adobe {
-                    // Adobe writes CMYK JPEG inverted
-                    d.insert(
-                        "Decode".into(),
-                        Obj::Array(
-                            [1, 0, 1, 0, 1, 0, 1, 0]
-                                .iter()
-                                .map(|v| Obj::Int(*v))
-                                .collect(),
-                        ),
-                    );
-                }
-                (b.add_stream(d, data, false), info.width, info.height, dpi)
-            }
-            Source::Raster(img) => {
-                let img = to_eight(&img);
-                let (base, alpha) = split_alpha(&img);
-                let mut extra = Vec::new();
-                if let Some(a) = alpha {
-                    let amask = Image {
-                        width: img.width,
-                        height: img.height,
-                        layout: Layout::Gray,
-                        depth: Depth::Eight,
-                        data: a,
-                        metadata: Default::default(),
-                    };
-                    let sm = flate_image(&mut b, &amask, Vec::new());
-                    extra.push(("SMask", sm));
-                }
-                let dpi = img.metadata.dpi.map(|(x, _)| x);
-                (
-                    flate_image(&mut b, &base, extra),
-                    img.width,
-                    img.height,
-                    dpi,
-                )
-            }
-        };
+        let (xobj, wpx, hpx, meta_dpi) = add_image_source(&mut b, src)?;
         let dpi = if opts.dpi > 0.0 {
             opts.dpi
         } else {

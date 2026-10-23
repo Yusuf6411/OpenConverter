@@ -128,6 +128,102 @@ fn rtf_reader_survives_hostile_input() {
     nested.extend_from_slice(b"hello");
     let out = run("r3", &nested, "in.rtf", "md");
     assert!(String::from_utf8_lossy(&out).contains("hello") || out.is_empty() || !out.is_empty());
-    let junk = b"{\\rtf1\\u\\u99999999999 \\'zz\\pict\\pngblip ZZ{\\*\\x}\\par\\cell\\row}".to_vec();
+    let junk =
+        b"{\\rtf1\\u\\u99999999999 \\'zz\\pict\\pngblip ZZ{\\*\\x}\\par\\cell\\row}".to_vec();
     let _ = run("r4", &junk, "in.rtf", "md");
+}
+
+#[test]
+fn epub_round_trips_through_markdown() {
+    check_round_trip(&through("epub", "e"));
+}
+
+#[test]
+fn epub_splits_chapters_and_keeps_reading_order() {
+    let md = "# One\n\nfirst\n\n# Two\n\nsecond\n";
+    let f = run("e3", md.as_bytes(), "in.md", "epub");
+    assert_eq!(&f[30..38], b"mimetype", "mimetype is the first member");
+    let back = String::from_utf8(run("e4", &f, "in.epub", "md")).unwrap();
+    let (a, b) = (back.find("first").unwrap(), back.find("second").unwrap());
+    assert!(a < b, "{back}");
+    assert!(back.contains("# One") && back.contains("# Two"), "{back}");
+}
+
+#[test]
+fn fb2_is_read() {
+    let fb2 = r##"<?xml version="1.0" encoding="utf-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink">
+<description><title-info><author><first-name>Ann</first-name><last-name>Writer</last-name></author><book-title>Tale</book-title><lang>en</lang></title-info></description>
+<body><title><p>Tale</p></title><section><title><p>Part</p></title><p>Some <emphasis>words</emphasis> and <strong>more</strong>.<a l:href="#n1" type="note">[1]</a></p><empty-line/><poem><stanza><v>line a</v><v>line b</v></stanza></poem></section></body>
+<body name="notes"><section id="n1"><title><p>1</p></title><p>The note.</p></section></body>
+</FictionBook>"##;
+    let md = String::from_utf8(run("f1", fb2.as_bytes(), "in.fb2", "md")).unwrap();
+    for needle in [
+        "title: \"Tale\"",
+        "author: \"Ann Writer\"",
+        "# Tale",
+        "## Part",
+        "*words*",
+        "**more**",
+        "line a",
+        "The note.",
+    ] {
+        assert!(md.contains(needle), "missing {needle} in {md}");
+    }
+}
+
+fn pdf_text(pdf: &[u8]) -> String {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static N: AtomicUsize = AtomicUsize::new(0);
+    let tag = format!("pt{}", N.fetch_add(1, Ordering::SeqCst));
+    String::from_utf8(run(&tag, pdf, "in.pdf", "txt")).unwrap()
+}
+
+#[test]
+fn documents_become_pdf_with_a_text_layer() {
+    let pdf = run("p1", MD.as_bytes(), "in.md", "pdf");
+    assert!(pdf.starts_with(b"%PDF-"));
+    let t = pdf_text(&pdf);
+    for w in ["Title", "emphasis", "strong", "first", "second", "quote"] {
+        assert!(t.contains(w), "missing {w} in {t}");
+    }
+}
+
+#[test]
+fn text_becomes_pdf_pages() {
+    let text = (0..400)
+        .map(|i| format!("Line number {i} of the text"))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let pdf = run("p2", text.as_bytes(), "in.txt", "pdf");
+    let t = pdf_text(&pdf);
+    assert!(
+        t.contains("Line number 0 ") && t.contains("Line number 399 "),
+        "{}",
+        &t[..200.min(t.len())]
+    );
+}
+
+#[test]
+fn pdf_layout_survives_hostile_documents() {
+    // a very long word, deep nesting, a wide table and many list items
+    let mut md = String::new();
+    md.push_str(&"x".repeat(5000));
+    md.push_str("\n\n");
+    for d in 0..40 {
+        md.push_str(&format!("{}> level {d}\n", "> ".repeat(d)));
+    }
+    md.push_str("\n\n");
+    md.push_str(&format!(
+        "|{}\n|{}\n|{}\n\n",
+        " c |".repeat(30),
+        "---|".repeat(30),
+        " some longer cell text |".repeat(30)
+    ));
+    for i in 0..300 {
+        md.push_str(&format!("- item {i}\n"));
+    }
+    let pdf = run("p3", md.as_bytes(), "in.md", "pdf");
+    assert!(pdf.starts_with(b"%PDF-"));
+    assert!(pdf_text(&pdf).contains("item 299"));
 }

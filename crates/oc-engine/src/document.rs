@@ -14,7 +14,11 @@ pub const HTML: FormatId = FormatId("html");
 pub const DOCX: FormatId = FormatId("docx");
 pub const ODT: FormatId = FormatId("odt");
 pub const RTF: FormatId = FormatId("rtf");
-pub const FORMATS: [FormatId; 5] = [MD, HTML, DOCX, ODT, RTF];
+pub const EPUB: FormatId = FormatId("epub");
+pub const FB2: FormatId = FormatId("fb2");
+pub const PPTX: FormatId = FormatId("pptx");
+pub const ODP: FormatId = FormatId("odp");
+pub const FORMATS: [FormatId; 9] = [MD, HTML, DOCX, ODT, RTF, EPUB, FB2, PPTX, ODP];
 
 pub fn is_document(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -140,6 +144,46 @@ fn infos() -> Vec<Info> {
             write: true,
             spec: "RTF 1.9 subset: runs, paragraphs, lists, tables, hyperlinks, PNG and JPEG pictures (own reader and writer)",
         },
+        Info {
+            id: EPUB,
+            name: "EPUB e-book",
+            exts: &["epub"],
+            mime: &["application/epub+zip"],
+            sniff: vec![],
+            read: true,
+            write: true,
+            spec: "EPUB 3.3 (with an EPUB 2 navigation file): own reader and writer, chapters split at the top heading",
+        },
+        Info {
+            id: FB2,
+            name: "FictionBook (FB2)",
+            exts: &["fb2"],
+            mime: &["application/x-fictionbook+xml"],
+            sniff: vec![],
+            read: true,
+            write: false,
+            spec: "FictionBook 2.1 (own reader; read only)",
+        },
+        Info {
+            id: PPTX,
+            name: "PowerPoint presentation (PPTX)",
+            exts: &["pptx"],
+            mime: &["application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+            sniff: vec![],
+            read: true,
+            write: false,
+            spec: "ISO/IEC 29500 PresentationML: slide text, lists, tables and pictures (own reader; read only)",
+        },
+        Info {
+            id: ODP,
+            name: "OpenDocument presentation (ODP)",
+            exts: &["odp"],
+            mime: &["application/vnd.oasis.opendocument.presentation"],
+            sniff: vec![],
+            read: true,
+            write: false,
+            spec: "ISO/IEC 26300 presentation: slide text, lists, tables and pictures (own reader; read only)",
+        },
     ]
 }
 
@@ -216,6 +260,62 @@ pub fn register(registry: &mut Registry) {
             );
         }
     }
+    for a in &all {
+        if a.read {
+            edge(
+                registry,
+                a.id,
+                crate::pdf::PDF,
+                2,
+                4,
+                "Lay out the text on pages and embed fonts",
+            );
+        }
+    }
+    for a in &all {
+        if a.read {
+            for img in [
+                crate::image::PNG,
+                crate::image::JPEG,
+                crate::image::WEBP,
+                crate::image::BMP,
+                crate::image::GIF,
+            ] {
+                edge(
+                    registry,
+                    a.id,
+                    img,
+                    3,
+                    5,
+                    "Draw the first page of the laid-out document",
+                );
+            }
+        }
+    }
+    for img in [
+        crate::image::PNG,
+        crate::image::JPEG,
+        crate::image::WEBP,
+        crate::image::BMP,
+        crate::image::GIF,
+    ] {
+        edge(
+            registry,
+            crate::TXT,
+            img,
+            3,
+            5,
+            "Draw the first page of the laid-out text",
+        );
+    }
+    edge(
+        registry,
+        crate::TXT,
+        crate::pdf::PDF,
+        2,
+        3,
+        "Lay out the text on pages and embed fonts",
+    );
     edge(
         registry,
         crate::pdf::PDF,
@@ -242,10 +342,27 @@ fn bad(msg: &str) -> Error {
 fn decode_text(data: &[u8], from: FormatId, notes: &mut Notes) -> Result<String> {
     let d = oc_text::detect(data);
     let mut enc = d.encoding;
+    if !d.certain && from == FB2 {
+        let head = String::from_utf8_lossy(data.get(..200).unwrap_or(data)).to_ascii_lowercase();
+        if let Some(p) = head.find("encoding=") {
+            let name: String = head
+                .get(p + 9..)
+                .unwrap_or("")
+                .trim_start_matches(['"', '\''])
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                .collect();
+            if let Some(e) = oc_text::Encoding::from_name(&name) {
+                enc = e;
+            }
+        }
+    }
     if !d.certain && from == HTML {
         let head = String::from_utf8_lossy(data.get(..2048).unwrap_or(data)).to_ascii_lowercase();
         if let Some(p) = head.find("charset=") {
-            let name: String = head.get(p + 8..).unwrap_or("")
+            let name: String = head
+                .get(p + 8..)
+                .unwrap_or("")
                 .trim_start_matches(['"', '\''])
                 .chars()
                 .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
@@ -299,6 +416,13 @@ pub fn read(
         DOCX => oc_document::docx_in::read(data, limits, notes),
         ODT => oc_document::odt_in::read(data, limits, notes),
         RTF => oc_document::rtf_in::read(data, limits, notes),
+        EPUB => oc_document::epub_in::read(data, limits, notes),
+        PPTX => oc_document::pptx_in::read(data, limits, notes),
+        ODP => oc_document::odt_in::read_presentation(data, limits, notes),
+        FB2 => {
+            let t = decode_text(data, from, notes)?;
+            oc_document::fb2_in::read(&t, limits, notes)
+        }
         _ => Err(Error::new(
             ErrorCode::UnsupportedFormat,
             "this document format cannot be read",
@@ -357,6 +481,7 @@ pub fn write(
         DOCX => oc_document::docx_out::write(doc, limits),
         ODT => oc_document::odt_out::write(doc, limits),
         RTF => Ok(oc_document::rtf_out::write(doc, notes)),
+        EPUB => oc_document::epub_out::write(doc, limits),
         _ => Err(bad("this document format cannot be written")),
     }
 }
@@ -428,4 +553,16 @@ pub fn from_pdf(
         ));
     }
     write(to, &doc, opts, limits, notes)
+}
+
+/// A document format into a PDF with real text, laid out on pages.
+pub fn to_pdf(
+    from: FormatId,
+    data: &[u8],
+    opts: &Options,
+    limits: &Limits,
+    notes: &mut Notes,
+) -> Result<Vec<u8>> {
+    let doc = read(from, data, opts, limits, notes)?;
+    crate::docpdf::write(&doc, opts, limits, notes)
 }

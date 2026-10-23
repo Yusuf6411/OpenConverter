@@ -195,7 +195,10 @@ impl P<'_> {
         if let Some(name) = par.style.and_then(|n| self.styles.get(&n)) {
             let n = name.to_ascii_lowercase();
             if par.outline.is_none() {
-                if let Some(l) = n.strip_prefix("heading ").and_then(|r| r.trim().parse::<u8>().ok()) {
+                if let Some(l) = n
+                    .strip_prefix("heading ")
+                    .and_then(|r| r.trim().parse::<u8>().ok())
+                {
                     par.outline = Some(l.clamp(1, 6) - 1);
                 } else if n == "title" {
                     par.outline = Some(0);
@@ -216,7 +219,10 @@ impl P<'_> {
         if par.in_tbl {
             // table cell paragraphs are collected by \cell
             self.inl = inl;
-            self.par = Par { in_tbl: true, ..Par::default() };
+            self.par = Par {
+                in_tbl: true,
+                ..Par::default()
+            };
             return;
         }
         self.end_table();
@@ -226,7 +232,12 @@ impl P<'_> {
         } else if inl.is_empty() {
             // an empty paragraph only separates
         } else if par.has_listtext || par.ls.is_some_and(|l| l > 0) {
-            let ordered = par.list_text.trim().chars().next().is_some_and(|c| c.is_ascii_alphanumeric());
+            let ordered = par
+                .list_text
+                .trim()
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphanumeric());
             let start = par
                 .list_text
                 .trim()
@@ -235,7 +246,10 @@ impl P<'_> {
                 .unwrap_or(1);
             let key = format!("{}", par.ls.unwrap_or(0));
             let block = match par.outline {
-                Some(l) => Block::Heading { level: l + 1, content: inl },
+                Some(l) => Block::Heading {
+                    level: l + 1,
+                    content: inl,
+                },
                 None => Block::Paragraph(inl),
             };
             self.builder.list_item(
@@ -243,7 +257,10 @@ impl P<'_> {
                 &key,
                 ordered,
                 start,
-                ListItem { checked: None, blocks: vec![block] },
+                ListItem {
+                    checked: None,
+                    blocks: vec![block],
+                },
             );
         } else if let Some(l) = par.outline {
             let inl = match <[Inline; 1]>::try_from(inl) {
@@ -251,7 +268,10 @@ impl P<'_> {
                 Ok([o]) => vec![o],
                 Err(i) => i,
             };
-            self.builder.push(Block::Heading { level: (l + 1).min(6), content: inl });
+            self.builder.push(Block::Heading {
+                level: (l + 1).min(6),
+                content: inl,
+            });
         } else if mono_only && any {
             let text = crate::model::plain(&inl);
             self.builder.close_lists();
@@ -280,7 +300,10 @@ impl P<'_> {
         self.merge_runs();
         let mut content = std::mem::take(&mut self.inl);
         let par = std::mem::take(&mut self.par);
-        self.par = Par { in_tbl: true, ..Par::default() };
+        self.par = Par {
+            in_tbl: true,
+            ..Par::default()
+        };
         self.mono_only = true;
         self.any_text = false;
         if let Some(Inline::Text(t)) = content.first_mut() {
@@ -310,7 +333,8 @@ impl P<'_> {
         }
         // the first row is the header when every cell in it is bold, or by convention
         let bold_row = rows.first().is_some_and(|r| {
-            r.iter().all(|c| matches!(c.content.as_slice(), [Inline::Strong(_)] | []))
+            r.iter()
+                .all(|c| matches!(c.content.as_slice(), [Inline::Strong(_)] | []))
         });
         if let Some(r) = rows.first_mut() {
             for c in r.iter_mut() {
@@ -442,11 +466,11 @@ impl P<'_> {
                     self.par.style = arg;
                 }
             }
-            "colortbl" | "listtable" | "listoverridetable" | "rsidtbl" | "header"
-            | "footer" | "headerl" | "headerr" | "footerl" | "footerr" | "headerf" | "footerf"
-            | "private" | "generator" | "xmlnstbl" | "themedata" | "colorschememapping"
-            | "datastore" | "latentstyles" | "pnseclvl" | "falt" | "fldtype" | "bkmkstart"
-            | "bkmkend" | "object" | "footnote" | "annotation" => self.cur.dest = Dest::Skip,
+            "colortbl" | "listtable" | "listoverridetable" | "rsidtbl" | "header" | "footer"
+            | "headerl" | "headerr" | "footerl" | "footerr" | "headerf" | "footerf" | "private"
+            | "generator" | "xmlnstbl" | "themedata" | "colorschememapping" | "datastore"
+            | "latentstyles" | "pnseclvl" | "falt" | "fldtype" | "bkmkstart" | "bkmkend"
+            | "object" | "footnote" | "annotation" => self.cur.dest = Dest::Skip,
             "info" => self.cur.dest = Dest::Info,
             "title" if self.cur.dest == Dest::Info => self.cur.dest = Dest::InfoItem(0),
             "author" if self.cur.dest == Dest::Info => self.cur.dest = Dest::InfoItem(1),
@@ -482,8 +506,15 @@ impl P<'_> {
         match closing.dest {
             Dest::FontTbl => {}
             Dest::InfoItem(k) => {
-                let t = std::mem::take(&mut self.info_text).trim().trim_end_matches('-').to_string();
-                let t = if k == 3 && t.starts_with("00") { String::new() } else { t };
+                let t = std::mem::take(&mut self.info_text)
+                    .trim()
+                    .trim_end_matches('-')
+                    .to_string();
+                let t = if k == 3 && t.starts_with("00") {
+                    String::new()
+                } else {
+                    t
+                };
                 if !t.is_empty() {
                     match k {
                         0 => self.doc.meta.title = Some(t),
@@ -500,7 +531,10 @@ impl P<'_> {
                 let mut k = 0;
                 while k + 1 < hb.len() {
                     let h = |c: u8| (c as char).to_digit(16);
-                    if let (Some(a), Some(b)) = (hb.get(k).and_then(|c| h(*c)), hb.get(k + 1).and_then(|c| h(*c))) {
+                    if let (Some(a), Some(b)) = (
+                        hb.get(k).and_then(|c| h(*c)),
+                        hb.get(k + 1).and_then(|c| h(*c)),
+                    ) {
                         data.push((a * 16 + b) as u8);
                     }
                     k += 2;
@@ -524,11 +558,15 @@ impl P<'_> {
                         .field_url
                         .as_deref()
                         .map(str::trim)
-                        .and_then(|f| f.strip_prefix("HYPERLINK").or_else(|| f.strip_prefix("hyperlink")))
+                        .and_then(|f| {
+                            f.strip_prefix("HYPERLINK")
+                                .or_else(|| f.strip_prefix("hyperlink"))
+                        })
                         .map(|u| u.trim().trim_matches('"').to_string())
                         .filter(|u| !u.is_empty() && !u.starts_with("\\l"));
                     if let Some(url) = url {
-                        let content: Vec<Inline> = self.inl.drain(start.min(self.inl.len())..).collect();
+                        let content: Vec<Inline> =
+                            self.inl.drain(start.min(self.inl.len())..).collect();
                         let content = strip_ul(content);
                         if !content.is_empty() {
                             self.inl.push(Inline::Link {
@@ -564,10 +602,16 @@ impl P<'_> {
                         self.i += 2;
                         // keep fldinst, listtext and pntext; everything else is skipped
                         let rest = &self.b[self.i..];
-                        let known = [&b"\\fldinst"[..], b"\\listtext", b"\\pntext", b"\\shppict", b"\\nonshppict"];
-                        if !known.iter().any(|k| rest.starts_with(k)) {
-                            self.cur.dest = Dest::Skip;
-                        } else if rest.starts_with(b"\\nonshppict") {
+                        let known = [
+                            &b"\\fldinst"[..],
+                            b"\\listtext",
+                            b"\\pntext",
+                            b"\\shppict",
+                            b"\\nonshppict",
+                        ];
+                        if !known.iter().any(|k| rest.starts_with(k))
+                            || rest.starts_with(b"\\nonshppict")
+                        {
                             self.cur.dest = Dest::Skip;
                         }
                     }
@@ -596,9 +640,21 @@ impl P<'_> {
                         }
                         b'\'' => {
                             self.i += 1;
-                            let h = |o: usize| self.b.get(self.i + o).and_then(|c| (*c as char).to_digit(16));
+                            let h = |o: usize| {
+                                self.b
+                                    .get(self.i + o)
+                                    .and_then(|c| (*c as char).to_digit(16))
+                            };
                             if let (Some(a), Some(b)) = (h(0), h(1)) {
-                                if matches!(self.cur.dest, Dest::Normal | Dest::FldRslt | Dest::ListText | Dest::FldInst | Dest::InfoItem(_) | Dest::Style) {
+                                if matches!(
+                                    self.cur.dest,
+                                    Dest::Normal
+                                        | Dest::FldRslt
+                                        | Dest::ListText
+                                        | Dest::FldInst
+                                        | Dest::InfoItem(_)
+                                        | Dest::Style
+                                ) {
                                     self.pending.push((a * 16 + b) as u8);
                                 }
                                 self.i += 2;
@@ -633,8 +689,12 @@ impl P<'_> {
                                 e += 1;
                             }
                             if e > ds {
-                                let v: i64 = String::from_utf8_lossy(&self.b[ds..e]).parse().unwrap_or(0);
-                                arg = Some(if neg { -v } else { v }.clamp(-1_000_000_000, 1_000_000_000) as i32);
+                                let v: i64 =
+                                    String::from_utf8_lossy(&self.b[ds..e]).parse().unwrap_or(0);
+                                arg = Some(
+                                    if neg { -v } else { v }.clamp(-1_000_000_000, 1_000_000_000)
+                                        as i32,
+                                );
                                 self.i = e;
                             }
                             if self.b.get(self.i) == Some(&b' ') {
@@ -650,7 +710,9 @@ impl P<'_> {
                                 let mut skip = self.cur.uc;
                                 while skip > 0 && self.i < n {
                                     match self.b[self.i] {
-                                        b'\\' if self.b.get(self.i + 1) == Some(&b'\'') => self.i += 4,
+                                        b'\\' if self.b.get(self.i + 1) == Some(&b'\'') => {
+                                            self.i += 4
+                                        }
                                         b'\\' | b'{' | b'}' => break,
                                         _ => self.i += 1,
                                     }
@@ -669,15 +731,20 @@ impl P<'_> {
                 _ => {
                     // plain text up to the next special character
                     let s = self.i;
-                    while self.i < n && !matches!(self.b[self.i], b'{' | b'}' | b'\\' | b'\r' | b'\n') {
+                    while self.i < n
+                        && !matches!(self.b[self.i], b'{' | b'}' | b'\\' | b'\r' | b'\n')
+                    {
                         self.i += 1;
                     }
                     let chunk = &self.b[s..self.i];
                     match self.cur.dest {
                         Dest::Pict => {
-                            self.pict
-                                .hex
-                                .extend(chunk.iter().filter(|c| c.is_ascii_hexdigit()).map(|c| *c as char));
+                            self.pict.hex.extend(
+                                chunk
+                                    .iter()
+                                    .filter(|c| c.is_ascii_hexdigit())
+                                    .map(|c| *c as char),
+                            );
                         }
                         Dest::FontTbl => {
                             let name = String::from_utf8_lossy(chunk);
@@ -698,7 +765,12 @@ impl P<'_> {
                         }
                         Dest::Skip | Dest::Info => {}
                         _ => {
-                            if self.cur.dest == Dest::Normal || self.cur.dest == Dest::FldRslt || self.cur.dest == Dest::ListText || self.cur.dest == Dest::FldInst || matches!(self.cur.dest, Dest::InfoItem(_)) {
+                            if self.cur.dest == Dest::Normal
+                                || self.cur.dest == Dest::FldRslt
+                                || self.cur.dest == Dest::ListText
+                                || self.cur.dest == Dest::FldInst
+                                || matches!(self.cur.dest, Dest::InfoItem(_))
+                            {
                                 // bytes above 0x7f in a non-UTF-8 stream are in the code page
                                 if chunk.iter().all(|c| *c < 0x80) {
                                     self.flush_bytes();
@@ -749,7 +821,10 @@ fn strip_ul(c: Vec<Inline>) -> Vec<Inline> {
 pub fn read(data: &[u8], limits: &Limits, notes: &mut Notes) -> Result<Document> {
     let head = data.iter().take(32).copied().collect::<Vec<u8>>();
     if !head.windows(5).any(|w| w == b"{\\rtf") {
-        return Err(Error::new(ErrorCode::CorruptFile, "this is not an RTF file"));
+        return Err(Error::new(
+            ErrorCode::CorruptFile,
+            "this is not an RTF file",
+        ));
     }
     let base = St {
         bold: false,

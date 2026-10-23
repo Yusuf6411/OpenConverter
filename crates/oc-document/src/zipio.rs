@@ -39,7 +39,8 @@ impl Package {
     }
 
     pub fn text(&self, name: &str) -> Option<String> {
-        self.get(name).map(|d| String::from_utf8_lossy(d).into_owned())
+        self.get(name)
+            .map(|d| String::from_utf8_lossy(d).into_owned())
     }
 }
 

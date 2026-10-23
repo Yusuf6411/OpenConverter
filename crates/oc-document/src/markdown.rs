@@ -7,11 +7,42 @@ pub struct ReadOptions {
 
 pub fn read(text: &str, opts: &ReadOptions) -> Document {
     let (meta, body) = front_matter(text);
-    Document {
+    let mut doc = Document {
         meta,
         blocks: crate::md_block::parse(body, opts.github),
         images: Vec::new(),
+    };
+    // embedded (data:) pictures become pictures of the document
+    let mut images = Vec::new();
+    crate::model::visit_images(&mut doc.blocks, &mut |i| {
+        if let crate::model::Inline::Image { src, .. } = i {
+            if src.starts_with("data:") {
+                if let Some((mime, data)) = crate::base64::parse_data_uri(src) {
+                    if mime.starts_with("image/") {
+                        images.push((mime, data));
+                        *src = format!("\u{1}{}", images.len() - 1);
+                    }
+                }
+            }
+        }
+    });
+    let mut names = Vec::new();
+    for (mime, data) in images {
+        names.push(doc.add_image(&mime, data));
     }
+    crate::model::visit_images(&mut doc.blocks, &mut |i| {
+        if let crate::model::Inline::Image { src, .. } = i {
+            if let Some(n) = src
+                .strip_prefix('\u{1}')
+                .and_then(|n| n.parse::<usize>().ok())
+            {
+                if let Some(name) = names.get(n) {
+                    *src = name.clone();
+                }
+            }
+        }
+    });
+    doc
 }
 
 /// A leading `---` block of `key: value` lines gives title, author, date and language.
