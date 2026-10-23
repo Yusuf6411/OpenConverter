@@ -5,3 +5,4 @@
 // every offset is bounds-checked against the input before use
 
 pub mod isobmff;
+pub mod matroska;
