@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=OpenConverter
+Comment=Convert files on your own computer
+Exec=openconverter-desktop
+Icon=io.github.yusuf6411.openconverter
+Terminal=false
+Categories=Utility;AudioVideo;Graphics;
+Keywords=convert;converter;image;audio;video;document;

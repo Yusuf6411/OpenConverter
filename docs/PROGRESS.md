@@ -119,9 +119,9 @@ Notes: [python.md](python.md).
 
 ## Phase 8: Distribution polish
 - [~] M8.1 translation infrastructure with a pseudo-locale ([i18n.md](i18n.md)); checked in headless Chromium at `/?lang=qps`. Not done: JavaScript-built strings, a language picker, a real community language.
-- [~] M8.2 performance pass ([PERFORMANCE.md](PERFORMANCE.md), ADR-0015): most budgets are missed and recorded; no speed work was done.
+- [~] M8.2 performance pass ([PERFORMANCE.md](PERFORMANCE.md), ADR-0015): v3.0.1 sped up Inflate, Zstandard, PNG, JPEG, FLAC and MP3; the remaining misses are recorded.
 - [~] M8.3 documentation review: README, python.md, i18n.md, formats pages and COMPATIBILITY.md are current for 3.0.0. Two stray wheel files that had been committed by mistake were removed.
-- [ ] M8.4 Flathub, winget, COPR, signed APT and DNF repositories, Windows 11 context menu, macOS signing and notarization, OSS-Fuzz application: not done. They need accounts, credentials or network services that this environment does not have, and none can be tested here.
+- [~] M8.4 distribution: files and scripts are prepared in `packaging/` and `tools/` ([packaging/README.md](../packaging/README.md)); only the signed APT repository was tested. Not done: publishing to any channel, the Windows 11 top-level menu, and everything marked untested there.
 - [ ] M8.5 the encumbered build: no decision has been recorded, so it stays off (ADR-0010).
 - Release v3.0.0 (tagged locally).
 
@@ -137,3 +137,9 @@ Notes: [python.md](python.md).
 Speed work against the budgets (ADR-0015), the packaging channels in M8.4, and the unfinished items listed per phase above.
 
 - **Tables (CSV, TSV, JSON, XLSX, ODS)**: `oc-sheet` reads and writes RFC 4180 delimited text (delimiter detection, lenient quotes, BOM, ragged rows padded), flat JSON tables (own strict parser) and, since Phase 3, XLSX and ODS workbooks (M3.5). Engine options mirror 1.x. Fuzz targets `table` and `workbook`.
+
+## Post-3.0.0 (v3.0.1)
+- Speed pass (PERFORMANCE.md).
+- Brotli encoder and WOFF2 writing (`oc-compress::brotli`, `oc-font`); WOFF2 reading and Brotli decoding are not done.
+- Distribution files (`packaging/`).
+- Not done: JPEG XL, camera RAW/DNG, WavPack, APE, ProRes, Theora decoding (ADR-0013); the encumbered build (ADR-0010).

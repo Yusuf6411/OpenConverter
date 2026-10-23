@@ -22,7 +22,7 @@ Crates: `oc-font` (parsing, outlines, conversions), `oc-raster` (drawing the spe
 Oracles (test time only): fontTools reads every output and its outline areas and advances match the source; Chromium's font sanitiser loads each one (`tools/font_interop.py`, 46 checks).
 
 ## Not done
-- WOFF2 (needs a Brotli decoder and its static dictionary, which is not written), Type 1 (PFA/PFB) and bitmap-only fonts as inputs or outputs.
+- WOFF2 as an input (needs a Brotli decoder and its static dictionary, which is not written); WOFF2 output is supported, with tables stored untransformed, Type 1 (PFA/PFB) and bitmap-only fonts as inputs or outputs.
 - Variable fonts: only the default instance is converted, with a warning; `gvar`/`fvar` are dropped when the outline type changes.
 - Hinting: TrueType instructions are dropped when making CFF, and CFF hints are not carried to TrueType (a note says so).
 - Layout features: the specimen applies `kern` pairs only; GSUB/GPOS shaping is a Phase 6b item.

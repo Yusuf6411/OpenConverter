@@ -61,8 +61,8 @@ Decision: every document format reads into `oc-document::model` and writes from 
 Consequences: the output looks different on machines with different fonts; text extraction and search work everywhere because the PDF carries `ToUnicode` maps. Complex scripts and CFF-only fonts are not supported (notes say so).
 
 ## ADR-0013: Stretch codecs that need unavailable specifications are not attempted
-Context: JPEG XL, DNG/camera RAW, WavPack, APE, ProRes, Theora decoding, a Brotli encoder and WOFF2 writing each need large specification tables (context models, dictionaries, transform sets) that cannot be fetched in the offline build environment, and the project's rule is to write its own code and verify it against real files.
-Decision: they are recorded as not done rather than shipped as guesses. Legacy Office, XLS and SQLite, which are fully described by publicly known structure and can be checked with LibreOffice and sqlite3, were done instead.
+Context: JPEG XL, DNG/camera RAW, WavPack, APE, ProRes, Theora decoding, and the Brotli decoder and WOFF2 reading each need large specification tables (context models, dictionaries, transform sets) that cannot be fetched in the offline build environment, and the project's rule is to write its own code and verify it against real files.
+Decision: they are recorded as not done rather than shipped as guesses. Update (v3.0.1): a Brotli encoder (own prefix codes and LZ77, no static dictionary) and WOFF2 writing were added, checked with the reference Brotli decoder and fontTools; they need no tables. Brotli decoding and WOFF2 reading still need the static dictionary and transform set and stay not done. Legacy Office, XLS and SQLite, which are fully described by publicly known structure and can be checked with LibreOffice and sqlite3, were done instead.
 Consequences: the compatibility table does not list these formats; adding one later needs its specification and an oracle to test against.
 
 ## ADR-0014: The Python binding uses PyO3 and drops `forbid(unsafe_code)` for that crate

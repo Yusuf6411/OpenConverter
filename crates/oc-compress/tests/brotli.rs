@@ -1,4 +1,8 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::vec_init_then_push)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::vec_init_then_push
+)]
 use oc_compress::brotli::compress;
 
 fn samples() -> Vec<(&'static str, Vec<u8>)> {

@@ -1,0 +1,38 @@
+# Flatpak manifest for Flathub. NOT BUILT OR SUBMITTED: this environment has no flatpak-builder
+# and no network access to Flathub. Before submitting:
+#   1. publish a release tarball and fill in url and sha256 below,
+#   2. generate cargo-sources.json with flatpak-cargo-generator.py from Cargo.lock
+#      (see packaging/README.md), because Flathub builds have no network,
+#   3. run flatpak-builder --user --install --force-clean build this-file and test the app.
+app-id: io.github.yusuf6411.openconverter
+runtime: org.gnome.Platform
+runtime-version: "48"
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: openconverter-desktop
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Files are chosen through the portal; no blanket filesystem access and no network.
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/openconverter/cargo
+modules:
+  - name: openconverter
+    buildsystem: simple
+    build-commands:
+      - cargo --offline build --release --locked -p oc-cli -p oc-desktop
+      - install -Dm755 target/release/openconverter /app/bin/openconverter
+      - install -Dm755 target/release/openconverter-desktop /app/bin/openconverter-desktop
+      - install -Dm644 packaging/flatpak/io.github.yusuf6411.openconverter.desktop /app/share/applications/io.github.yusuf6411.openconverter.desktop
+      - install -Dm644 packaging/flatpak/io.github.yusuf6411.openconverter.metainfo.xml /app/share/metainfo/io.github.yusuf6411.openconverter.metainfo.xml
+      - install -Dm644 crates/oc-desktop/icons/128x128.png /app/share/icons/hicolor/128x128/apps/io.github.yusuf6411.openconverter.png
+    sources:
+      - type: archive
+        url: https://github.com/Yusuf6411/OpenConverter/archive/refs/tags/v3.0.0.tar.gz
+        sha256: REPLACE_WITH_TARBALL_SHA256
+      - cargo-sources.json

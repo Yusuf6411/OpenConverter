@@ -7,7 +7,7 @@ name = "openconverter"
 description = "Convert images, audio, video, documents, tables, archives and more with no external tools."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT OR Apache-2.0" }
+license = { text = "MIT" }
 dynamic = ["version"]
 classifiers = [
   "Programming Language :: Rust",
