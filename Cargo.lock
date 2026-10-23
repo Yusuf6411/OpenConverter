@@ -2147,7 +2147,7 @@ dependencies = [
 
 [[package]]
 name = "oc-archive"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "aes",
  "hmac",
@@ -2161,7 +2161,7 @@ dependencies = [
 
 [[package]]
 name = "oc-audio"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-checksum",
  "oc-container",
@@ -2172,11 +2172,11 @@ dependencies = [
 
 [[package]]
 name = "oc-checksum"
-version = "3.0.2"
+version = "3.0.3"
 
 [[package]]
 name = "oc-cli"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-archive",
  "oc-core",
@@ -2186,7 +2186,7 @@ dependencies = [
 
 [[package]]
 name = "oc-compress"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-checksum",
  "oc-core",
@@ -2196,18 +2196,18 @@ dependencies = [
 
 [[package]]
 name = "oc-container"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-core",
 ]
 
 [[package]]
 name = "oc-core"
-version = "3.0.2"
+version = "3.0.3"
 
 [[package]]
 name = "oc-desktop"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-cli",
  "oc-server",
@@ -2217,7 +2217,7 @@ dependencies = [
 
 [[package]]
 name = "oc-document"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-archive",
  "oc-core",
@@ -2227,7 +2227,7 @@ dependencies = [
 
 [[package]]
 name = "oc-engine"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-archive",
  "oc-audio",
@@ -2248,7 +2248,7 @@ dependencies = [
 
 [[package]]
 name = "oc-font"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-checksum",
  "oc-compress",
@@ -2258,7 +2258,7 @@ dependencies = [
 
 [[package]]
 name = "oc-image"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-checksum",
  "oc-compress",
@@ -2270,14 +2270,14 @@ dependencies = [
 
 [[package]]
 name = "oc-io"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-core",
 ]
 
 [[package]]
 name = "oc-pdf"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "aes",
  "md-5",
@@ -2293,14 +2293,14 @@ dependencies = [
 
 [[package]]
 name = "oc-prores"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-core",
 ]
 
 [[package]]
 name = "oc-python"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-core",
  "oc-engine",
@@ -2309,11 +2309,11 @@ dependencies = [
 
 [[package]]
 name = "oc-raster"
-version = "3.0.2"
+version = "3.0.3"
 
 [[package]]
 name = "oc-server"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "axum",
  "getrandom 0.4.3",
@@ -2329,7 +2329,7 @@ dependencies = [
 
 [[package]]
 name = "oc-sheet"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-archive",
  "oc-core",
@@ -2339,11 +2339,11 @@ dependencies = [
 
 [[package]]
 name = "oc-simd"
-version = "3.0.2"
+version = "3.0.3"
 
 [[package]]
 name = "oc-subtitle"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-core",
  "oc-xml",
@@ -2351,7 +2351,7 @@ dependencies = [
 
 [[package]]
 name = "oc-svg"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-core",
  "oc-font",
@@ -2363,14 +2363,14 @@ dependencies = [
 
 [[package]]
 name = "oc-text"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-core",
 ]
 
 [[package]]
 name = "oc-theora"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-audio",
  "oc-checksum",
@@ -2379,7 +2379,7 @@ dependencies = [
 
 [[package]]
 name = "oc-video"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-audio",
  "oc-container",
@@ -2389,22 +2389,30 @@ dependencies = [
  "oc-subtitle",
  "oc-theora",
  "oc-vp8",
+ "oc-vp9",
 ]
 
 [[package]]
 name = "oc-vp8"
-version = "3.0.2"
+version = "3.0.3"
+dependencies = [
+ "oc-core",
+]
+
+[[package]]
+name = "oc-vp9"
+version = "3.0.3"
 dependencies = [
  "oc-core",
 ]
 
 [[package]]
 name = "oc-worker"
-version = "3.0.2"
+version = "3.0.3"
 
 [[package]]
 name = "oc-xml"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "oc-core",
 ]

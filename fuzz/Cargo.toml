@@ -17,6 +17,7 @@ oc-xml = { path = "../crates/oc-xml" }
 oc-image = { path = "../crates/oc-image" }
 oc-vp8 = { path = "../crates/oc-vp8" }
 oc-theora = { path = "../crates/oc-theora" }
+oc-vp9 = { path = "../crates/oc-vp9" }
 oc-prores = { path = "../crates/oc-prores" }
 oc-video = { path = "../crates/oc-video" }
 oc-font = { path = "../crates/oc-font" }
@@ -418,5 +419,11 @@ doc = false
 [[bin]]
 name = "prores"
 path = "fuzz_targets/prores.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "vp9"
+path = "fuzz_targets/vp9.rs"
 test = false
 doc = false

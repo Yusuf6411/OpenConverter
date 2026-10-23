@@ -23,6 +23,7 @@ pub mod subs;
 pub mod theora;
 pub mod ts;
 pub mod vp8;
+pub mod vp9;
 pub mod y4m;
 
 use oc_core::{Error, ErrorCode, Result};

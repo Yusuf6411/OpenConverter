@@ -138,11 +138,12 @@ Speed work against the budgets (ADR-0015), the packaging channels in M8.4, and t
 
 - **Tables (CSV, TSV, JSON, XLSX, ODS)**: `oc-sheet` reads and writes RFC 4180 delimited text (delimiter detection, lenient quotes, BOM, ragged rows padded), flat JSON tables (own strict parser) and, since Phase 3, XLSX and ODS workbooks (M3.5). Engine options mirror 1.x. Fuzz targets `table` and `workbook`.
 
-## Post-3.0.0 (v3.0.1 and v3.0.2)
+## Post-3.0.0 (v3.0.1 to v3.0.3)
 - Speed pass (PERFORMANCE.md).
 - Brotli encoder and decoder (`oc-compress::brotli`) and WOFF2 reading and writing (`oc-font::woff2`, `build`); WOFF2 collections are read by code that no test file has exercised.
 - Distribution files (`packaging/`).
 - DNG reading ([formats/raw.md](formats/raw.md)), checked only against synthetic files.
 - ProRes decoding (`oc-prores`, [formats/prores.md](formats/prores.md)), matching ffmpeg within one level on 4:2:2, 4:4:4, alpha and interlaced frames.
 - Theora decoding (`oc-theora`, [formats/theora.md](formats/theora.md)), bit-exact with ffmpeg on nine libtheora streams, and Ogg video reading.
-- Not done: JPEG XL, other camera raw formats, WavPack, APE, ProRes (ADR-0013); the encumbered build (ADR-0010).
+- VP9 decoding (`oc-vp9`, [formats/vp9.md](formats/vp9.md)), written from the specification and bit-exact with libvpx on 14 streams (tiles, scaled references, 4:4:4, 10-bit, lossless).
+- Not done: JPEG XL, other camera raw formats, WavPack, APE (ADR-0013); the encumbered build (ADR-0010).
