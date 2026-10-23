@@ -258,6 +258,9 @@ impl Decoder {
                         }
                     } else {
                         let mix_bits = b.read(8)?;
+                        if mix_bits >= 32 {
+                            return Err(Error::corrupt("ALAC mix shift out of range"));
+                        }
                         let mix_res = b.read(8)? as u8 as i8;
                         let mut hdr = Vec::with_capacity(n);
                         for _ in 0..n {

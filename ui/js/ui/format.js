@@ -50,6 +50,7 @@ export function friendlyError(err) {
     return "This file uses a feature OpenConverter 1.0 doesn't support: " + msg;
   }
   if (code === "corrupt_file") return "The file looks damaged or incomplete, so it couldn't be read. (" + msg + ")";
+  if (code === "codec_not_in_build") return msg || "This file needs a codec that is not included in this build.";
   if (code === "unsupported_format") return msg || "This kind of file isn't supported yet.";
   if (code === "limit_exceeded") return "Too large: " + msg;
   if (code === "cancelled") return "Conversion cancelled.";

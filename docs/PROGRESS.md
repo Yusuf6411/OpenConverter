@@ -53,6 +53,17 @@ The 1.x Python notes are kept in [v1/](v1/).
 - [~] M3.4 server and UI: `/api/files/{id}/entries`, `/extract`, `/api/archives`; Browse and Pack dialogs. Documented in [API.md](API.md). Driven end to end by `serve.rs` tests and a headless browser.
 - [~] M3.5 spreadsheets (`oc-sheet`): XLSX and ODS read and write. Several sheets (`sheet` option picks one, default the first visible), shared and inline strings, number formats that mean dates (1900 and 1904 systems), booleans, errors, merged cells, formula text kept next to the cached value, hidden sheets reported; on write a bold frozen header row, date styles and column widths. Cross-checked with openpyxl, xlsxwriter, pandas and LibreOffice in both directions (`tools/sheet_interop.py`, 20+ cases). A table preview (`GET /api/files/{id}/table`, a Preview button and sheet picker in the UI) shows the first rows. Fuzz target `workbook`. Not done: styles beyond the header row, charts, images, pivot tables, formulas on write, XLS and XLSB (binary formats).
 
+## Phase 4: Audio
+Format notes are in [formats/](formats/README.md). Interop checks (ffmpeg, libopus, libmpg123 as oracles at test time only) are in `tools/audio_interop.py`: 94 checks, all passing.
+- [~] M4.1 DSP (`oc-audio::dsp`): sample-format conversion with none/TPDF/shaped dither, channel mixing with BS.775 downmix, a polyphase Kaiser-window sinc resampler (four quality presets), BS.1770 / R128 integrated loudness, range and true peak, normalisation, ReplayGain tags, trim, fades, silence trimming. Normalising reaches the target within 0.3 LU as ffmpeg's ebur128 measures it.
+- [~] M4.2 PCM containers: WAV (RIFF, RF64, BW64, extensible, float, A-law, mu-law, LIST/INFO), AIFF/AIFF-C (including `sowt`, float, 80-bit rates), CAF; FLAC encoder and decoder (levels 0-8, MD5 checked, bit-identical to ffmpeg, within 3% of its size). Not done: WAV ADPCM and `bext`/`cue ` chunks, AIFF markers and ID3 chunk, FLAC CUESHEET, Ogg FLAC.
+- [~] M4.3 MP3: layer III decoder (matches ffmpeg and libmpg123 to 3e-6) and encoder (CBR/VBR, bit reservoir, Xing/LAME header, ID3v2.4), ID3v1/v2.2-2.4 and APEv2 tags. Not done: layers I and II, a psychoacoustic model and short blocks in the encoder, ABR, VBRI.
+- [~] M4.4 Ogg, Vorbis and Opus: Ogg pages; Vorbis decoder (matches ffmpeg to 5e-8) and encoder (within a few percent of libvorbis in size and SNR); Opus CELT decoder (range-coder state identical to libopus on 12 streams, 70-85 dB SNR) and encoder (CBR/VBR/CVBR, 2.5-20 ms, multichannel; libopus decodes it). Not done: Opus SILK and hybrid decoding and encoding (ADR-0008), Vorbis short blocks and floor 0.
+- [~] M4.5 Tags, cover art and containers: one tag model for Vorbis comments, ID3, MP4 atoms, APEv2 and Matroska ([formats/tags.md](formats/tags.md)); ALAC (bit-exact with ffmpeg) in M4A and CAF on a shared ISO-BMFF reader; Matroska/WebM reader and writer in `oc-container` (EBML, lacing, unknown-size clusters, tags, chapters, attachments) with audio in `.mka`/`.weba` (Opus, Vorbis, FLAC, PCM; reads MP3 too); lossless stream copy between Ogg, Matroska/WebM and FLAC (ADR-0009). Not done: AAC and AC-3 (ADR-0006), ALAC in Matroska, MP3 packets into Matroska, stream copy for M4A and CAF.
+- [~] M4.6 Audio UI: waveform from the decoded samples, integrated loudness, loudness range, sample and true peak, tags, playback of the first 90 s (the original, or a WAV made by the worker), nine built-in presets (Podcast: Opus 64 kbps mono at -16 LUFS, Voice memo, Music small, Music compatible, Streaming, Web audio, Lossless archive, Apple Lossless, CD quality). Endpoints `/api/files/{id}/audio`, `.../audio.wav` and the same under `/api/outputs/`. Driven in headless Chromium: preset, waveform, convert, output waveform. Not done: user-defined presets, seeking by dragging, per-channel waveforms.
+- Fuzz targets: `flac`, `vorbis`, `mp3`, `alac`, `opus`, `matroska`, `audio_wav_aiff`, run 45 s each locally; the nightly workflow lists them.
+- Not run on a real machine: the desktop shell's audio playback (WebKitGTK codec support varies; the WAV preview exists for that reason).
+
 ## Known gaps
 - 1.x Python test cases are not ported yet; they are available at tag v1.0.0. Port them as each Rust codec lands (M1.x, M2.x).
 - cargo-deny passes locally (advisories, bans, licenses, sources); the Tauri tree is allowed through named wrappers (ADR-0005).
@@ -62,6 +73,6 @@ The 1.x Python notes are kept in [v1/](v1/).
 - [~] M2.8 [COMPATIBILITY.md](COMPATIBILITY.md) is generated from the registry by `tools/gen_compat.py`; screenshots of the UI are in `docs/screenshots/`.
 
 ## Next step
-Phase 4: audio (WAV, FLAC, MP3, Ogg Vorbis, Opus, AAC, AIFF), written from the specifications and checked against the reference tools available here.
+Phase 5a: containers, remux, subtitles, VP8.
 
 - **Tables (CSV, TSV, JSON, XLSX, ODS)**: `oc-sheet` reads and writes RFC 4180 delimited text (delimiter detection, lenient quotes, BOM, ragged rows padded), flat JSON tables (own strict parser) and, since Phase 3, XLSX and ODS workbooks (M3.5). Engine options mirror 1.x. Fuzz targets `table` and `workbook`.

@@ -198,6 +198,12 @@ pub fn read(data: &[u8], limits: &Limits) -> Result<(Audio, Notes)> {
             mp3::read(&all, limits)?
         }
         id if id.starts_with("A_PCM/") => (pcm_from_packets(id, &info, &pk, limits)?, Notes::new()),
+        other if other.starts_with("A_AAC") || other.starts_with("A_AC3") || other.starts_with("A_EAC3") => {
+            return Err(Error::new(
+                ErrorCode::CodecNotInBuild,
+                "this audio is AAC or AC-3, codecs that may be covered by patents and are not in this build; remux it or use FLAC or Opus instead",
+            ))
+        }
         other => {
             return Err(Error::new(
                 ErrorCode::UnsupportedVariant,

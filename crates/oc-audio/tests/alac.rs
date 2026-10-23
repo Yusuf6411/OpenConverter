@@ -258,3 +258,11 @@ fn tags_and_cover_survive() {
         assert!(text.contains("track=3/12"), "{text}");
     }
 }
+
+#[test]
+fn mix_shift_out_of_range_is_an_error_not_a_panic() {
+    // Found by fuzzing: a mix shift of 32 or more overflowed a shift.
+    let d = data("alac_fuzz_mixshift.m4a");
+    let _ = m4a::read(&d, &Limits::default());
+    let _ = oc_audio::caf::read(&d, &Limits::default());
+}

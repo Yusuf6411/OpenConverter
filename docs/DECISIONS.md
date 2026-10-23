@@ -24,3 +24,23 @@ Consequences: the tables are numeric constants of the format; the tool documents
 Context: MASTER_PROMPT §2 wants a Tauri v2 shell with an IPC adapter. Tauri's windowing stack (tauri-utils, tauri-codegen, plist, ico, wry) pulls `png`, `quick-xml`, `miniz_oxide` and `flate2` for icon handling and bundling, which the dependency ban forbids for conversion code.
 Decision: `oc-desktop` starts the same loopback HTTP server used by `openconverter serve` (with a per-run token) and points a Tauri window at it, so the desktop app and the browser UI share one API and one security model. Conversions still run in sandboxed worker processes. `cargo xtask check-deps` does not descend into `tauri`, `tauri-*`, `wry` and `tao`; `deny.toml` allows the banned names only through those wrappers. None of those crates sees user files.
 Consequences: the desktop crate is the only place with a GUI dependency tree; the CLI and server trees stay free of banned crates. The IPC adapter is dropped; native file dialogs can be added later through tauri plugins without touching the engine.
+
+## ADR-0006: Patent-encumbered audio codecs stay out of the default build
+Context: MASTER_PROMPT §7.4 puts AAC and AC-3 behind an `encumbered` Cargo feature that is off by default, and asks for an explicit decision before a release includes it. No such decision has been made.
+Decision: Phase 4 implements no AAC or AC-3 code at all. Files that hold them fail with `codec_not_in_build` and a message that suggests Apple Lossless, FLAC or Opus (`.m4a`, Matroska and WebM readers). Stream copy of such tracks arrives with the remux work in Phase 5a, which needs no codec.
+Consequences: nothing in the 2.2.0 artifacts is subject to the §7.4 question. If the feature is added later, the `.rpm` stays without it.
+
+## ADR-0007: MP3 is in the default build
+Context: the MP3 patents are reported as expired (the last one in 2017); this is a record of the engineering decision, not a legal conclusion.
+Decision: the layer III decoder and encoder are always built. The encoder writes a Xing/LAME-style header whose encoder string is `LAMEOC2.2`, not a LAME version number, so a player never assumes LAME's delay values apply to a stream they were not tuned for (the header stores an encoder delay of 528 samples, which with the usual 529-sample decoder delay gives gapless playback in ffmpeg and libmpg123).
+Consequences: MP3 appears in every artifact. Layer I and II are not read yet.
+
+## ADR-0008: Opus decoder covers CELT; SILK and hybrid are deferred, the encoder is CELT-only and simple
+Context: Opus in the master prompt means SILK, CELT and hybrid. The CELT tables (band layout, allocation, cache, PVQ tables, window, comb filter taps) were read back from a libopus binary with a script, as ADR-0004 did for VP8, and the decoder was validated bit-exactly on the range-coder state against libopus. The SILK codebooks (about 40 KB of NLSF, gain, pitch and LTP tables) cannot be recovered the same way from the stripped `libopus.so.0` available here (no symbols to anchor on) and RFC 6716 was unreachable (rfc-editor.org is blocked by the egress proxy). Copying libopus source from the network was not done: it is the reference implementation, not a specification, and the project rule is to write from the specification.
+Decision: CELT frames are decoded and encoded; a SILK or hybrid packet raises `unsupported_variant` for that packet and the rest of the file still decodes with a warning. The encoder writes CELT with long blocks, CBR/VBR/CVBR, dual stereo, no transient detection, no pitch pre-filter. Its output is valid for every decoder (checked with libopus) and its quality-for-bits is behind libopus's.
+Consequences: Opus files from low-rate voice encoders do not decode here until SILK is added. Revisit when the RFC text or the tables can be obtained from a documented source.
+
+## ADR-0009: Audio stream copy
+Context: converting Opus from Ogg to WebM, or FLAC to Matroska, by decode and encode would lose quality for no reason.
+Decision: `oc-audio::copy` moves packets between Ogg, Matroska/WebM and FLAC files when the codec fits the target and no option changes the sound (processing, bit depth, encoder settings). The route text says "no re-encoding". `codec=auto` is the default of the Matroska/WebM writers for that reason.
+Consequences: the copy path must carry tags, pictures, pre-skip and end trimming exactly; round trips are tested packet for packet.

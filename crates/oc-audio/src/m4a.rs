@@ -219,6 +219,12 @@ pub fn read(data: &[u8], limits: &Limits) -> Result<(Audio, Notes)> {
     let mut notes = Notes::new();
     let mut audio = match &track.codec {
         b"alac" => read_alac(data, track, limits)?,
+        b"mp4a" | b"ac-3" | b"ec-3" => {
+            return Err(Error::new(
+                ErrorCode::CodecNotInBuild,
+                "this audio is AAC or AC-3, codecs that may be covered by patents and are not in this build; remux it or use Apple Lossless instead",
+            ))
+        }
         other => {
             return Err(Error::new(
                 ErrorCode::UnsupportedVariant,
