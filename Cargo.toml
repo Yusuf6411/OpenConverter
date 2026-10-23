@@ -15,6 +15,7 @@ members = [
     "crates/oc-prores",
     "crates/oc-vp9",
     "crates/oc-jxl",
+    "crates/oc-av1",
     "crates/oc-video",
     "crates/oc-container",
     "crates/oc-archive",
