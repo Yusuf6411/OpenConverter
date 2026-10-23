@@ -11,7 +11,7 @@ mod bc6h_layout;
 pub mod bc7;
 mod bc7_tables;
 pub mod bmp;
-mod ccitt;
+pub mod ccitt;
 mod ccitt_tables;
 pub mod dds;
 pub mod exr;
