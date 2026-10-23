@@ -943,3 +943,112 @@ pub fn source_depth(a: &Audio) -> (Option<u8>, bool) {
         Samples::Float(_) => (None, true),
     }
 }
+
+fn json_escape(s: &str) -> String {
+    let mut o = String::with_capacity(s.len() + 2);
+    o.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            '\n' => o.push_str("\\n"),
+            '\r' => o.push_str("\\r"),
+            '\t' => o.push_str("\\t"),
+            c if (c as u32) < 0x20 => o.push_str(&format!("\\u{:04x}", c as u32)),
+            c => o.push(c),
+        }
+    }
+    o.push('"');
+    o
+}
+
+fn num(v: f64) -> String {
+    if v.is_finite() {
+        format!("{v:.4}")
+    } else {
+        "null".into()
+    }
+}
+
+/// What the web preview shows for an audio file, as JSON:
+/// `{"sample_rate","channels","frames","duration","bits","float","peaks":[[min,max]...],
+/// "loudness":{"integrated","range","sample_peak_db","true_peak_db"},"tags":[[key,value]...]}`.
+/// Peaks cover all channels together, scaled to -1..1, `buckets` of them across the clip.
+pub fn analyse_json(fmt: FormatId, data: &[u8], buckets: usize, limits: &Limits) -> Result<String> {
+    let (a, _) = decode(fmt, data, limits)?;
+    a.validate(limits)?;
+    let ch = usize::from(a.channels.max(1));
+    let pcm = dsp::to_float(&a.samples);
+    let frames = pcm.len() / ch;
+    let buckets = buckets.clamp(16, 4000).min(frames.max(1));
+    let mut peaks = Vec::with_capacity(buckets);
+    for b in 0..buckets {
+        let (lo, hi) = (b * frames / buckets, (b + 1) * frames / buckets);
+        let (mut mn, mut mx) = (0f32, 0f32);
+        for v in pcm.get(lo * ch..hi * ch).unwrap_or_default() {
+            mn = mn.min(*v);
+            mx = mx.max(*v);
+        }
+        peaks.push(format!("[{mn:.4},{mx:.4}]"));
+    }
+    let l = dsp::loudness(&a);
+    let opt = |v: Option<f64>| v.map_or("null".to_string(), num);
+    let peak_db = if l.sample_peak > 0.0 {
+        20.0 * f64::from(l.sample_peak).log10()
+    } else {
+        f64::NEG_INFINITY
+    };
+    let (bits, float) = match &a.samples {
+        Samples::Int { bits, .. } => (bits.to_string(), false),
+        Samples::Float(_) => ("null".to_string(), true),
+    };
+    let tags: Vec<String> = a
+        .tags
+        .fields
+        .iter()
+        .take(64)
+        .map(|(k, v)| {
+            format!(
+                "[{},{}]",
+                json_escape(k),
+                json_escape(&v.chars().take(500).collect::<String>())
+            )
+        })
+        .collect();
+    Ok(format!(
+        "{{\"sample_rate\":{},\"channels\":{},\"frames\":{},\"duration\":{},\"bits\":{},\"float\":{},\"peaks\":[{}],\"loudness\":{{\"integrated\":{},\"range\":{},\"sample_peak_db\":{},\"true_peak_db\":{}}},\"tags\":[{}]}}",
+        a.sample_rate,
+        a.channels,
+        frames,
+        num(a.duration_secs()),
+        bits,
+        float,
+        peaks.join(","),
+        opt(l.integrated),
+        opt(l.range),
+        num(peak_db),
+        num(l.true_peak_db),
+        tags.join(",")
+    ))
+}
+
+/// A 16-bit WAV of the first `secs` seconds, for browsers that cannot play the original.
+pub fn preview_wav(fmt: FormatId, data: &[u8], secs: f64, limits: &Limits) -> Result<Vec<u8>> {
+    let (mut a, _) = decode(fmt, data, limits)?;
+    a.validate(limits)?;
+    if a.duration_secs() > secs {
+        dsp::trim(&mut a, 0.0, secs)?;
+    }
+    let mut notes = Notes::new();
+    let opts_src = vec![(
+        "bit_depth".to_string(),
+        oc_core::options::OptionValue::Text("16".into()),
+    )];
+    let schema = OptionSchema {
+        specs: vec![depth_option(vec!["keep", "16"])],
+    };
+    let opts = schema.validate(&opts_src)?;
+    let source = source_depth(&a);
+    fit_depth(&mut a, WAV, &opts, source, &mut notes)?;
+    wav::write(&a, wav::Encoding::Pcm, &mut notes)
+}

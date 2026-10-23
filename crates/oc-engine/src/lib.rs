@@ -577,6 +577,28 @@ impl Engine {
         table::preview_json(from, data, sheet, max_rows, 60, &self.limits, progress)
     }
 
+    /// Waveform peaks, loudness and tags of an audio file as JSON (see `audio::analyse_json`).
+    pub fn audio_analysis(&self, from: FormatId, data: &[u8], buckets: usize) -> Result<String> {
+        if !audio::is_audio(from) {
+            return Err(Error::new(
+                ErrorCode::UnsupportedFormat,
+                "not an audio format",
+            ));
+        }
+        audio::analyse_json(from, data, buckets, &self.limits)
+    }
+
+    /// The first `secs` seconds of an audio file as 16-bit WAV, for playback in the browser.
+    pub fn audio_preview(&self, from: FormatId, data: &[u8], secs: f64) -> Result<Vec<u8>> {
+        if !audio::is_audio(from) {
+            return Err(Error::new(
+                ErrorCode::UnsupportedFormat,
+                "not an audio format",
+            ));
+        }
+        audio::preview_wav(from, data, secs, &self.limits)
+    }
+
     /// A PNG preview of at most `max` pixels on a side.
     pub fn thumbnail(
         &self,

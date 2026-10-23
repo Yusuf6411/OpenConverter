@@ -417,3 +417,45 @@ fn table_preview_through_the_api() {
     let (st, _) = s.json("GET", "/api/files/nope/table", "");
     assert_eq!(st, 404);
 }
+
+#[test]
+fn audio_waveform_and_playback_preview_through_the_api() {
+    let s = Server::start("audiopreview");
+    // 0.5 s of a 440 Hz tone, mono 16-bit 8 kHz WAV.
+    let mut pcm = Vec::new();
+    for i in 0..4000 {
+        let v = ((i as f32 * 440.0 * std::f32::consts::TAU / 8000.0).sin() * 12000.0) as i16;
+        pcm.extend_from_slice(&v.to_le_bytes());
+    }
+    let mut wav = b"RIFF".to_vec();
+    wav.extend_from_slice(&(36 + pcm.len() as u32).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&8000u32.to_le_bytes());
+    wav.extend_from_slice(&16000u32.to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
+    wav.extend_from_slice(&pcm);
+    let (_, up) = s.upload("tone.wav", &wav);
+    let id = up.str("file_id");
+    let (st, p) = s.json("GET", &format!("/api/files/{id}/audio?buckets=32"), "");
+    assert_eq!(st, 200, "{}", p.0);
+    assert!(p.has("\"sample_rate\":8000"), "{}", p.0);
+    assert!(p.has("\"peaks\":[["), "{}", p.0);
+    assert!(p.has("\"integrated\":"), "{}", p.0);
+    let (st, _, body) = s.request("GET", &format!("/api/files/{id}/audio.wav"), &[], b"");
+    assert_eq!(st, 200);
+    assert!(body.starts_with(b"RIFF"));
+    // other kinds of file have no waveform
+    let (_, txt) = s.upload("n.txt", b"hello");
+    let (st, _) = s.json(
+        "GET",
+        &format!("/api/files/{}/audio", txt.str("file_id")),
+        "",
+    );
+    assert_eq!(st, 415);
+}

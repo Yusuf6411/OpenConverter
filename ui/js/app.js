@@ -188,7 +188,7 @@ class App {
   defaultTarget(entry) {
     const t = entry.available_targets || [];
     const src = entry.detected_format;
-    const prefs = { image: src === "png" ? ["jpeg"] : ["png"], data: src === "json" ? ["csv"] : ["json"], text: ["txt"] };
+    const prefs = { image: src === "png" ? ["jpeg"] : ["png"], data: src === "json" ? ["csv"] : ["json"], text: ["txt"], audio: src === "wav" ? ["flac"] : ["wav"] };
     const cat = this.formats.get(src) ? this.formats.get(src).category : "image";
     for (const p of prefs[cat] || []) if (t.includes(p)) return p;
     return t.find((x) => x !== src) || t[0];

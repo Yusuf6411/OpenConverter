@@ -3,6 +3,8 @@ import { api, ApiError, uploadFile } from "../api.js";
 import { announce, append, clear, h, icon } from "./dom.js";
 import { ArchiveDialog, isOpenableArchive } from "./archive.js";
 import { TableDialog, isPreviewableTable } from "./table.js";
+import { AudioDialog, isAudio } from "./audio.js";
+import { AUDIO_PRESETS, presetOptions } from "./presets.js";
 import { bytes, duration, friendlyError, sizeChange, stageLabel } from "./format.js";
 import { flattensAlpha, renderOptions } from "./options.js";
 
@@ -85,6 +87,12 @@ export class Card {
     this.browseBtn.addEventListener("click", () => new ArchiveDialog(this.app, this));
     this.previewBtn = h("button", { type: "button", class: "btn" }, icon("text", 16), "Preview");
     this.previewBtn.addEventListener("click", () => new TableDialog(this.app, this));
+    this.waveBtn = h("button", { type: "button", class: "btn" }, icon("audio", 16), "Waveform");
+    this.waveBtn.addEventListener("click", () => new AudioDialog(this.app, this.name, { id: this.entry.file_id, output: false }));
+    this.outWaveBtn = h("button", { type: "button", class: "btn" }, icon("audio", 16), "Output waveform");
+    this.outWaveBtn.addEventListener("click", () => new AudioDialog(this.app, this.result.output_name || this.name, { id: this.result.output_id, output: true }));
+    this.presetSelect = h("select", { "aria-label": "Preset for " + this.name });
+    this.presetSelect.addEventListener("change", () => this.applyPreset(this.presetSelect.value));
     this.removeBtn = h("button", { type: "button", class: "btn", "aria-label": "Remove " + this.name }, icon("x", 16), "Remove");
     this.removeBtn.addEventListener("click", () => this.remove());
     this.render(true);
@@ -101,7 +109,7 @@ export class Card {
       img.addEventListener("error", () => { clear(this.thumb); this.thumb.append(icon("image", 36)); });
       this.thumb.append(img);
     } else {
-      const kind = fmt ? (fmt.category === "data" ? "table" : fmt.category === "text" ? "text" : "image") : "upload";
+      const kind = fmt ? (fmt.category === "data" ? "table" : fmt.category === "text" ? "text" : fmt.category === "audio" ? "audio" : "image") : "upload";
       this.thumb.append(icon(kind, 36));
     }
   }
@@ -163,6 +171,17 @@ export class Card {
       this.targetSelect.disabled = this.busy;
       for (const el of this.optionsBox.querySelectorAll("input, select")) el.disabled = this.busy;
       append(this.convertRow, [h("label", { class: "hint", text: "Convert to" }), this.targetSelect]);
+      if (isAudio(fmt)) {
+        if (full || this.presetSelect.options.length === 0) {
+          clear(this.presetSelect);
+          this.presetSelect.append(h("option", { value: "", text: "Preset…" }));
+          for (const p of AUDIO_PRESETS) {
+            if (this.entry.available_targets.includes(p.target)) this.presetSelect.append(h("option", { value: p.id, text: p.name }));
+          }
+        }
+        this.presetSelect.disabled = this.busy;
+        append(this.convertRow, [this.presetSelect]);
+      }
       if (full) this.renderOptions();
     } else {
       clear(this.optionsBox);
@@ -230,7 +249,24 @@ export class Card {
     }
     if (this.entry && isOpenableArchive(this.format) && !this.uploadGone) this.actions.append(this.browseBtn);
     if (this.entry && isPreviewableTable(this.format) && !this.uploadGone) this.actions.append(this.previewBtn);
+    if (this.entry && isAudio(this.format) && !this.uploadGone) this.actions.append(this.waveBtn);
+    if (this.status === "done" && this.result && isAudio(this.targetFormat) && !this.outputGone) this.actions.append(this.outWaveBtn);
     this.actions.append(this.removeBtn);
+  }
+
+  applyPreset(id) {
+    const p = AUDIO_PRESETS.find((x) => x.id === id);
+    this.presetSelect.value = "";
+    if (!p || !this.entry || !this.entry.available_targets.includes(p.target)) return;
+    const tgt = this.app.formats.get(p.target);
+    this.target = p.target;
+    this.options = presetOptions(p, tgt ? tgt.write_options : null);
+    if (FINAL.has(this.status)) this.status = "ready";
+    // make the target menu show the new choice
+    for (const o of this.targetSelect.options) o.selected = o.value === p.target;
+    this.render(true);
+    this.app.save();
+    announce("Preset applied: " + p.name + ".");
   }
 
   renderOptions() {

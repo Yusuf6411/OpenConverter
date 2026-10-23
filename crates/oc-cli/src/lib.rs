@@ -570,6 +570,31 @@ fn worker_inspect(engine: &Engine, args: &[String]) -> ExitCode {
                 Err(e) => fail(&e),
             }
         }
+        "audio" => {
+            // __worker audio <path> <format> [buckets]
+            let buckets = args.get(3).and_then(|r| r.parse().ok()).unwrap_or(800);
+            match engine.audio_analysis(from, &data, buckets) {
+                Ok(json) => {
+                    println!("{json}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(&e),
+            }
+        }
+        "wavprev" => {
+            // __worker wavprev <path> <format> <out.wav> [seconds]
+            let Some(out) = args.get(3) else {
+                return usage();
+            };
+            let secs = args.get(4).and_then(|r| r.parse().ok()).unwrap_or(60.0);
+            match engine
+                .audio_preview(from, &data, secs)
+                .and_then(|wav| std::fs::write(out, wav).map_err(Into::into))
+            {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => fail(&e),
+            }
+        }
         "thumb" => {
             let Some(out) = args.get(3) else {
                 return usage();
@@ -639,7 +664,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
         Some("__worker")
             if matches!(
                 args.get(1).map(String::as_str),
-                Some("probe" | "thumb" | "table")
+                Some("probe" | "thumb" | "table" | "audio" | "wavprev")
             ) =>
         {
             worker_inspect(&engine, args.get(1..).unwrap_or(&[]))

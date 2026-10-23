@@ -329,3 +329,10 @@ dialog.wide { width: min(720px, calc(100vw - 24px)); }
 .preview-table { border-collapse: collapse; font-size: 12px; width: max-content; min-width: 100%; }
 .preview-table th, .preview-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
 .preview-table th { position: sticky; top: 0; background: var(--surface); font-weight: 600; }
+
+/* ---------- audio preview ---------- */
+.waveform { width: 100%; height: 140px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; background: var(--surface-2); }
+.player { width: 100%; }
+dl.stats { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 13px; }
+dl.stats dt { color: var(--text-2); }
+dl.stats dd { margin: 0; overflow-wrap: anywhere; }

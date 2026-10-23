@@ -1585,3 +1585,136 @@ pub async fn table_preview(
         .map_err(engine_err)?;
     Ok(([(header::CONTENT_TYPE, "application/json")], out).into_response())
 }
+
+#[derive(serde::Deserialize)]
+pub struct AudioQuery {
+    buckets: Option<usize>,
+}
+
+/// Which stored file or output an audio request names.
+fn audio_target(app: &App, id: &str, output: bool) -> R<(std::path::PathBuf, &'static str)> {
+    if !valid_id(id) {
+        return Err(ApiErr::not_found());
+    }
+    let rec = if output {
+        lock(&app.outputs)
+            .get(id)
+            .map(|o| (o.path.clone(), o.format))
+    } else {
+        lock(&app.files).get(id).map(|f| (f.path.clone(), f.format))
+    };
+    let (path, format) = rec.ok_or_else(ApiErr::not_found)?;
+    let is_audio = app
+        .engine
+        .format_by_name(format)
+        .and_then(|f| app.engine.registry().format(f))
+        .is_some_and(|d| d.category == Category::Audio);
+    if !is_audio {
+        return Err(ApiErr::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "unsupported_format",
+            "Only audio files have a waveform.",
+        ));
+    }
+    Ok((path, format))
+}
+
+async fn audio_worker(app: &Arc<App>, args: Vec<String>) -> R<String> {
+    let app2 = app.clone();
+    let permit = app.sem.acquire().await;
+    let res = tokio::task::spawn_blocking(move || {
+        let mut iso = app2.isolation();
+        iso.timeout = Duration::from_secs(120);
+        run_worker(&iso, &args, &CancelToken::new())
+    })
+    .await;
+    drop(permit);
+    res.map_err(|_| {
+        ApiErr::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "The preview stopped unexpectedly.",
+        )
+    })?
+    .map_err(engine_err)
+}
+
+async fn audio_json(app: &Arc<App>, id: &str, q: AudioQuery, output: bool) -> R<Response> {
+    let (path, format) = audio_target(app, id, output)?;
+    let out = audio_worker(
+        app,
+        vec![
+            "__worker".to_string(),
+            "audio".to_string(),
+            path.display().to_string(),
+            format.to_string(),
+            q.buckets.unwrap_or(800).clamp(16, 4000).to_string(),
+        ],
+    )
+    .await?;
+    Ok(([(header::CONTENT_TYPE, "application/json")], out).into_response())
+}
+
+async fn audio_wav(app: &Arc<App>, id: &str, output: bool) -> R<Response> {
+    let (path, format) = audio_target(app, id, output)?;
+    let key = format!("{}{id}", if output { "o" } else { "f" });
+    let cache = app.cfg.data_dir.join("previews").join(format!("{key}.wav"));
+    if tokio::fs::metadata(&cache).await.is_err() {
+        if let Some(dir) = cache.parent() {
+            let _ = tokio::fs::create_dir_all(dir).await;
+        }
+        audio_worker(
+            app,
+            vec![
+                "__worker".to_string(),
+                "wavprev".to_string(),
+                path.display().to_string(),
+                format.to_string(),
+                cache.display().to_string(),
+                "90".to_string(),
+            ],
+        )
+        .await?;
+    }
+    let bytes = tokio::fs::read(&cache).await.map_err(|_| {
+        ApiErr::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "The preview could not be stored.",
+        )
+    })?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "audio/wav"),
+            (header::CACHE_CONTROL, "private, max-age=3600"),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+/// `GET /api/files/{id}/audio?buckets=`: waveform peaks, loudness and tags as JSON.
+pub async fn file_audio(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    Query(q): Query<AudioQuery>,
+) -> R<Response> {
+    audio_json(&app, &id, q, false).await
+}
+
+pub async fn output_audio(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    Query(q): Query<AudioQuery>,
+) -> R<Response> {
+    audio_json(&app, &id, q, true).await
+}
+
+/// `GET /api/files/{id}/audio.wav`: the first 90 seconds as 16-bit WAV, playable anywhere.
+pub async fn file_audio_wav(State(app): State<Arc<App>>, Path(id): Path<String>) -> R<Response> {
+    audio_wav(&app, &id, false).await
+}
+
+pub async fn output_audio_wav(State(app): State<Arc<App>>, Path(id): Path<String>) -> R<Response> {
+    audio_wav(&app, &id, true).await
+}
