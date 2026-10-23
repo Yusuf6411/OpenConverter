@@ -13,8 +13,9 @@ pub const TTF: FormatId = FormatId("ttf");
 pub const OTF: FormatId = FormatId("otf");
 pub const WOFF: FormatId = FormatId("woff");
 pub const TTC: FormatId = FormatId("ttc");
+pub const WOFF2: FormatId = FormatId("woff2");
 
-pub const FORMATS: [FormatId; 4] = [TTF, OTF, WOFF, TTC];
+pub const FORMATS: [FormatId; 5] = [TTF, OTF, WOFF, TTC, WOFF2];
 
 pub fn is_font(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -22,6 +23,11 @@ pub fn is_font(id: FormatId) -> bool {
 
 pub fn read_only(id: FormatId) -> bool {
     id == TTC
+}
+
+/// WOFF2 can be written (Brotli encoder) but not read (that needs Brotli's static dictionary).
+pub fn write_only(id: FormatId) -> bool {
+    id == WOFF2
 }
 
 fn spec(
@@ -65,7 +71,7 @@ fn options_for(id: FormatId) -> OptionSchema {
             },
         ));
     }
-    if id == WOFF {
+    if id == WOFF || id == WOFF2 {
         specs.push(spec(
             "level",
             "opt.font.level",
@@ -74,7 +80,7 @@ fn options_for(id: FormatId) -> OptionSchema {
             OptionKind::Int {
                 min: 1,
                 max: 9,
-                default: 9,
+                default: if id == WOFF2 { 5 } else { 9 },
             },
         ));
     }
@@ -120,6 +126,18 @@ pub fn register(registry: &mut Registry) {
             }],
         ),
         (
+            WOFF2,
+            "WOFF2",
+            &["woff2"][..],
+            &["font/woff2"][..],
+            "W3C WOFF 2.0 (Brotli; tables stored without the glyph transform; write only)",
+            vec![Sniffer {
+                offset: 0,
+                magic: b"wOF2",
+                confidence: 100,
+            }],
+        ),
+        (
             TTC,
             "Font collection",
             &["ttc", "otc"][..],
@@ -141,7 +159,7 @@ pub fn register(registry: &mut Registry) {
             mime,
             sniffers,
             capabilities: Capabilities {
-                read: true,
+                read: !write_only(id),
                 write: !read_only(id),
                 ..Capabilities::default()
             },
@@ -154,13 +172,17 @@ pub fn register(registry: &mut Registry) {
     let desc = |from: FormatId, to: FormatId| -> &'static str {
         match (from == TTF || from == TTC, to) {
             (_, t) if t == WOFF => "Compress the font tables as WOFF",
+            (_, t) if t == WOFF2 => "Compress the font tables as WOFF2 (Brotli)",
             (true, t) if t == OTF => "Rebuild the outlines as CFF",
             (false, t) if t == TTF && from == OTF => "Rebuild the outlines as TrueType quadratics",
             _ => "Unpack the font tables",
         }
     };
     for from in FORMATS {
-        for to in [TTF, OTF, WOFF] {
+        if write_only(from) {
+            continue;
+        }
+        for to in [TTF, OTF, WOFF, WOFF2] {
             if from == to {
                 continue;
             }
@@ -206,6 +228,9 @@ pub fn register(registry: &mut Registry) {
 pub fn detect(data: &[u8]) -> Option<FormatId> {
     if build::is_woff(data) {
         return Some(WOFF);
+    }
+    if build::is_woff2(data) {
+        return Some(WOFF2);
     }
     if data.get(..4) == Some(b"ttcf") {
         return Some(TTC);
@@ -278,6 +303,7 @@ pub fn convert(
     }
     let out = match to {
         t if t == WOFF => build::sfnt_to_woff(&sf, opts.int("level").unwrap_or(9) as u32)?,
+        t if t == WOFF2 => build::sfnt_to_woff2(&sf, opts.int("level").unwrap_or(5) as u32)?,
         t if t == TTF => {
             if font.is_cff {
                 let tol = opts.float("curve_tolerance").unwrap_or(0.5)

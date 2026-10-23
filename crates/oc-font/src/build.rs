@@ -184,3 +184,94 @@ pub fn sfnt_to_woff(data: &[u8], level: u32) -> Result<Vec<u8>> {
     out.extend_from_slice(&body);
     Ok(out)
 }
+
+/// Tags with a one-byte code in a WOFF2 table directory, in code order.
+const WOFF2_KNOWN: [&[u8; 4]; 63] = [
+    b"cmap", b"head", b"hhea", b"hmtx", b"maxp", b"name", b"OS/2", b"post", b"cvt ", b"fpgm",
+    b"glyf", b"loca", b"prep", b"CFF ", b"VORG", b"EBDT", b"EBLC", b"gasp", b"hdmx", b"kern",
+    b"LTSH", b"PCLT", b"VDMX", b"vhea", b"vmtx", b"BASE", b"GDEF", b"GPOS", b"GSUB", b"EBSC",
+    b"JSTF", b"MATH", b"CBDT", b"CBLC", b"COLR", b"CPAL", b"SVG ", b"sbix", b"acnt", b"avar",
+    b"bdat", b"bloc", b"bsln", b"cvar", b"fdsc", b"feat", b"fmtx", b"fvar", b"gvar", b"hsty",
+    b"just", b"lcar", b"mort", b"morx", b"opbd", b"prop", b"trak", b"Zapf", b"Silf", b"Glat",
+    b"Gloc", b"Feat", b"Sill",
+];
+
+fn base128(out: &mut Vec<u8>, mut v: u32) {
+    let mut digits = [0u8; 5];
+    let mut n = 0;
+    loop {
+        digits[n] = (v & 0x7F) as u8;
+        n += 1;
+        v >>= 7;
+        if v == 0 {
+            break;
+        }
+    }
+    for i in (0..n).rev() {
+        out.push(digits[i] | if i > 0 { 0x80 } else { 0 });
+    }
+}
+
+/// Wrap an sfnt as WOFF2 with Brotli. Tables are stored untransformed (the null transform
+/// the format allows for `glyf` and `loca`), so the result is larger than a font run
+/// through the glyph transform, but every WOFF2 reader accepts it.
+pub fn sfnt_to_woff2(data: &[u8], level: u32) -> Result<Vec<u8>> {
+    let (flavor, mut tables) = tables_of(data)?;
+    tables.sort_by_key(|t| t.0);
+    for (tag, d) in tables.iter_mut() {
+        // WOFF2 requires the "font data is lossless modified" flag in head.
+        if tag == b"head" && d.len() >= 18 {
+            d[16] |= 0x08;
+        }
+    }
+    let n = tables.len();
+    let mut dir = Vec::new();
+    let mut stream = Vec::new();
+    for (tag, d) in &tables {
+        let known = WOFF2_KNOWN.iter().position(|k| *k == tag);
+        // glyf and loca: transform version 3 is the null transform; the rest use version 0.
+        let null_bits = if matches!(tag, b"glyf" | b"loca") {
+            0xC0
+        } else {
+            0
+        };
+        match known {
+            Some(i) => dir.push(i as u8 | null_bits),
+            None => {
+                dir.push(63 | null_bits);
+                dir.extend_from_slice(tag);
+            }
+        }
+        base128(&mut dir, d.len() as u32);
+        stream.extend_from_slice(d);
+    }
+    let compressed = oc_compress::brotli::compress(&stream, level);
+    let sfnt_size = 12
+        + 16 * n
+        + tables
+            .iter()
+            .map(|(_, d)| d.len().div_ceil(4) * 4)
+            .sum::<usize>();
+    let mut out = Vec::new();
+    out.extend_from_slice(b"wOF2");
+    out.extend_from_slice(&flavor);
+    let length_at = out.len();
+    put_u32(&mut out, 0);
+    put_u16(&mut out, n as u16);
+    put_u16(&mut out, 0);
+    put_u32(&mut out, sfnt_size as u32);
+    put_u32(&mut out, compressed.len() as u32);
+    put_u16(&mut out, 1);
+    put_u16(&mut out, 0);
+    for _ in 0..5 {
+        put_u32(&mut out, 0);
+    }
+    out.extend_from_slice(&dir);
+    out.extend_from_slice(&compressed);
+    while out.len() % 4 != 0 {
+        out.push(0);
+    }
+    let total = out.len() as u32;
+    out[length_at..length_at + 4].copy_from_slice(&total.to_be_bytes());
+    Ok(out)
+}

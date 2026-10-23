@@ -400,3 +400,9 @@ name = "sqlite"
 path = "fuzz_targets/sqlite.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "brotli"
+path = "fuzz_targets/brotli.rs"
+test = false
+doc = false

@@ -35,7 +35,7 @@ pub fn outline(font: &Font, gid: u16) -> Option<Path> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::build::{build_sfnt, sfnt_to_woff, woff_to_sfnt};
+    use crate::build::{build_sfnt, sfnt_to_woff, sfnt_to_woff2, woff_to_sfnt};
     use crate::reader::{put_u16, put_u32};
     use oc_core::Limits;
 
@@ -156,6 +156,46 @@ mod tests {
         assert_eq!(&w[..4], b"wOFF");
         let back = woff_to_sfnt(&w, &Limits::default()).unwrap();
         assert_eq!(back, sf);
+    }
+
+    #[test]
+    fn woff2_has_a_valid_header_and_python_reads_it() {
+        let sf = tiny_font();
+        let w = sfnt_to_woff2(&sf, 5).unwrap();
+        assert_eq!(&w[..4], b"wOF2");
+        assert_eq!(
+            u32::from_be_bytes([w[8], w[9], w[10], w[11]]) as usize,
+            w.len()
+        );
+        assert_eq!(w.len() % 4, 0);
+        // fontTools (with the brotli module) is the reference reader; skipped where absent.
+        let probe = std::process::Command::new("python3")
+            .args(["-c", "import fontTools.ttLib, brotli"])
+            .output();
+        if !probe.is_ok_and(|o| o.status.success()) {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("oc-woff2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.ttf"), &sf).unwrap();
+        std::fs::write(dir.join("a.woff2"), &w).unwrap();
+        let out = std::process::Command::new("python3")
+            .args([
+                "-c",
+                "import sys; from fontTools.ttLib import TTFont; a=TTFont(sys.argv[1]); b=TTFont(sys.argv[2]); \
+                 assert b.flavor=='woff2'; \
+                 assert all(a.getTableData(t)==b.getTableData(t) for t in a.keys() if t not in ('GlyphOrder','head'))",
+            ])
+            .arg(dir.join("a.ttf"))
+            .arg(dir.join("a.woff2"))
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

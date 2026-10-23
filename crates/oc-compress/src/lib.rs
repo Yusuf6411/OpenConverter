@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod bcj;
+pub mod brotli;
 pub mod bzip2;
 pub mod compress_z;
 pub mod deflate;

@@ -280,7 +280,7 @@ pub(crate) fn code_lengths(freq: &[u32], max_bits: usize) -> Vec<u8> {
 }
 
 /// Canonical codes from lengths, bit-reversed for LSB-first output.
-fn canonical_codes(lens: &[u8]) -> Vec<u32> {
+pub(crate) fn canonical_codes(lens: &[u8]) -> Vec<u32> {
     let mut count = [0u32; 16];
     for &l in lens {
         count[usize::from(l)] += 1;
