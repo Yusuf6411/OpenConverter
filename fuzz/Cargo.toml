@@ -17,6 +17,8 @@ oc-xml = { path = "../crates/oc-xml" }
 oc-image = { path = "../crates/oc-image" }
 oc-vp8 = { path = "../crates/oc-vp8" }
 oc-video = { path = "../crates/oc-video" }
+oc-font = { path = "../crates/oc-font" }
+oc-raster = { path = "../crates/oc-raster" }
 oc-sheet = { path = "../crates/oc-sheet" }
 oc-archive = { path = "../crates/oc-archive" }
 oc-audio = { path = "../crates/oc-audio" }
@@ -299,5 +301,17 @@ doc = false
 [[bin]]
 name = "video"
 path = "fuzz_targets/video.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "font"
+path = "fuzz_targets/font.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "raster"
+path = "fuzz_targets/raster.rs"
 test = false
 doc = false

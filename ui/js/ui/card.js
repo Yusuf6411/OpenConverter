@@ -112,7 +112,7 @@ export class Card {
       img.addEventListener("error", () => { clear(this.thumb); this.thumb.append(icon("image", 36)); });
       this.thumb.append(img);
     } else {
-      const kind = fmt ? (fmt.category === "data" ? "table" : fmt.category === "text" ? "text" : fmt.category === "audio" ? "audio" : fmt.category === "video" ? "video" : fmt.category === "subtitle" ? "subtitle" : "image") : "upload";
+      const kind = fmt ? (fmt.category === "data" ? "table" : fmt.category === "text" ? "text" : fmt.category === "audio" ? "audio" : fmt.category === "video" ? "video" : fmt.category === "subtitle" ? "subtitle" : fmt.category === "font" ? "font" : "image") : "upload";
       this.thumb.append(icon(kind, 36));
     }
   }

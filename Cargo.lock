@@ -2217,7 +2217,9 @@ dependencies = [
  "oc-audio",
  "oc-container",
  "oc-core",
+ "oc-font",
  "oc-image",
+ "oc-raster",
  "oc-sheet",
  "oc-subtitle",
  "oc-text",
@@ -2227,6 +2229,12 @@ dependencies = [
 [[package]]
 name = "oc-font"
 version = "2.3.0"
+dependencies = [
+ "oc-checksum",
+ "oc-compress",
+ "oc-core",
+ "oc-raster",
+]
 
 [[package]]
 name = "oc-image"

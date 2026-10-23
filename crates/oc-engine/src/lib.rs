@@ -7,6 +7,7 @@
 
 pub mod archive;
 pub mod audio;
+pub mod font;
 pub mod image;
 pub mod isolated;
 pub mod subtitle;
@@ -139,12 +140,14 @@ impl Engine {
         subtitle::register(&mut registry);
         table::register(&mut registry);
         video::register(&mut registry);
+        font::register(&mut registry);
         let packable: Vec<FormatId> = std::iter::once(TXT)
             .chain(image::FORMATS)
             .chain(audio::FORMATS)
             .chain(subtitle::FORMATS)
             .chain(table::FORMATS)
             .chain(video::FORMATS)
+            .chain(font::FORMATS)
             .collect();
         archive::register(&mut registry, &packable);
         Self {
@@ -338,6 +341,7 @@ impl Engine {
             .chain(table::FORMATS)
             .chain(video::FORMATS)
             .chain([video::FRAMES])
+            .chain(font::FORMATS)
             .chain(archive::FORMATS)
             .filter_map(|id| self.registry.format(id))
     }
@@ -442,6 +446,24 @@ impl Engine {
         if video::is_video(ext_from) {
             if let Some(found) = video::detect(&data) {
                 if found != ext_from {
+                    notes.push(
+                        Note::new(
+                            Severity::Warning,
+                            "format_mismatch",
+                            format!(
+                                "the file extension says {} but the content is {}",
+                                ext_from.0, found.0
+                            ),
+                        )
+                        .with_detail(found.0),
+                    );
+                    from = found;
+                }
+            }
+        }
+        if font::is_font(ext_from) {
+            if let Some(found) = font::detect(&data) {
+                if found != ext_from && !(found == font::TTC && ext_from == font::TTC) {
                     notes.push(
                         Note::new(
                             Severity::Warning,
@@ -646,6 +668,29 @@ impl Engine {
                 out,
                 format!("Read {} streams -> Write {}", name(from), name(to)),
             )
+        } else if font::is_font(from) && image::is_image(to) {
+            let (img, n) = font::specimen(from, data, &opts, &self.limits)?;
+            notes.extend(n);
+            let out_ext = req
+                .output
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let (img, n) = image::transform(img, &opts, &self.limits)?;
+            notes.extend(n);
+            let (out, n) = image::encode(to, &img, &opts, &out_ext)?;
+            notes.extend(n);
+            let name = |id| self.registry.format(id).map_or("font", |f| f.name);
+            (
+                out,
+                format!("Read {} -> Draw specimen -> Encode {}", name(from), name(to)),
+            )
+        } else if font::is_font(from) && font::is_font(to) {
+            let (out, n) = font::convert(from, to, data, &opts, &self.limits)?;
+            notes.extend(n);
+            let name = |id| self.registry.format(id).map_or("font", |f| f.name);
+            (out, format!("Read {} -> Write {}", name(from), name(to)))
         } else if subtitle::is_subtitle(from) {
             let (out, n) = subtitle::convert(from, to, data, &opts)?;
             notes.extend(n);

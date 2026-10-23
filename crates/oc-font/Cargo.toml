@@ -1,11 +1,17 @@
 [package]
 name = "oc-font"
-description = "OpenConverter: oc-font"
+description = "OpenConverter: font parsing, outlines, WOFF and conversion"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+
+[dependencies]
+oc-core = { path = "../oc-core" }
+oc-compress = { path = "../oc-compress" }
+oc-raster = { path = "../oc-raster" }
+oc-checksum = { path = "../oc-checksum" }
 
 [lints]
 workspace = true
