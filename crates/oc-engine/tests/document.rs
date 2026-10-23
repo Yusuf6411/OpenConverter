@@ -81,3 +81,34 @@ fn embedded_pictures_survive_html_to_markdown() {
         "{md}"
     );
 }
+
+fn through(fmt: &str, tag: &str) -> String {
+    let f = run(&format!("{tag}1"), MD.as_bytes(), "in.md", fmt);
+    assert_eq!(&f[..2], b"PK", "{fmt} is a zip package");
+    String::from_utf8(run(&format!("{tag}2"), &f, &format!("in.{fmt}"), "md")).unwrap()
+}
+
+fn check_round_trip(md: &str) {
+    for needle in [
+        "# Title",
+        "*emphasis*",
+        "**strong**",
+        "`code`",
+        "- one",
+        "1. first",
+        "| a | b |",
+        "> quote",
+    ] {
+        assert!(md.contains(needle), "missing {needle} in {md}");
+    }
+}
+
+#[test]
+fn docx_round_trips_through_markdown() {
+    check_round_trip(&through("docx", "d"));
+}
+
+#[test]
+fn odt_round_trips_through_markdown() {
+    check_round_trip(&through("odt", "o"));
+}

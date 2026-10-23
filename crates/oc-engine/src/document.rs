@@ -11,7 +11,9 @@ use oc_document::model::Document;
 
 pub const MD: FormatId = FormatId("md");
 pub const HTML: FormatId = FormatId("html");
-pub const FORMATS: [FormatId; 2] = [MD, HTML];
+pub const DOCX: FormatId = FormatId("docx");
+pub const ODT: FormatId = FormatId("odt");
+pub const FORMATS: [FormatId; 4] = [MD, HTML, DOCX, ODT];
 
 pub fn is_document(id: FormatId) -> bool {
     FORMATS.contains(&id)
@@ -106,6 +108,26 @@ fn infos() -> Vec<Info> {
             read: true,
             write: true,
             spec: "HTML (own tolerant reader; not the full WHATWG tree builder) and writer",
+        },
+        Info {
+            id: DOCX,
+            name: "Word document (DOCX)",
+            exts: &["docx"],
+            mime: &["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+            sniff: vec![],
+            read: true,
+            write: true,
+            spec: "ISO/IEC 29500 WordprocessingML subset (own reader and writer)",
+        },
+        Info {
+            id: ODT,
+            name: "OpenDocument text (ODT)",
+            exts: &["odt", "fodt"],
+            mime: &["application/vnd.oasis.opendocument.text"],
+            sniff: vec![],
+            read: true,
+            write: true,
+            spec: "ISO/IEC 26300 OpenDocument 1.2 text subset (own reader and writer)",
         },
     ]
 }
@@ -263,6 +285,8 @@ pub fn read(
             notes.extend(n);
             Ok(doc)
         }
+        DOCX => oc_document::docx_in::read(data, limits, notes),
+        ODT => oc_document::odt_in::read(data, limits, notes),
         _ => Err(Error::new(
             ErrorCode::UnsupportedFormat,
             "this document format cannot be read",
@@ -286,7 +310,7 @@ pub fn write(
     to: FormatId,
     doc: &Document,
     opts: &Options,
-    _limits: &Limits,
+    limits: &Limits,
     notes: &mut Notes,
 ) -> Result<Vec<u8>> {
     let embed = opts.bool("embed_images").unwrap_or(true);
@@ -318,6 +342,8 @@ pub fn write(
             },
         )
         .into_bytes()),
+        DOCX => oc_document::docx_out::write(doc, limits),
+        ODT => oc_document::odt_out::write(doc, limits),
         _ => Err(bad("this document format cannot be written")),
     }
 }

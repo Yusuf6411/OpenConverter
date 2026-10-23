@@ -15,8 +15,14 @@
 )]
 
 pub mod base64;
+pub mod build;
+pub mod docx_in;
+pub mod docx_out;
 pub mod entities;
 pub mod html_in;
+pub mod odt_in;
+pub mod odt_out;
+pub mod imgsize;
 pub mod html_out;
 pub mod markdown;
 pub mod md_block;
@@ -24,5 +30,7 @@ pub mod md_inline;
 pub mod md_out;
 pub mod model;
 pub mod text_io;
+pub mod xml_tree;
+pub mod zipio;
 
 pub use model::{Align, Block, Cell, Document, Image, Inline, ListItem, Meta};
