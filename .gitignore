@@ -1,30 +1,7 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-build/
-dist/
-.venv/
-venv/
-.mypy_cache/
-.pytest_cache/
-
-# Runtime data (only at the repository root; tests/fixtures/data is real test data)
-/data/
-/uploads/
-/outputs/
-/temp/
-/logs/
-*.log
-tests/_tmp/
-
-# Editors / OS
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
-
-# Local tooling
-.claude/
-
-test-output.txt
+# Rust
+/target/
+Cargo.lock.bak
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/Cargo.lock

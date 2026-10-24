@@ -1,0 +1,24 @@
+[package]
+name = "oc-pdf"
+description = "OpenConverter: PDF parsing, text extraction, rendering and writing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+oc-core = { path = "../oc-core" }
+oc-io = { path = "../oc-io" }
+oc-compress = { path = "../oc-compress" }
+oc-image = { path = "../oc-image" }
+oc-raster = { path = "../oc-raster" }
+oc-font = { path = "../oc-font" }
+# Cryptography comes from RustCrypto (the one deliberate exception to own code).
+aes = "0.8"
+md-5 = "0.10"
+rc4 = "0.1"
+sha2 = { version = "0.10", default-features = false }
+
+[lints]
+workspace = true

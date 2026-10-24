@@ -1,0 +1,24 @@
+[package]
+name = "oc-image"
+description = "OpenConverter: oc-image"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+oc-core = { path = "../oc-core" }
+oc-io = { path = "../oc-io" }
+oc-checksum = { path = "../oc-checksum" }
+oc-compress = { path = "../oc-compress" }
+oc-text = { path = "../oc-text" }
+oc-vp8 = { path = "../oc-vp8" }
+oc-jxl = { path = "../oc-jxl" }
+oc-jp2 = { path = "../oc-jp2" }
+oc-jbig2 = { path = "../oc-jbig2" }
+oc-av1 = { path = "../oc-av1" }
+oc-container = { path = "../oc-container" }
+
+[lints]
+workspace = true

@@ -1,0 +1,19 @@
+[package]
+name = "oc-svg"
+description = "OpenConverter: SVG parsing and rendering"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+oc-core = { path = "../oc-core" }
+oc-xml = { path = "../oc-xml" }
+oc-raster = { path = "../oc-raster" }
+oc-font = { path = "../oc-font" }
+oc-image = { path = "../oc-image" }
+oc-text = { path = "../oc-text" }
+
+[lints]
+workspace = true

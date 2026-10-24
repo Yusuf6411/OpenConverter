@@ -1,0 +1,22 @@
+[package]
+name = "oc-archive"
+description = "OpenConverter: oc-archive"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+oc-core = { path = "../oc-core" }
+oc-checksum = { path = "../oc-checksum" }
+oc-io = { path = "../oc-io" }
+oc-compress = { path = "../oc-compress" }
+# Cryptographic primitives for ZIP/7z encryption; the declared exception of MASTER_PROMPT §5.2.
+aes = "0.8"
+hmac = "0.12"
+sha1 = "0.10"
+sha2 = { version = "0.10", default-features = false }
+
+[lints]
+workspace = true

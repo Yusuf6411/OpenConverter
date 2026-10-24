@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The window talks to its own loopback server over HTTP and needs no native commands.",
+  "windows": ["main"],
+  "permissions": []
+}

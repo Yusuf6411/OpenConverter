@@ -1,0 +1,23 @@
+[package]
+name = "oc-video"
+description = "OpenConverter: oc-video"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+oc-core = { path = "../oc-core" }
+oc-container = { path = "../oc-container" }
+oc-subtitle = { path = "../oc-subtitle" }
+oc-image = { path = "../oc-image" }
+oc-vp8 = { path = "../oc-vp8" }
+oc-theora = { path = "../oc-theora" }
+oc-prores = { path = "../oc-prores" }
+oc-vp9 = { path = "../oc-vp9" }
+oc-av1 = { path = "../oc-av1" }
+oc-audio = { path = "../oc-audio" }

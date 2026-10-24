@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""Generate crates/oc-vp9/src/tables.rs from the text of the VP9 bitstream specification
+(docs/specs/vp9-bitstream-specification-v0.6.pdf), so no number is typed by hand.
+
+    pdftotext -layout docs/specs/vp9-bitstream-specification-v0.6.pdf /tmp/vp9.txt
+    python3 tools/gen_vp9_tables.py /tmp/vp9.txt crates/oc-vp9/src/tables.rs
+"""
+import re, sys
+
+src, out = sys.argv[1], sys.argv[2]
+lines = []
+for l in open(src, encoding="utf-8"):
+    if "Copyright ©" in l or "VP9 Bitstream & Decoding Process" in l:
+        continue
+    lines.append(l)
+text = "".join(lines)
+text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+text = re.sub(r"//[^\n]*", " ", text)
+
+CONST = {}
+for i, n in enumerate(["4X4", "4X8", "8X4", "8X8", "8X16", "16X8", "16X16", "16X32", "32X16", "32X32", "32X64", "64X32", "64X64"]):
+    CONST["BLOCK_" + n] = i
+CONST["BLOCK_INVALID"] = 14
+for i, n in enumerate(["TX_4X4", "TX_8X8", "TX_16X16", "TX_32X32"]):
+    CONST[n] = i
+for i, n in enumerate(["DCT_DCT", "ADST_DCT", "DCT_ADST", "ADST_ADST"]):
+    CONST[n] = i
+for i, n in enumerate(["BOTH_ZERO", "ZERO_PLUS_PREDICTED", "BOTH_PREDICTED", "NEW_PLUS_NON_INTRA", "BOTH_NEW", "INTRA_PLUS_NON_INTRA", "BOTH_INTRA"]):
+    CONST[n] = i
+CONST["INVALID_CASE"] = 9
+
+# name -> (rust type of the element, rust name)
+TABLES = {
+    "default_scan_4x4": "u16", "col_scan_4x4": "u16", "row_scan_4x4": "u16",
+    "default_scan_8x8": "u16", "col_scan_8x8": "u16", "row_scan_8x8": "u16",
+    "default_scan_16x16": "u16", "col_scan_16x16": "u16", "row_scan_16x16": "u16",
+    "default_scan_32x32": "u16",
+    "b_width_log2_lookup": "u8", "b_height_log2_lookup": "u8",
+    "num_4x4_blocks_wide_lookup": "u8", "num_4x4_blocks_high_lookup": "u8",
+    "mi_width_log2_lookup": "u8", "num_8x8_blocks_wide_lookup": "u8",
+    "mi_height_log2_lookup": "u8", "num_8x8_blocks_high_lookup": "u8",
+    "size_group_lookup": "u8", "tx_mode_to_biggest_tx_size": "u8",
+    "subsize_lookup": "u8", "ss_size_lookup": "u8", "max_txsize_lookup": "u8",
+    "coefband_4x4": "u8", "coefband_8x8plus": "u8", "energy_class": "u8", "mode2txfm_map": "u8",
+    "pareto_table": "u8",
+    "kf_partition_probs": "u8", "kf_y_mode_probs": "u8", "kf_uv_mode_probs": "u8",
+    "default_partition_probs": "u8", "default_y_mode_probs": "u8", "default_uv_mode_probs": "u8",
+    "default_skip_prob": "u8", "default_is_inter_prob": "u8", "default_comp_mode_prob": "u8",
+    "default_comp_ref_prob": "u8", "default_single_ref_prob": "u8", "default_mv_sign_prob": "u8",
+    "default_mv_bits_prob": "u8", "default_mv_class0_bit_prob": "u8", "default_tx_probs": "u8",
+    "default_inter_mode_probs": "u8", "default_interp_filter_probs": "u8",
+    "default_mv_joint_probs": "u8", "default_mv_class_probs": "u8",
+    "default_mv_class0_fr_probs": "u8", "default_mv_class0_hp_prob": "u8",
+    "default_mv_fr_probs": "u8", "default_mv_hp_prob": "u8", "default_coef_probs": "u8",
+    "dc_qlookup": "i32", "ac_qlookup": "i32", "subpel_filters": "i32", "cos64_lookup": "i32",
+    "inv_map_table": "u8", "cat_probs": "u8", "extra_bits": "i32",
+    "mv_ref_blocks": "i32", "mode_2_counter": "u8", "counter_to_context": "u8",
+    "idx_n_column_to_subblock": "usize",
+}
+
+def parse(s, i):
+    """Parse a brace group at s[i] == '{' into nested lists; returns (value, next index)."""
+    assert s[i] == "{"
+    i += 1
+    items = []
+    tok = ""
+    while True:
+        c = s[i]
+        if c == "{":
+            v, i = parse(s, i)
+            items.append(v)
+            continue
+        if c in ",}":
+            tok = tok.strip()
+            if tok:
+                items.append(tok)
+            tok = ""
+            i += 1
+            if c == "}":
+                return items, i
+            continue
+        tok += c
+        i += 1
+
+def num(t):
+    t = t.strip()
+    if t in CONST:
+        return CONST[t]
+    m = re.fullmatch(r"-?\d+", t)
+    if m:
+        return int(t)
+    raise ValueError("unknown token %r" % t)
+
+def conv(v):
+    if isinstance(v, list):
+        return [conv(x) for x in v]
+    return num(v)
+
+def shape(v):
+    if not isinstance(v, list):
+        return []
+    subs = [shape(x) for x in v]
+    deep = max(subs, key=len) if subs else []
+    dims = [len(v)]
+    if deep:
+        inner = [max(s[k] if k < len(s) else 0 for s in subs) for k in range(len(deep))]
+        dims += inner
+    return dims
+
+def pad(v, dims):
+    if not dims:
+        return v if not isinstance(v, list) else 0
+    n = dims[0]
+    items = list(v) if isinstance(v, list) else []
+    res = [pad(x, dims[1:]) for x in items]
+    while len(res) < n:
+        res.append(pad(0, dims[1:]))
+    return res
+
+def emit(v, dims):
+    if len(dims) == 1:
+        return "[" + ", ".join(str(x) for x in v) + "]"
+    return "[" + ",\n".join(emit(x, dims[1:]) for x in v) + "]"
+
+def rtype(t, dims):
+    ty = t
+    for d in reversed(dims):
+        ty = "[%s; %d]" % (ty, d)
+    return ty
+
+res = ["// Generated by tools/gen_vp9_tables.py from the VP9 bitstream specification v0.6. Do not edit.", "#![allow(clippy::unreadable_literal, clippy::type_complexity, dead_code)]", ""]
+for name, ty in TABLES.items():
+    m = re.search(r"(?<![A-Za-z0-9_])" + name + r"\s*(?:\[[A-Za-z0-9_ \-+*]*\]\s*)+=\s*\{", text, flags=re.S)
+    if not m:
+        sys.exit("table not found: " + name)
+    v, _ = parse(text, m.end() - 1)
+    v = conv(v)
+    dims = shape(v)
+    v = pad(v, dims)
+    res.append("pub static %s: %s = %s;\n" % (name.upper(), rtype(ty, dims), emit(v, dims)))
+open(out, "w").write("\n".join(res))
+print("wrote", out)

@@ -1,0 +1,23 @@
+[package]
+name = "oc-desktop"
+description = "OpenConverter desktop app (Tauri shell around the shared web UI)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "openconverter-desktop"
+path = "src/main.rs"
+
+[dependencies]
+oc-cli = { path = "../oc-cli" }
+oc-server = { path = "../oc-server" }
+tauri = { version = "2", default-features = false, features = ["wry", "x11", "common-controls-v6"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[lints]
+workspace = true

@@ -1,0 +1,27 @@
+name: Fuzz (nightly)
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [inflate, zlib, gzip, lzw, packbits, xml, text, deflate_roundtrip, png, bmp, tga, qoi, netpbm, gif, jpeg, jpeg_transform, ico, icns, dds, psd, hdr, table, icc, exr, tiff, webp, webp_roundtrip, webp_lossy_roundtrip, vp8, animation, animation_roundtrip, image_roundtrip, codecs, ppmd7, bcj2, archive, workbook, flac, vorbis, mp3, alac, opus, matroska, audio_wav_aiff, subtitle]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo install cargo-fuzz --locked
+      - run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=300 -rss_limit_mb=2048
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}

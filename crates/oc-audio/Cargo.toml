@@ -1,0 +1,18 @@
+[package]
+name = "oc-audio"
+description = "OpenConverter: audio formats, DSP and codecs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+oc-core = { path = "../oc-core" }
+oc-io = { path = "../oc-io" }
+oc-checksum = { path = "../oc-checksum" }
+oc-text = { path = "../oc-text" }
+oc-container = { path = "../oc-container" }
+
+[lints]
+workspace = true

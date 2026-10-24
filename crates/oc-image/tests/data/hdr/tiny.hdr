@@ -1,0 +1,6 @@
+#?RADIANCE
+# made by make_hdr_fixtures
+FORMAT=32-bit_rle_rgbe
+
+-Y 1 +X 1
+ €‚

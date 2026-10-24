@@ -1,0 +1,8 @@
+homepage: "https://github.com/Yusuf6411/OpenConverter"
+language: rust
+primary_contact: "muhammedyusuf6417@gmail.com"
+main_repo: "https://github.com/Yusuf6411/OpenConverter"
+sanitizers:
+  - address
+fuzzing_engines:
+  - libfuzzer

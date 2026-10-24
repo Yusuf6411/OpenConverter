@@ -1,0 +1,22 @@
+[package]
+name = "oc-cli"
+description = "OpenConverter: oc-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "openconverter"
+path = "src/main.rs"
+
+[dependencies]
+oc-core = { path = "../oc-core" }
+oc-archive = { path = "../oc-archive" }
+oc-engine = { path = "../oc-engine" }
+oc-server = { path = "../oc-server" }
+
+[lints]
+workspace = true
+

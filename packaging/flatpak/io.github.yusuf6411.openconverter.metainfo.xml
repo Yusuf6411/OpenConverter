@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.yusuf6411.openconverter</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>OpenConverter</name>
+  <summary>Convert files on your own computer</summary>
+  <description>
+    <p>OpenConverter converts images, audio, video containers, documents, tables, fonts and archives with its own code. Nothing is uploaded and nothing phones home.</p>
+  </description>
+  <launchable type="desktop-id">io.github.yusuf6411.openconverter.desktop</launchable>
+  <url type="homepage">https://github.com/Yusuf6411/OpenConverter</url>
+  <url type="bugtracker">https://github.com/Yusuf6411/OpenConverter/issues</url>
+  <content_rating type="oars-1.1"/>
+  <provides>
+    <binary>openconverter</binary>
+  </provides>
+  <releases>
+    <release version="3.0.0" date="2026-10-23"/>
+  </releases>
+</component>

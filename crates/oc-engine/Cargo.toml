@@ -1,0 +1,28 @@
+[package]
+name = "oc-engine"
+description = "OpenConverter: oc-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+oc-core = { path = "../oc-core" }
+oc-text = { path = "../oc-text" }
+oc-image = { path = "../oc-image" }
+oc-font = { path = "../oc-font" }
+oc-raster = { path = "../oc-raster" }
+oc-svg = { path = "../oc-svg" }
+oc-pdf = { path = "../oc-pdf" }
+oc-document = { path = "../oc-document" }
+oc-compress = { path = "../oc-compress" }
+oc-audio = { path = "../oc-audio" }
+oc-container = { path = "../oc-container" }
+oc-sheet = { path = "../oc-sheet" }
+oc-subtitle = { path = "../oc-subtitle" }
+oc-video = { path = "../oc-video" }
+oc-archive = { path = "../oc-archive" }
+
+[lints]
+workspace = true

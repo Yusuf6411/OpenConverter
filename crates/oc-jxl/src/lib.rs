@@ -1,0 +1,195 @@
+//! JPEG XL decoder (ISO/IEC 18181), written for OpenConverter.
+//!
+//! The format structure follows the specification; `jxl-oxide` (MIT/Apache-2.0) was used as a
+//! reference for details the text leaves open. See `docs/formats/jxl.md` for what is covered.
+#![forbid(unsafe_code)]
+// Every index is derived from dimensions validated against the limits; the sample loops mirror
+// the specification's formulas.
+#![allow(
+    clippy::indexing_slicing,
+    clippy::needless_range_loop,
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::chunks_exact_to_as_chunks
+)]
+
+mod bits;
+mod colour;
+mod compose;
+mod dct;
+mod dequant;
+mod entropy;
+mod features;
+mod filter;
+mod frame;
+mod header;
+mod icc;
+mod modular;
+mod render;
+mod upsample;
+mod vardct;
+
+use oc_core::{Error, Limits, Note, Notes, Result, Severity};
+
+pub use render::Picture;
+
+const BARE: [u8; 2] = [0xff, 0x0a];
+const BOX_SIGNATURE: [u8; 12] = [
+    0, 0, 0, 0x0c, b'J', b'X', b'L', b' ', 0x0d, 0x0a, 0x87, 0x0a,
+];
+
+pub fn sniff(data: &[u8]) -> bool {
+    data.starts_with(&BARE) || data.starts_with(&BOX_SIGNATURE)
+}
+
+/// Extract the codestream from a bare codestream or an ISO BMFF container.
+fn codestream(data: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>> {
+    if data.starts_with(&BARE) {
+        return Ok(data.into());
+    }
+    let mut pos = BOX_SIGNATURE.len();
+    let mut out: Vec<u8> = Vec::new();
+    let mut found = false;
+    while pos + 8 <= data.len() {
+        let size = u32::from_be_bytes(
+            <[u8; 4]>::try_from(&data[pos..pos + 4])
+                .map_err(|_| Error::corrupt("JPEG XL box header"))?,
+        ) as usize;
+        let kind = &data[pos + 4..pos + 8];
+        let (header, len) = match size {
+            0 => (8, data.len() - pos),
+            1 => {
+                if pos + 16 > data.len() {
+                    break;
+                }
+                (
+                    16,
+                    u64::from_be_bytes(
+                        <[u8; 8]>::try_from(&data[pos + 8..pos + 16])
+                            .map_err(|_| Error::corrupt("JPEG XL box header"))?,
+                    ) as usize,
+                )
+            }
+            n => (8, n),
+        };
+        if len < header || pos.checked_add(len).is_none_or(|e| e > data.len()) {
+            return Err(Error::truncated(
+                "JPEG XL box extends past the end of the file",
+            ));
+        }
+        let body = &data[pos + header..pos + len];
+        match kind {
+            b"jxlc" => {
+                out.extend_from_slice(body);
+                found = true;
+            }
+            b"jxlp" => {
+                if body.len() < 4 {
+                    return Err(Error::corrupt(
+                        "JPEG XL partial codestream box is too short",
+                    ));
+                }
+                out.extend_from_slice(&body[4..]);
+                found = true;
+            }
+            _ => {}
+        }
+        pos += len;
+    }
+    if !found {
+        return Err(Error::corrupt("JPEG XL container has no codestream"));
+    }
+    Ok(out.into())
+}
+
+/// Decode the first displayed frame of a JPEG XL file.
+pub fn decode(data: &[u8], limits: &Limits) -> Result<(Picture, Notes)> {
+    let cs = codestream(data)?;
+    let mut br = bits::Br::new(&cs);
+    let img = header::ImageHeader::parse(&mut br)?;
+    let pixels = u64::from(img.width) * u64::from(img.height);
+    if pixels > limits.max_pixels {
+        return Err(Error::limit("max_pixels", "JPEG XL: image is too large"));
+    }
+    let mut notes = Notes::new();
+    let icc = if img.colour.want_icc {
+        Some(header::read_icc(&mut br)?)
+    } else {
+        None
+    };
+    br.align();
+    let mut pos = br.bits_read() / 8;
+    if img.preview.is_some() {
+        let (_, len) = frame::frame_extent(&cs[pos..], &img)?;
+        pos += len;
+    }
+    if img.animation.is_some() {
+        notes.push(Note::new(
+            Severity::Loss,
+            "animation_flattened",
+            "only the first frame of the animation is decoded",
+        ));
+    }
+    let mut slots: [Option<std::rc::Rc<render::Planes>>; 4] = Default::default();
+    let mut frame_idx = 0u64;
+    // decoded LF frames by level - 1 (XYB, before the colour transform)
+    let mut lf_frames: [Option<render::Planes>; 3] = Default::default();
+    loop {
+        if pos >= cs.len() {
+            return Err(Error::truncated(
+                "JPEG XL codestream ends before the first frame",
+            ));
+        }
+        let mut dec = frame::decode_frame(&cs[pos..], &img, limits, &lf_frames)?;
+        let this_idx = frame_idx;
+        frame_idx += 1;
+        pos += dec.consumed;
+        let fh = dec.header.clone();
+        let patches = dec.patches.take();
+        let noise = dec.noise.take();
+        let mut planes = render::frame_planes(dec, &img)?;
+        if let Some(p) = patches {
+            p.apply(&mut planes, &slots, &img)?;
+        }
+        if let Some(n) = noise {
+            // We stop at the first keyframe, so no visible frame precedes this one.
+            let (visible, invisible) = if fh.is_keyframe() {
+                (1, 0)
+            } else {
+                (0, 1 + this_idx)
+            };
+            features::add_noise(&mut planes, &fh, &n, visible, invisible);
+        }
+        let slot = fh.save_as_reference as usize;
+        if fh.can_reference() && fh.save_before_ct {
+            slots[slot] = Some(std::rc::Rc::new(compose::embed(&planes, &fh, &img)));
+        }
+        if fh.lf_level > 0 {
+            if let Some(slot) = lf_frames.get_mut(fh.lf_level as usize - 1) {
+                *slot = Some(planes);
+            }
+            continue;
+        }
+        render::to_native(&mut planes, &img);
+        if !fh.frame_type.is_normal() {
+            // reference-only frames are not blended onto anything
+            if fh.can_reference() && !fh.save_before_ct {
+                slots[slot] = Some(std::rc::Rc::new(compose::embed(&planes, &fh, &img)));
+            }
+            continue;
+        }
+        let canvas = compose::compose(planes, &fh, &img, &slots)?;
+        if fh.can_reference() && !fh.save_before_ct {
+            slots[slot] = Some(std::rc::Rc::new(canvas.clone()));
+        }
+        if fh.is_keyframe() {
+            let mut pic = render::finish(canvas, &img, &mut notes)?;
+            // Samples of a profile-described image that was stored without the XYB transform
+            // are still in the profile's space; hand the profile on with them.
+            if !img.xyb_encoded {
+                pic.icc = icc;
+            }
+            return Ok((pic, notes));
+        }
+    }
+}

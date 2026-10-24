@@ -1,0 +1,441 @@
+[package]
+name = "oc-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+oc-core = { path = "../crates/oc-core" }
+oc-compress = { path = "../crates/oc-compress" }
+oc-text = { path = "../crates/oc-text" }
+oc-xml = { path = "../crates/oc-xml" }
+oc-image = { path = "../crates/oc-image" }
+oc-vp8 = { path = "../crates/oc-vp8" }
+oc-theora = { path = "../crates/oc-theora" }
+oc-vp9 = { path = "../crates/oc-vp9" }
+oc-prores = { path = "../crates/oc-prores" }
+oc-video = { path = "../crates/oc-video" }
+oc-font = { path = "../crates/oc-font" }
+oc-raster = { path = "../crates/oc-raster" }
+oc-svg = { path = "../crates/oc-svg" }
+oc-pdf = { path = "../crates/oc-pdf" }
+oc-document = { path = "../crates/oc-document" }
+oc-sheet = { path = "../crates/oc-sheet" }
+oc-archive = { path = "../crates/oc-archive" }
+oc-audio = { path = "../crates/oc-audio" }
+oc-subtitle = { path = "../crates/oc-subtitle" }
+oc-container = { path = "../crates/oc-container" }
+
+# Not part of the main workspace: fuzzing needs a nightly toolchain.
+[workspace]
+
+[[bin]]
+name = "inflate"
+path = "fuzz_targets/inflate.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "zlib"
+path = "fuzz_targets/zlib.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "gzip"
+path = "fuzz_targets/gzip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "lzw"
+path = "fuzz_targets/lzw.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "packbits"
+path = "fuzz_targets/packbits.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "xml"
+path = "fuzz_targets/xml.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "text"
+path = "fuzz_targets/text.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "deflate_roundtrip"
+path = "fuzz_targets/deflate_roundtrip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "png"
+path = "fuzz_targets/png.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "bmp"
+path = "fuzz_targets/bmp.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tga"
+path = "fuzz_targets/tga.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "qoi"
+path = "fuzz_targets/qoi.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "netpbm"
+path = "fuzz_targets/netpbm.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "image_roundtrip"
+path = "fuzz_targets/image_roundtrip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "gif"
+path = "fuzz_targets/gif.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "jpeg"
+path = "fuzz_targets/jpeg.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "jpeg_transform"
+path = "fuzz_targets/jpeg_transform.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "ico"
+path = "fuzz_targets/ico.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tiff"
+path = "fuzz_targets/tiff.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "webp"
+path = "fuzz_targets/webp.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "webp_roundtrip"
+path = "fuzz_targets/webp_roundtrip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "webp_lossy_roundtrip"
+path = "fuzz_targets/webp_lossy_roundtrip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "vp8"
+path = "fuzz_targets/vp8.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "animation"
+path = "fuzz_targets/animation.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "animation_roundtrip"
+path = "fuzz_targets/animation_roundtrip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "icns"
+path = "fuzz_targets/icns.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "dds"
+path = "fuzz_targets/dds.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "psd"
+path = "fuzz_targets/psd.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "hdr"
+path = "fuzz_targets/hdr.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "table"
+path = "fuzz_targets/table.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "icc"
+path = "fuzz_targets/icc.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "exr"
+path = "fuzz_targets/exr.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "codecs"
+path = "fuzz_targets/codecs.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "ppmd7"
+path = "fuzz_targets/ppmd7.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "bcj2"
+path = "fuzz_targets/bcj2.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "archive"
+path = "fuzz_targets/archive.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "workbook"
+path = "fuzz_targets/workbook.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "flac"
+path = "fuzz_targets/flac.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "vorbis"
+path = "fuzz_targets/vorbis.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "mp3"
+path = "fuzz_targets/mp3.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "alac"
+path = "fuzz_targets/alac.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "opus"
+path = "fuzz_targets/opus.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "matroska"
+path = "fuzz_targets/matroska.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "audio_wav_aiff"
+path = "fuzz_targets/audio_wav_aiff.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "subtitle"
+path = "fuzz_targets/subtitle.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "video"
+path = "fuzz_targets/video.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "font"
+path = "fuzz_targets/font.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "raster"
+path = "fuzz_targets/raster.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "svg"
+path = "fuzz_targets/svg.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pdf"
+path = "fuzz_targets/pdf.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "markdown"
+path = "fuzz_targets/markdown.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "html"
+path = "fuzz_targets/html.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "docx"
+path = "fuzz_targets/docx.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "odt"
+path = "fuzz_targets/odt.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "rtf"
+path = "fuzz_targets/rtf.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "epub"
+path = "fuzz_targets/epub.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fb2"
+path = "fuzz_targets/fb2.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "doc"
+path = "fuzz_targets/doc.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "ppt"
+path = "fuzz_targets/ppt.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "xls"
+path = "fuzz_targets/xls.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "sqlite"
+path = "fuzz_targets/sqlite.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "brotli"
+path = "fuzz_targets/brotli.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "theora"
+path = "fuzz_targets/theora.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "prores"
+path = "fuzz_targets/prores.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "vp9"
+path = "fuzz_targets/vp9.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "wavpack"
+path = "fuzz_targets/wavpack.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "jxl"
+path = "fuzz_targets/jxl.rs"
+test = false
+doc = false

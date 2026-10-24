@@ -1,0 +1,123 @@
+name: Release
+
+on:
+  push:
+    tags: ["v2*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cli:
+    name: CLI ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, ext: tar.gz }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, ext: tar.gz }
+          - { os: macos-latest, target: aarch64-apple-darwin, ext: tar.gz }
+          - { os: macos-13, target: x86_64-apple-darwin, ext: tar.gz }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, ext: zip }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo build --release --locked -p oc-cli --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          name=openconverter-${{ github.ref_name }}-${{ matrix.target }}
+          mkdir "$name"
+          cp LICENSE README.md "$name"/
+          if [ "${{ matrix.ext }}" = zip ]; then
+            cp target/${{ matrix.target }}/release/openconverter.exe "$name"/
+            7z a "$name.zip" "$name"
+          else
+            cp target/${{ matrix.target }}/release/openconverter "$name"/
+            tar czf "$name.tar.gz" "$name"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.target }}
+          path: openconverter-*.*
+
+  desktop:
+    name: Desktop ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev rpm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install tauri-cli --version "^2" --locked
+      - name: Build installers
+        working-directory: crates/oc-desktop
+        run: cargo tauri build
+      - name: Portable Windows build
+        if: runner.os == 'Windows'
+        shell: bash
+        run: 7z a "openconverter-desktop-portable-${{ github.ref_name }}-windows-x64.zip" ./target/release/openconverter-desktop.exe LICENSE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: |
+            target/release/bundle/**/*.deb
+            target/release/bundle/**/*.rpm
+            target/release/bundle/**/*.AppImage
+            target/release/bundle/**/*.msi
+            target/release/bundle/**/*-setup.exe
+            target/release/bundle/**/*.dmg
+            openconverter-desktop-portable-*.zip
+
+  wheels:
+    name: wheels ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install maturin
+      - run: maturin build --release --manifest-path crates/oc-python/Cargo.toml --out wheels
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheels/*.whl
+
+  publish:
+    needs: [cli, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: SBOM and checksums
+        run: |
+          find dist -type f
+          cargo run -q -p xtask -- sbom dist/openconverter-sbom.cdx.json
+          cargo run -q -p xtask -- checksums dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

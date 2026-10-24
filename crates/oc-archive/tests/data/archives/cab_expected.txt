@@ -1,0 +1,4 @@
+readme.txt 195038 3524188756
+sub/data.bin 10370 1886438374
+empty.txt 0 0
+sub/deeper/x.txt 1400 1407435979
