@@ -23,6 +23,8 @@ pub mod icc;
 pub mod icns;
 pub mod ico;
 pub mod image;
+pub mod jbig2;
+pub mod jp2;
 pub mod jpeg;
 pub mod jxl;
 pub mod netpbm;

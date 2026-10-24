@@ -10,7 +10,7 @@ Vector pictures: [svg](svg.md).
 
 Camera raw: [raw](raw.md).
 
-Pictures: [JPEG XL](jxl.md), [AVIF](av1.md).
+Pictures: [JPEG XL](jxl.md), [AVIF](av1.md), [JPEG 2000](jpeg2000.md), [JBIG2](jbig2.md).
 
 Video: [containers](containers.md), [VP8](vp8.md), [VP9](vp9.md), [AV1](av1.md), [Theora](theora.md).
 

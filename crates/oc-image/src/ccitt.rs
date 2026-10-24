@@ -243,6 +243,25 @@ fn paint(out: &mut [u8], changes: &[usize], width: usize) {
 /// Decodes up to `rows` rows of `width` pixels. Returns the packed rows and how many were
 /// decoded in full; the rest are white.
 pub fn decode(data: &[u8], width: usize, rows: usize, mode: Mode) -> (Vec<u8>, usize) {
+    let (out, done, _) = decode_inner(data, width, rows, mode);
+    (out, done)
+}
+
+/// Group 4 decoding for JBIG2 MMR data: returns the packed rows (1 = black) and the number of
+/// bytes used, including an end-of-block marker when one follows the rows.
+pub fn decode_mmr(data: &[u8], width: usize, rows: usize) -> (Vec<u8>, usize) {
+    let (out, _, bits) = decode_inner(data, width, rows, Mode::Group4);
+    let mut r = Bits { data, pos: bits };
+    if r.peek(12) == 1 {
+        r.skip(12);
+        if r.peek(12) == 1 {
+            r.skip(12);
+        }
+    }
+    (out, r.pos.div_ceil(8).min(data.len()))
+}
+
+fn decode_inner(data: &[u8], width: usize, rows: usize, mode: Mode) -> (Vec<u8>, usize, usize) {
     let row_bytes = width.div_ceil(8);
     let mut out = vec![0u8; row_bytes * rows];
     let mut r = Bits { data, pos: 0 };
@@ -295,5 +314,5 @@ pub fn decode(data: &[u8], width: usize, rows: usize, mode: Mode) -> (Vec<u8>, u
             r.align();
         }
     }
-    (out, done)
+    (out, done, r.pos)
 }

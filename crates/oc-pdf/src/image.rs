@@ -154,6 +154,98 @@ pub fn decode_image(
                         depth,
                     );
                 }
+                "JPXDecode" => {
+                    let Ok((img, _)) = oc_image::jp2::decode(&data, &Limits::default()) else {
+                        notes.push("a JPEG 2000 image could not be decoded".into());
+                        return None;
+                    };
+                    let (img, _) = oc_image::ops::convert_depth(&img, oc_image::Depth::Eight);
+                    // an alpha channel is dropped: PDF carries transparency in /SMask
+                    let (jw, jh) = (img.width as usize, img.height as usize);
+                    let (px, jn) = match img.layout {
+                        oc_image::Layout::Gray | oc_image::Layout::Rgb => {
+                            (img.data.clone(), img.layout.channels())
+                        }
+                        oc_image::Layout::GrayAlpha => {
+                            (img.data.chunks_exact(2).map(|c| c[0]).collect(), 1)
+                        }
+                        oc_image::Layout::Rgba => (
+                            img.data
+                                .chunks_exact(4)
+                                .flat_map(|c| [c[0], c[1], c[2]])
+                                .collect(),
+                            3,
+                        ),
+                    };
+                    if cs.as_ref().is_none_or(|c| {
+                        c.n_components() != jn && !matches!(c, ColorSpace::Indexed { .. })
+                    }) {
+                        cs = Some(if jn == 1 {
+                            ColorSpace::Gray
+                        } else {
+                            ColorSpace::Rgb
+                        });
+                    }
+                    let samples = Samples {
+                        data: px.iter().map(|b| u16::from(*b)).collect(),
+                        bpc: 8,
+                        n: jn,
+                    };
+                    return finish(
+                        pdf,
+                        &d,
+                        res,
+                        cs?,
+                        samples,
+                        jw,
+                        jh,
+                        is_mask,
+                        fill,
+                        decode_arr,
+                        interpolate,
+                        notes,
+                        depth,
+                    );
+                }
+                "JBIG2Decode" => {
+                    let globals = match pdf.dget(&parms, "JBIG2Globals") {
+                        Obj::Stream(gs) => decode_stream(pdf, &gs, false).ok().map(|(b, _)| b),
+                        _ => None,
+                    };
+                    let Ok((img, _)) = oc_image::jbig2::decode_embedded(
+                        globals.as_deref(),
+                        &data,
+                        &Limits::default(),
+                    ) else {
+                        notes.push("a JBIG2 image could not be decoded".into());
+                        return None;
+                    };
+                    let (jw, jh) = (img.width as usize, img.height as usize);
+                    // decoded black is 0 here, which is what DeviceGray and /Decode expect
+                    let samples = Samples {
+                        data: img.data.iter().map(|v| u16::from(*v >= 128)).collect(),
+                        bpc: 1,
+                        n: 1,
+                    };
+                    if cs.is_none() {
+                        cs = Some(ColorSpace::Gray);
+                    }
+                    return finish(
+                        pdf,
+                        &d,
+                        res,
+                        cs?,
+                        samples,
+                        jw,
+                        jh,
+                        is_mask,
+                        fill,
+                        decode_arr,
+                        interpolate,
+                        notes,
+                        depth,
+                    );
+                }
                 "CCITTFaxDecode" => {
                     let k = pdf.dget_i64(&parms, "K").unwrap_or(0);
                     let cols = pdf

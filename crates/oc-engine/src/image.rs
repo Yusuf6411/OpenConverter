@@ -11,8 +11,8 @@ use oc_core::{
 };
 use oc_image::anim::{self, Animation};
 use oc_image::{
-    avif, bmp, dds, dng, exr, gif, hdr, icc, icns, ico, jpeg, jxl, netpbm, ops, png, psd, qoi, tga,
-    tiff, webp, Image,
+    avif, bmp, dds, dng, exr, gif, hdr, icc, icns, ico, jbig2, jp2, jpeg, jxl, netpbm, ops, png,
+    psd, qoi, tga, tiff, webp, Image,
 };
 
 pub const PNG: FormatId = FormatId("png");
@@ -36,11 +36,16 @@ pub const DNG: FormatId = FormatId("dng");
 pub const JXL: FormatId = FormatId("jxl");
 /// AVIF; read only.
 pub const AVIF: FormatId = FormatId("avif");
+/// JPEG 2000 (JP2 and raw codestreams); read only.
+pub const JP2: FormatId = FormatId("jp2");
+/// JBIG2 files (first page); read only.
+pub const JBIG2: FormatId = FormatId("jbig2");
 /// Internal hub; never shown to users.
 pub const IMAGE_IR: FormatId = FormatId("image-ir");
 
-pub const FORMATS: [FormatId; 18] = [
+pub const FORMATS: [FormatId; 20] = [
     PNG, JPEG, BMP, TGA, QOI, PNM, GIF, ICO, ICNS, DDS, PSD, HDR, EXR, TIFF, WEBP, DNG, JXL, AVIF,
+    JP2, JBIG2,
 ];
 
 pub fn is_image(id: FormatId) -> bool {
@@ -653,6 +658,41 @@ pub fn register(registry: &mut Registry) {
             "AV1 Image File Format (read only: stills, grids and alpha; see docs/formats/av1.md)",
         ),
         describe(
+            JP2,
+            "JPEG 2000",
+            &["jp2", "j2k", "j2c", "jpc"],
+            &["image/jp2"],
+            vec![
+                Sniffer {
+                    offset: 0,
+                    magic: &[0, 0, 0, 0x0c, b'j', b'P', b' ', b' ', 0x0d, 0x0a, 0x87, 0x0a],
+                    confidence: 100,
+                },
+                Sniffer {
+                    offset: 0,
+                    magic: &[0xFF, 0x4F, 0xFF, 0x51],
+                    confidence: 100,
+                },
+            ],
+            false,
+            schema(Vec::new()),
+            "ISO/IEC 15444-1 (read only: see docs/formats/jpeg2000.md)",
+        ),
+        describe(
+            JBIG2,
+            "JBIG2",
+            &["jb2", "jbig2"],
+            &["image/x-jbig2"],
+            vec![Sniffer {
+                offset: 0,
+                magic: &[0x97, 0x4A, 0x42, 0x32, 0x0D, 0x0A, 0x1A, 0x0A],
+                confidence: 100,
+            }],
+            false,
+            schema(Vec::new()),
+            "ISO/IEC 14492 (read only: first page of a standalone file; see docs/formats/jbig2.md)",
+        ),
+        describe(
             PNM,
             "Netpbm",
             &["pnm", "pbm", "pgm", "ppm", "pam"],
@@ -671,7 +711,7 @@ pub fn register(registry: &mut Registry) {
     ];
     for mut f in formats {
         let (id, name) = (f.id, f.name);
-        if id == DNG || id == JXL || id == AVIF {
+        if id == DNG || id == JXL || id == AVIF || id == JP2 || id == JBIG2 {
             f.capabilities.write = false;
             f.capabilities.alpha = false;
         }
@@ -685,7 +725,7 @@ pub fn register(registry: &mut Registry) {
             time: 2,
             description: decode_description(name),
         });
-        if id == DNG || id == JXL || id == AVIF {
+        if id == DNG || id == JXL || id == AVIF || id == JP2 || id == JBIG2 {
             continue;
         }
         registry.add_edge(Edge {
@@ -713,6 +753,9 @@ fn decode_description(name: &str) -> &'static str {
         "TIFF" => "Decode TIFF",
         "DNG" => "Develop DNG raw data",
         "JPEG XL" => "Decode JPEG XL",
+        "AVIF" => "Decode AVIF",
+        "JPEG 2000" => "Decode JPEG 2000",
+        "JBIG2" => "Decode JBIG2",
         "WebP" => "Decode WebP",
         "ICO / CUR" => "Decode ICO",
         "ICNS" => "Decode ICNS",
@@ -761,6 +804,8 @@ pub fn decode(
         DNG => dng::decode(data, limits, progress),
         JXL => jxl::decode(data, limits),
         AVIF => avif::decode(data, limits),
+        JP2 => jp2::decode(data, limits),
+        JBIG2 => jbig2::decode(data, limits),
         WEBP => webp::decode(data, limits, progress),
         ICO => ico::decode(data, limits, progress),
         ICNS => icns::decode(data, limits, progress),
@@ -1164,6 +1209,18 @@ pub fn encode(fmt: FormatId, img: &Image, opts: &Options, ext: &str) -> Result<(
             return Err(Error::new(
                 ErrorCode::UnsupportedFormat,
                 "AVIF can be read but not written",
+            ))
+        }
+        JP2 => {
+            return Err(Error::new(
+                ErrorCode::UnsupportedFormat,
+                "JPEG 2000 can be read but not written",
+            ))
+        }
+        JBIG2 => {
+            return Err(Error::new(
+                ErrorCode::UnsupportedFormat,
+                "JBIG2 can be read but not written",
             ))
         }
         other => {
